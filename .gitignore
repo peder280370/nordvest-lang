@@ -1,0 +1,50 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Kotlin / JVM
+.kotlin
+*.class
+*.jar
+*.war
+*.ear
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude
+.claude
+
+
+# Nordvest compiler outputs
+*.nvc
+*.nvbc
+*.ll
+*.bc
+dist/
+
+# Test artifacts
+reports/
+
+# Environment / secrets
+.env
+.env.local
+config.local.toml
+
+# Editor backups
+*~
+*.swp
+*.swo

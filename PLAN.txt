@@ -1,0 +1,3601 @@
+================================================================================
+  NORDVEST LANGUAGE — IMPLEMENTATION PLAN
+================================================================================
+
+  Status: Draft v1.0
+  Scope:  Bootstrap → Self-hosting compiler, standard library, tooling
+
+────────────────────────────────────────────────────────────────────────────────
+  TABLE OF CONTENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  1.  Vision & Goals
+  2.  Phased Implementation Roadmap
+  3.  Formal Syntax Specification
+  4.  Reference Documentation Plan
+  5.  Standard Library Design
+  6.  Tooling (nv CLI)
+  7.  IDE Plugins (VS Code & IntelliJ)
+
+================================================================================
+  1. VISION & GOALS
+================================================================================
+
+Nordvest is a statically typed, compiled language that combines readable
+indentation-based syntax with first-class mathematical notation, strong null
+safety, expressive pattern matching, and practical systems-programming features
+(inline assembly, GPU kernels, C/C++ interop).
+
+Core design axioms:
+  - Readability first: syntax should read like well-written pseudocode.
+  - Zero-cost abstractions: high-level constructs compile to efficient native
+    code without hidden overhead.
+  - Correctness by default: null safety, exhaustive match, Result<T> propagation,
+    and checked I/O errors eliminate whole classes of runtime bugs.
+  - Unified tooling: a single "nv" binary handles compile, run, test, fmt, doc,
+    and package management — no Makefiles, no build scripts for common cases.
+  - Mathematical expressiveness: ∀ ∃ ∑ ∏ ∈ ∧ ∨ ¬ π e ∞ are first-class syntax,
+    not library calls.
+  - Progressive escape hatches: pure Nordvest by default, inline asm and C/C++
+    interop when needed, GPU kernels via @gpu annotation.
+
+Non-goals (v1):
+  - Dynamic/runtime typing or reflection-heavy metaprogramming.
+  - Garbage collection as the primary memory strategy (ownership/RC TBD post-v1).
+  - Competing with C in raw systems-level kernel programming.
+
+
+================================================================================
+  2. PHASED IMPLEMENTATION ROADMAP
+================================================================================
+
+The roadmap follows four major phases. Each phase ends with a named milestone
+that is releasable (even if incomplete). The bootstrap compiler is written in
+Kotlin; self-hosting is the goal of Phase 4.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 0 — FOUNDATION
+  Goal: project skeleton, tooling scaffolding, decision record
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M0 "Scaffolding"
+
+  0.1  Repository structure
+       nordvest-lang/
+         compiler/         Kotlin bootstrap compiler (Gradle project)
+         stdlib/           Nordvest source for the standard library
+         spec/             Formal grammar (EBNF/PEG) and language spec docs
+         docs/             Reference documentation source
+         tests/            Test suite (unit + integration)
+         examples/         Curated example programs (including EXAMPLE.txt cases)
+         tools/            nv CLI entry point (Kotlin/Gradle)
+
+  0.2  Build system
+       - Gradle multi-module project: compiler, stdlib, tools, tests.
+       - A minimal "nv" shell wrapper invokes the Kotlin compiler JAR.
+       - CI: GitHub Actions — build + test on Linux (x86_64) and macOS (arm64).
+
+  0.3  Decision records
+       - Document memory management strategy decision (start with RC, revisit).
+       - Document Unicode-identifier policy (UTF-8 source, normalization NFC).
+       - Document target backends for Phase 1 (LLVM IR via LLVM Java bindings,
+         or direct x86_64/arm64 codegen — LLVM recommended for speed of initial
+         implementation).
+
+  0.4  Formal grammar skeleton
+       - Draft the top-level PEG grammar file (nv.peg) covering the full surface
+         syntax, even if many productions are stubs. This serves as the shared
+         truth between the parser and the spec document.
+
+  0.5  Test harness
+       - "golden file" tests: each .nv file in tests/ has a paired .expected file;
+         nv run produces output matched against it.
+       - A separate "parse" test category checks that the AST for known programs
+         matches a serialized expected AST.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 1 — BOOTSTRAP CORE
+  Goal: compile and run the full syntax of EXAMPLE.txt sections 1–27
+  Language: Kotlin; target: LLVM IR → native binary
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M1 "Hello World to Modules"
+
+  Language features implemented in this phase:
+    - Lexer/scanner for all tokens including Unicode operators (∀ ∃ ∑ ∏ → ∈ ∧
+      ∨ ¬ π e ∞ ≤ ≥ ≠ ^ ÷ |> & | ~ ⊕ << >>).
+      // (two slashes) is always a comment — there is no // integer-division token.
+      ÷ (U+00F7) is the sole integer-division operator.
+      xor is a keyword alias for ⊕; | is a single-token distinct from |> (maximal
+      munch).
+    - Indentation-sensitive parser (Python-style INDENT/DEDENT token injection).
+    - Core types: int, int64, float, float32, float64, bool, str, byte, char.
+    - Type aliases (type Meters = float).
+    - let and var bindings with type inference (Hindley-Milner extended for OOP).
+    - String interpolation: "step {count}" and formatted "{val:.2f}".
+    - Raw strings: r"..." (no escapes, no interpolation); r"""...""" multi-line
+      with indentation stripped to the level of the closing """.
+    - Arithmetic, comparison, logical, and bitwise operators including Unicode
+      variants. Compound assignments &= |= ⊕= <<= >>=.
+    - Power operator ^.
+    - Functions: fn, default parameters, named arguments, variadic (int...),
+      first-class fn types, lambda syntax.
+      Lambda forms: single-param (x → expr), multi-param ((x, y) → expr),
+      zero-param (() → expr). Parameter types inferred from context; explicit
+      annotation always allowed.
+      Void function type: fn() → ().
+      Trailing lambda: if the last argument is a lambda it may be written
+      outside the call parens as { params → expr } or a multi-line { } block;
+      parens omitted entirely when the lambda is the only argument.
+      No currying or partial application — |> with _ positional hole covers
+      functional composition without the type-inference cost of currying.
+    - Inline if expression: if cond then a else b — usable anywhere an expression
+      is expected. `then` keyword disambiguates from the if-statement form.
+      No ternary operator (?:) — eliminated to remove ? disambiguation complexity.
+    - Closure capture semantics: by-reference (RC) by default; explicit capture
+      list [name] snapshots a value at closure-creation time; [copy name] for
+      go-spawned coroutines. Compiler warns on implicit mutable capture in go.
+    - Tuples: (T, T) return types, named tuple fields, destructuring at call site.
+    - The return arrow → (interchangeable with ->).
+    - Pipeline operator |> with _ positional hole.
+    - Classes: primary constructor, body fields, init block, super.init.
+    - Three-tier visibility: pub (exported), pub(pkg) (package-internal),
+      (default) file-private.
+    - Computed properties: fn name → T (no parameter list — property, not method);
+      optional get/set blocks for settable properties.
+    - Subscript operators: fn [](params) → T (getter) and fn []=(params, T) (setter).
+    - Interfaces with default implementations.
+    - Associated types in interfaces: type Name declaration; where C.Item: Constraint.
+    - Inheritance (: BaseClass).
+    - Enums: simple, raw-value, and sealed (discriminated unions with associated
+      data). Sealed classes may be recursive (variants reference the enclosing
+      sealed type), enabling linked lists, trees, and expression ASTs.
+    - Structs: value types (struct keyword); stack-allocated, copy semantics, no
+      inheritance. Complement to class (reference type) and record (immutable ref).
+    - Records: immutable reference type with auto ==, str(), hash().
+    - Null safety: T?, ?., ??, !., if let, guard let, chained if let.
+      weak and unowned reference modifiers for breaking reference cycles.
+    - Type tests and casts: is (boolean, narrows type via smart cast in then-branch),
+      as? (explicit safe downcast, returns T?), as! (forced downcast, panics).
+    - Arrays [T]: literals, indexing, slices with range notation.
+    - 2D matrices [[T]]: A[row, col] indexing, row/column slice M[1,*].
+    - Range notation [a,b], ]a,b[, [a,b[, ]a,b] in for loops, slices, and match.
+    - List comprehensions: [expr for x in range if pred].
+    - Quantifiers ∀ ∃ ∑ ∏ with : body syntax and → block syntax.
+    - Built-in constants π, e, ∞.
+    - Mathematical logical operators ∧ ∨ ¬ (with && || ! aliases).
+    - for loops (range and collection iteration), while loops.
+    - Labeled loops: @label for/while; break @label; continue @label.
+    - defer statement: LIFO cleanup on scope exit, regardless of return path.
+    - Pattern matching (match): literals, ranges, type patterns (positional and
+      named-field destructuring), guard clauses, tuple patterns, wildcard _,
+      or-patterns (A(_) | B(_) in one arm), nested patterns (Ok(Some(x))),
+      exhaustiveness checking.
+    - Result<T> / Result<T,E>: Ok, Err, ? propagation, getOrElse, getOrThrow.
+      Result<T> defaults to Result<T, Error>; Error is a built-in interface with
+      message() → str and cause() → Error? methods.
+    - Checked exceptions as sugar: throws E desugars to a Result<T, E> return type;
+      the two forms interoperate (a throws fn can be called with ? propagation).
+    - try/catch/finally, throw for the throws form.
+    - Extension functions (extend T) and retroactive conformance (extend T : Interface):
+      declare that an existing type satisfies an interface without modifying it.
+      Conformance is nominal and module-scoped; conflicting conformances for the
+      same type+interface pair are a compile error.
+    - Generics: generic functions and classes, single constraint, where clauses,
+      associated types.
+    - Modules: module declaration, pub/pub(pkg) visibility, import, import as alias.
+      Multi-file modules: all .nv files in a directory with the same module
+      declaration share a module; subdirectories form sub-modules. A mod.nv file
+      controls which sub-modules are re-exported with pub import.
+    - Conditional compilation: @if(pred) / @else at declaration scope; predicates
+      platform, arch, debug, release, feature("name").
+    - Doc comments /** ... */ (parsed and stored in AST for nv doc).
+    - Comments: // and /* ... */.
+
+  Compiler internals:
+    1.1  Lexer
+         - Hand-written recursive-descent or ANTLR4 grammar.
+         - INDENT/DEDENT injection based on column offsets.
+         - Unicode character categories for identifier start/continuation.
+         - All Unicode operator tokens mapped to internal token kinds.
+
+    1.2  Parser → AST
+         - Recursive-descent parser following the PEG grammar.
+         - Produces an immutable AST with source-location spans on every node.
+         - Error recovery: insert synthetic nodes and continue to catch multiple
+           errors in one pass.
+
+    1.3  Name resolution & scope analysis
+         - Module-level symbol table; scoped symbol tables for blocks.
+         - Forward references within a module are allowed.
+         - Resolve imports and build the module dependency graph.
+
+    1.4  Type checker
+         - Bidirectional type inference (synthesize + check modes).
+         - Null safety flow analysis (nullable narrowing in if let / guard let).
+         - Exhaustiveness checker for match (sealed, enum, bool, nullable).
+           Must handle or-patterns and recursive sealed types (e.g. Tree<T>).
+         - Generic instantiation and constraint satisfaction.
+         - Tuple type inference including named fields.
+
+    1.5  IR lowering (HIR → MIR → LLVM IR)
+         - HIR (high-level IR): desugared AST; quantifiers expanded to loops,
+           list comprehensions to explicit loop + accumulator, string
+           interpolation to concat calls.
+         - MIR (mid-level IR): SSA form; explicit move semantics placeholder
+           (all values copied for now; ownership pass added later).
+         - LLVM IR emission via llvm4j or LLVMSharp (JVM-accessible LLVM
+           bindings). Alternatively, emit textual LLVM IR and invoke llc.
+
+    1.6  Runtime support library (written in C, linked into every nv binary)
+         - String representation (length-prefixed UTF-8 with small-string opt).
+         - Array/slice representation (ptr + length + capacity).
+         - Reference-counted heap allocator.
+         - Panic handler (for ! forced-unwrap and assertion failures).
+         - Result<T> boxing for mixed Ok/Err value representation.
+
+    1.7  nv CLI — Phase 1 commands
+         - nv run <file>    compile to temp binary and exec.
+         - nv build <file>  compile to named output binary.
+         - nv fmt <file>    format using canonical style (stub: just re-emit).
+
+  Phase 1 test targets:
+    - All 27 language-feature sections (1–27) of EXAMPLE.txt produce correct output.
+    - At least 300 unit tests covering lexer, parser, type checker, and codegen.
+    - "Hello World" benchmark: < 100 ms end-to-end compile time.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 2 — SYSTEMS & CONCURRENCY
+  Goal: async/await, channels, inline asm, GPU, C/C++ interop, full stdlib v1
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M2 "Production-Ready v0.1"
+
+  Language features added:
+    2.1  Concurrency model
+         - Async runtime: M:N green-thread scheduler (libuv or custom epoll/kqueue
+           event loop). One OS thread per CPU core; work-stealing scheduler.
+           Every goroutine is a lightweight coroutine; channel/IO operations
+           suspend the coroutine, not the OS thread.
+         - go statement: fire-and-forget goroutine spawning.
+         - spawn expression: like go, returns Future<T>; works on any fn.
+         - async fn: body annotation indicating the function contains await
+           expressions. Not a type distinction — any fn can be spawned.
+         - await expression: suspends the current coroutine until a Future<T>
+           resolves. Valid inside any function; does not require async at call
+           sites when the function is executed in a goroutine context.
+         - Channel<T>(capacity:) with send, receive, close, iteration.
+         - select statement: multiplex over channels and timeouts; first ready
+           branch runs. Optional default branch for non-blocking polls.
+         - Future<T>, Future.all, Future.any, Future.race.
+         - TaskGroup: structured concurrency block — all spawned tasks complete
+           (or are cancelled) before the group exits; errors propagate to caller.
+
+    2.2  Inline assembly
+         - @asm[arch] blocks: x86_64, arm64 (additional arches extensible).
+         - @asm[arch, feature] for ISA extensions (avx2, neon, etc.).
+         - Variable name scoping: enclosing Nordvest names resolved to their
+           LLVM alloca/register at the asm site.
+         - @bytes[arch] for raw hex bytecode embedding.
+         - Fallback: if no @asm block matches the target arch, compiler selects
+           the pure-Nordvest fallback body.
+
+    2.3  GPU acceleration
+         - @gpu annotation: function compiled as a parallel kernel.
+         - Target selection at compile time: CUDA (nvcc/NVVM), Metal (MSL), or
+           Vulkan compute (SPIR-V). Selected via --gpu-target flag.
+         - @gpu(block) for inline GPU block inside a CPU function.
+         - @gpu.local for per-thread shared memory hints.
+         - Runtime: data.toGPU() / data.toCPU() for explicit memory residency.
+         - Automatic transfer for plain @gpu function calls from CPU code.
+
+    2.4  C / C++ interoperability
+         - @extern("lib") for C functions whose Nordvest name matches the C symbol.
+         - @extern(fn: "c_symbol", lib: "lib") when the C symbol name differs from
+           the Nordvest function name (e.g. the C name contains underscores or
+           conflicts with a keyword).
+         - @extern(cxx: "Ns::fn", lib: "lib") for C++ symbols with name demangling.
+         - @CLayout annotation for C-compatible field layout and padding. Applicable
+           to both struct (value type) and class (reference type); use struct for
+           by-value C interop and class when passing a pointer to a C++ object.
+         - @c and @cpp inline blocks (pass through to clang during compilation).
+         - @include("header.h") to import a C/C++ header.
+         - ptr<T> type for raw pointers (unsafe context only).
+
+    2.5  Operator overloading
+         - Define +, -, *, /, %, ^, &, |, ⊕, ==, <, >, <=, >= inside a class
+           body. Bitwise ops follow same dispatch rewrite as arithmetic.
+         - Seen in EXAMPLE.txt: Matrix.+(other), Matrix.*(other).
+         - Compiler rewrites a + b to a.+(b) for user-defined types.
+
+    2.6  Lazy sequences and Iterator protocol
+         - Sequence<T> type: lazy, pull-based counterpart to eager [T].
+         - yield statement in Sequence<T>-returning functions (generator fns).
+         - Sequence<T> supports .map .filter .take .drop .zip .enumerate .toList.
+         - Iterator / Iterable interfaces with associated type Item (Section 3.2).
+         - for-loop desugaring via .iter() / .next() for any Iterable<T>.
+
+    2.7  Standard library v1 (see Section 5 for API details)
+         Phase 2 core modules:
+         - std.io, std.fs, std.math, std.string, std.collections, std.net.http,
+           std.json, std.concurrent, std.test, std.gpu, std.ffi, std.process,
+           std.time, std.log, std.crypto, std.encoding, std.net, std.compress,
+           std.cli, std.regex, std.rand, std.hash, std.iter, std.net.url,
+           std.fmt, std.uuid, std.bytes, std.config.
+         Phase 3 extended modules (see Section 3.7):
+         - std.sql, std.csv, std.xml, std.toml, std.unicode, std.bignum,
+           std.archive, std.html, std.stats, std.mime, std.signal,
+           std.template, std.debug.
+
+    2.8  nv CLI additions
+         - nv test         run std.test-annotated test functions.
+         - nv doc          generate HTML/Markdown from doc comments.
+         - nv pkg          package manager (see Section 6).
+
+  Phase 2 test targets:
+    - Complete program examples (sections 20–32 of EXAMPLE.txt) compile and
+      produce correct output.
+    - Concurrent producer/consumer channel example runs correctly.
+    - GPU addVectors produces correct result on CUDA and/or Metal target.
+    - C interop: @extern sin/cos produce values matching system libm.
+    - Lazy fibonacci().take(20) produces correct values without materializing
+      the infinite sequence.
+    - Standard library has ≥ 80% test coverage.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 3 — POLISH & ECOSYSTEM
+  Goal: formatter, language server, package registry, perf, error messages
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M3 "Developer Experience"
+
+  3.1  nv fmt — canonical formatter
+       - Implements the Nordvest style guide (see Section 6.4).
+       - Idempotent: fmt(fmt(x)) == fmt(x) for all valid inputs.
+       - Preserves blank lines and doc comments.
+       - Normalizes Unicode operators to preferred forms (→ not ->, ≠ not !=,
+         etc.) with a --ascii flag for terminals that cannot render Unicode.
+
+  3.2  Language server protocol (LSP)
+       - Implement nv-lsp, a standalone Language Server Protocol server backed
+         by the type-checked AST from the compiler. Runs as a subprocess; all
+         IDE integrations communicate with it over JSON-RPC (stdio or TCP).
+       - Core LSP features (must-have for v1):
+           hover type info and doc comments
+           go-to-definition (including cross-module and stdlib)
+           find-references and rename symbol
+           completion (keywords, module members, method chains, Unicode operators)
+           real-time diagnostics (type errors, null safety, exhaustiveness)
+           formatting on save (delegates to nv fmt)
+           code actions: introduce variable, wrap in if let, add ? propagation
+       - Extended LSP features (Phase 3 stretch):
+           inlay hints (inferred types on let bindings, named tuple fields)
+           semantic token highlighting (richer than TextMate scopes)
+           call hierarchy and type hierarchy views
+           workspace symbol search
+       - Target editors via LSP: Neovim (nvim-lspconfig), Zed, Helix, Emacs.
+         VS Code and IntelliJ have first-class dedicated plugins (see Section 7).
+
+  3.3  Error message quality
+       - All type errors include: what was expected, what was found, and the
+         source span with inline caret.
+       - Null safety errors suggest if let / guard let / ?? patterns.
+       - Exhaustiveness errors list the missing match cases explicitly.
+       - "Did you mean?" suggestions for typos using Levenshtein distance.
+
+  3.4  Performance work
+       - Profile compile time; target < 500 ms for a 10 KLOC project.
+       - Incremental compilation: cache per-module type-checked IR, recompile
+         only changed modules and their dependents.
+       - LLVM optimization passes: at least -O2 for nv build --release.
+
+  3.5  Package manager (nv pkg) — see Section 6.6 for full spec.
+
+  3.6  Documentation site
+       - Static site generated from the spec/ and docs/ directories.
+       - Auto-generated API docs for stdlib (from doc comments).
+       - "Try Nordvest" playground (WASM-compiled interpreter or server-side).
+
+  3.7  Standard library v2 — extended modules
+       - std.sql: driver-independent SQL interface (Go database/sql model);
+         bundled SQLite driver; pluggable drivers for Postgres, MySQL, etc.
+       - std.csv: CSV/TSV read and write with configurable separator and quoting.
+       - std.xml: DOM and SAX-style XML parsing; namespace support; error
+         recovery for malformed documents.
+       - std.toml: TOML v1.0 parsing and serialization; primary format for
+         nv.pkg project files.
+       - std.unicode: Unicode normalization (NFC/NFD/NFKC/NFKD), grapheme
+         cluster iteration for emoji-correct length, codepoint properties,
+         case folding.
+       - std.bignum: arbitrary-precision integer (BigInt) and decimal (Decimal)
+         with exact arithmetic; RoundMode for banking/finance use cases.
+       - std.archive: zip and tar read/write built on std.compress streams.
+       - std.html: HTML5 parsing with error tolerance, CSS selector queries
+         (querySelector / querySelectorAll), and XSS sanitization.
+       - std.stats: descriptive statistics — mean, median, stddev, percentile,
+         histogram, Pearson and Spearman correlation.
+       - std.mime: MIME type detection from extension or magic bytes; parse
+         and format Content-Type headers.
+       - std.signal: OS signal registration; channel-based delivery integrates
+         with the async runtime for safe signal handling.
+       - std.template: text templating engine with {{ }}, {% if %}, {% for %},
+         {% include %}; HtmlTemplate variant auto-escapes expressions.
+       - std.debug: stack traces, heap stats, simple wall-clock profiling,
+         and compile-away debug assertions.
+
+  Phase 3 test targets:
+    - LSP passes all protocol conformance tests.
+    - Formatter is idempotent on 100% of the test corpus.
+    - Package manager can install, resolve deps, and build a real-world package.
+    - All stdlib v2 modules have ≥ 80% test coverage.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 4 — SELF-HOSTING
+  Goal: the Nordvest compiler is written in Nordvest
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M4 "Self-Hosting Compiler"
+
+  Rationale: self-hosting is the ultimate proof of language expressiveness and
+  completeness. It also bootstraps the ecosystem — contributions to the compiler
+  can be made in Nordvest itself.
+
+  4.1  Port the lexer from Kotlin to Nordvest
+       - Start with the simplest, most self-contained module.
+       - Use the Kotlin compiler to compile the Nordvest lexer; run its tests.
+
+  4.2  Port the parser
+       - The recursive-descent parser is well-suited to Nordvest's sealed/match
+         pattern; each production becomes a match arm.
+
+  4.3  Port the type checker and IR lowering
+       - The most complex step. Requires a mature std.collections (HashMap, Set,
+         sorted structures) and robust Result propagation throughout.
+       - The HIR/MIR data structures are naturally expressed as sealed classes.
+
+  4.4  Port the LLVM IR emitter
+       - Use @extern to call into LLVM C API from Nordvest.
+       - Or: emit textual LLVM IR (a string-manipulation task well-suited to
+         Nordvest's string interpolation).
+
+  4.5  Bootstrap sequence (the "chicken and egg" protocol)
+       - Stage 0: Kotlin compiler (K0) compiles Nordvest compiler source → nvcc0.
+       - Stage 1: nvcc0 compiles Nordvest compiler source → nvcc1.
+       - Stage 2: nvcc1 compiles Nordvest compiler source → nvcc2.
+       - Verify: nvcc1 and nvcc2 are bit-for-bit identical (Trusting Trust check).
+       - Archive K0 as the "bootstrap seed" — a small, auditable binary.
+
+  4.6  Drop the Kotlin compiler from the build path
+       - Update CI to use nvcc1 as the compiler for all subsequent builds.
+       - Keep K0 archived but not required for normal development.
+
+  4.7  Runtime rewrite in Nordvest (optional stretch goal)
+       - The C runtime support library can be rewritten in Nordvest + @c for
+         the parts that must be C (startup, longjmp, etc.).
+
+  Phase 4 success criteria:
+    - nv build compiler/main.nv (using a prior nv binary) produces a compiler
+      that passes 100% of the existing test suite.
+    - The self-hosted compiler's output is identical to the Kotlin compiler's
+      output for all programs in the test corpus.
+    - End-to-end: a fresh checkout with only the bootstrap seed can build the
+      full toolchain.
+
+
+================================================================================
+  3. FORMAL SYNTAX SPECIFICATION
+================================================================================
+
+The formal syntax specification lives at spec/grammar.peg (PEG grammar) and
+spec/language.md (narrative spec). Together they are the normative reference.
+
+────────────────────────────────────────────────────────────────────────────────
+  3.1  Grammar Format Choice
+────────────────────────────────────────────────────────────────────────────────
+
+Use PEG (Parsing Expression Grammar) rather than EBNF for the following reasons:
+
+  - PEG is unambiguous by construction (ordered choice /); EBNF requires
+    separate disambiguation rules.
+  - PEG scannerless parsers handle indentation sensitivity cleanly via
+    parameterized rules.
+  - PEG tools (pest, peg.js, Ohm, or a hand-written recursive-descent parser
+    following the PEG structure) are widely available.
+
+The grammar file (spec/grammar.peg) is normative. The Kotlin parser in
+compiler/ implements this grammar exactly; deviations are bugs.
+
+────────────────────────────────────────────────────────────────────────────────
+  3.2  Grammar Document Structure
+────────────────────────────────────────────────────────────────────────────────
+
+spec/grammar.peg is organized into the following sections:
+
+  SECTION A — Lexical Rules (tokens)
+    A.1  Whitespace and line endings
+         - NEWLINE := '\n' / '\r\n' / '\r'
+         - BLANK_LINE, COMMENT, ignored between top-level items.
+    A.2  Indentation tokens
+         - INDENT: increase in leading spaces relative to enclosing block.
+           The grammar is parameterized by an explicit indent level (indented(n))
+           so that block-level rules receive their expected indent depth.
+         - DEDENT: return to previous indent level.
+         - Rules for tab expansion (one tab = 4 spaces; tabs and spaces must
+           not be mixed within a file).
+    A.3  Integer and float literals
+         - Decimal, hex (0x), binary (0b), octal (0o).
+         - Underscores as digit separators: 1_000_000.
+         - Float: digit+ '.' digit+ (exponent)? e.g. 1.5e-3.
+    A.4  String literals
+         - Double-quoted strings with escape sequences (\n, \t, \\, \", \uXXXX).
+         - Interpolation: '{' expr '}' and '{' expr ':' format_spec '}'.
+         - Raw strings (no escape processing): r"..." (no escapes, no interpolation);
+           r"""...""" multi-line with indentation stripped to the level of the closing """.
+    A.5  Identifiers
+         - Start: Unicode letter or '_'.
+         - Continue: Unicode letter, digit, or '_'.
+         - Greek letters (π, μ, σ) are valid identifiers.
+         - Keywords are a subset of identifiers; listed exhaustively.
+    A.6  Unicode operator tokens
+         - → ∀ ∃ ∑ ∏ ∈ ∧ ∨ ¬ π e ∞ ≤ ≥ ≠ ⊕
+         - Also accepted: -> && || ! <= >= != xor (ASCII aliases).
+         - The pipeline operator |> is two ASCII characters forming one token.
+           The single | is the bitwise-OR token. Lexer uses maximal munch: |>
+           wins when > immediately follows |.
+         - The power operator ^ is a single ASCII character (NOT bitwise XOR).
+         - Bitwise tokens: & | ~ << >> (single-char or two-char, not composite).
+           Compound assignment variants: &= |= ⊕= <<= >>=.
+         - Integer division: the sole token is ÷ (U+00F7). The two-slash //
+           sequence is ALWAYS lexed as a line comment regardless of position.
+           There is no // integer-division operator in Nordvest.
+         - xor is a reserved keyword acting as an infix operator (alias for ⊕).
+    A.7  Annotation tokens
+         - @gpu @gpu(block) @gpu.local @cpu @asm @bytes @extern @CLayout
+           @c @cpp @include
+         - @if @else  (compile-time conditional; predicate follows in parentheses)
+         - @derive @builder @newtype @lazy  (structural-boilerplate annotations;
+           see Chapter 17)
+         - @label identifiers on loops are not separate annotation tokens; the
+           grammar parses '@' identifier immediately before for/while keywords.
+
+  SECTION B — Expression Grammar
+    B.1  Operator precedence table (low to high):
+         Level 1  (lowest)  lambda       x → expr
+         Level 2            pipeline     expr |> expr
+         Level 3            or           expr ∨ expr  (∨ / ||)
+         Level 4            and          expr ∧ expr  (∧ / &&)
+         Level 5            not          ¬expr  (¬ / !)
+         Level 6            comparison   expr (== ≠ < > ≤ ≥) expr
+         Level 6.5          bitwise-or   expr | expr
+         Level 6.6          bitwise-xor  expr ⊕ expr  (⊕ / xor)
+         Level 6.7          bitwise-and  expr & expr
+         Level 6.8          bit-shift    expr (<< | >>) expr
+         Level 6.9          bitwise-not  ~expr  (unary)
+         Level 7            addition     expr (+ -) expr
+         Level 8            multiply     expr (* / ÷ %) expr
+         Level 9            power        expr ^ expr  (right-associative)
+         Level 10           unary        -expr
+         Level 11           postfix      expr? expr! expr.member expr[...] call
+                                          expr is type   expr as? type   expr as! type
+         Level 12 (highest) primary      literal, identifier, (expr), [expr,...],
+                                          quantifier, match, if-expr
+    B.2  Quantifier expressions
+         - ∀ binding ∈ expr ':' expr      (boolean — true if pred holds for all)
+         - ∃ binding ∈ expr ':' expr      (boolean — true if pred holds for any)
+         - ∑ binding ∈ expr ':' expr      (numeric — sum of expr over collection)
+         - ∏ binding ∈ expr ':' expr      (numeric — product of expr over collection)
+         - ∑ expr                         (numeric, no binding — sum of iterable)
+         - ∏ expr                         (numeric, no binding — product of iterable)
+         - ∀ binding ∈ expr '→' block     (imperative loop — desugars to for-loop;
+                                           preferred in mathematical/scientific code)
+         - ∃ binding ∈ expr ':' pred '→' block  (imperative first-match — executes
+                                           body for first element where pred is true)
+    B.3  Range expressions
+         - '[' expr ',' expr ']'  closed
+         - ']' expr ',' expr '['  open
+         - '[' expr ',' expr '['  half-open left-closed
+         - ']' expr ',' expr ']'  half-open right-closed
+    B.4  List comprehension
+         - '[' expr 'for' binding 'in' expr (',' binding 'in' expr)* ('if' expr)? ']'
+         - Also: '[' expr 'for' binding '∈' expr ... ']'
+    B.5  Lambda
+         - binding '→' expr                  (single-param, no parens needed)
+         - '(' params ')' '→' expr           (multi-param or zero-param)
+         - '(' ')' '→' expr                  (zero-param — void input)
+         Parameter types are inferred from the surrounding call's expected
+         fn type; explicit annotation allowed: (x: int) → x * 2.
+         Trailing lambda syntax: a lambda that is the last argument to a
+         call may appear outside the parens as a { } block:
+           call(a, b) { x → expr }           (inline)
+           call { x → expr }                 (only argument, parens omitted)
+           call { x →                        (multi-line; } closes the block)
+               stmt1
+               stmt2 }
+         The { } delimiter is used exclusively for trailing lambdas; it does
+         not appear elsewhere in the grammar. nv fmt enforces consistent style
+         (trailing form preferred when lambda is the sole or last argument).
+    B.6  Match expression
+         - 'match' expr NEWLINE INDENT arm+ DEDENT
+         - arm := pattern (':' / ',') → expr  /  pattern ':' NEWLINE INDENT stmts DEDENT
+    B.7  If expression
+         - Statement form (multi-line):
+           'if' expr NEWLINE INDENT stmts DEDENT ('else' NEWLINE INDENT stmts DEDENT)?
+         - Inline expression form:
+           'if' expr 'then' expr ('else' 'if' expr 'then' expr)* 'else' expr
+           The 'then' keyword is the disambiguator: its presence signals an inline
+           conditional expression rather than a statement. 'then' is only valid in
+           this position and must always be followed by an else clause. There is no
+           ternary operator (?:) — this inline form serves the same purpose without
+           the ? disambiguation complexity.
+    B.8  String interpolation (handled during parsing, not in lexer)
+         - Every '{' inside a string literal starts an interpolation sub-parse.
+    B.9  Yield expression
+         - 'yield' expr  — only valid as a statement inside a Sequence<T>-returning
+           function. Transforms the function into a generator (coroutine).
+         - A function with at least one yield statement must declare return type
+           Sequence<T>; the compiler infers T from the yielded expression types.
+    B.10 Cast and type-test expressions
+         - expr 'is' type       — boolean type check with smart cast: in the
+                                  then-branch of an if-statement, the variable is
+                                  narrowed to the tested type if the compiler can
+                                  prove it is not reassigned between the is-check
+                                  and the use site.
+         - expr 'as?' type      — explicit safe downcast; result type is type?
+                                  Use when the smart cast cannot apply (e.g., the
+                                  narrowed value is stored in a new binding).
+         - expr 'as!' type      — forced downcast; panics at runtime if wrong type
+
+  SECTION C — Statement Grammar
+    C.1  Variable declarations
+         - 'let' identifier (':' type)? ('=' expr)?
+         - 'var' identifier (':' type)? ('=' expr)?
+    C.2  Assignment
+         - lvalue '=' expr
+         - lvalue ('+=' '-=' '*=' '/=' '&=' '|=' '⊕=' '<<=' '>>=') expr
+    C.3  Function declaration
+         - 'fn' identifier ('<' type_params '>')? '(' params ')' ('→' type)? ('throws' type)?
+           NEWLINE INDENT stmts DEDENT
+         - 'throws' E is syntactic sugar for a Result<T, E> return type, where T is
+           inferred from the function's return statements. A throws fn can be called
+           with ? propagation in any context that expects Result<_, E>. The two forms
+           interoperate: Result<T, E> and throws E are the same at the IR level.
+    C.4  Async function
+         - 'async' 'fn' ...  (same as fn but with compile-time enforcement:
+           'await' expressions are only valid inside the body of an 'async fn';
+           the compiler rejects 'await' in a non-async fn with an error.
+           async fn is not a distinct callable type — any fn can be spawned;
+           the async annotation purely triggers the coroutine state-machine
+           transformation and the await-validity check.)
+    C.5  Return statement
+         - '→' expr          (preferred)
+         - 'return' expr
+    C.6  For loop
+         - ('@' label)? 'for' binding 'in' expr NEWLINE INDENT stmts DEDENT
+         - 'for' '(' binding ',' binding ')' 'in' expr ... (tuple destructuring)
+         - Desugars (for Iterable<T>): let _it = expr.iter(); while let _v = _it.next()
+    C.7  While loop
+         - ('@' label)? 'while' expr NEWLINE INDENT stmts DEDENT
+    C.8  Break and continue
+         - 'break' ('@' label)?
+         - 'continue' ('@' label)?
+    C.9  Go statement (fire-and-forget goroutine)
+         - 'go' ('[' capture_list ']')? (call_expr | block)
+         - capture_list := ('copy')? identifier (',' ('copy')? identifier)*
+         - Desugars to: concurrent.spawn(fn() { ... }) discarding the Future
+    C.10 Spawn expression (goroutine with awaitable result)
+         - 'spawn' (call_expr | block)
+         - Type: Future<T> where T is the return type of the spawned expression
+         - Works on any fn, async or not; async marks presence of await in body
+         - Desugars to: concurrent.spawn(fn() → T { ... })
+    C.11 Select statement
+         - 'select' NEWLINE INDENT select_arm+ DEDENT
+         - select_arm :=
+             binding 'from' expr ':' stmt         // channel receive
+           | '_' 'from' expr ':' stmt             // receive, discard value
+           | 'after' duration ':' stmt            // timeout arm
+           | 'default' ':' stmt                   // non-blocking poll arm
+         - duration := int_lit ('ms' | 's' | 'm' | 'h')
+         - Semantics: evaluates all channel exprs, blocks until one is ready;
+           if multiple ready simultaneously, one is chosen pseudo-randomly.
+           default arm (if present) runs immediately if no channel is ready.
+         - At most one default arm and one after arm per select.
+    C.12 Try/catch
+         - 'try' NEWLINE INDENT stmts DEDENT
+           ('catch' binding ':' type NEWLINE INDENT stmts DEDENT)*
+           ('finally' NEWLINE INDENT stmts DEDENT)?
+    C.13 Defer statement
+         - 'defer' stmt
+         - 'defer' NEWLINE INDENT stmts DEDENT  (block form)
+         - Semantics: the deferred code is registered at the defer site and runs
+           when the enclosing function scope exits, in LIFO order.
+    C.15 Unsafe block
+         - 'unsafe' NEWLINE INDENT stmts DEDENT
+         - Grants permission to: dereference ptr<T>, perform raw pointer arithmetic,
+           call @extern functions with ptr parameters without an enclosing @c block.
+         - The compiler tracks unsafe blocks; using ptr<T> outside an unsafe block
+           or @c/@cpp block is a compile error.
+         - @c and @cpp blocks implicitly provide an unsafe context.
+    C.16 Async/await rules (compile-time enforced)
+         - 'await' expr is only valid inside an 'async fn' body.
+         - An 'async fn' called from a non-async context must be called via
+           'spawn' (returns Future<T>) or 'go' (fire-and-forget).
+         - The compiler rejects 'await' outside an async fn with a clear error.
+    C.14 Conditional compilation
+         - '@if' '(' cc_pred ')' NEWLINE decls ('@else' NEWLINE decls)?
+         - cc_pred := 'platform' '==' str_lit
+                    | 'arch' '==' str_lit
+                    | 'debug' | 'release'
+                    | 'feature' '(' str_lit ')'
+         - Applies at declaration scope only (top-level, class body, module level).
+           Not valid inside expression or statement context.
+
+  SECTION D — Declaration Grammar
+    D.1  Struct declaration (value type)
+         - 'struct' identifier ('<' type_params '>')? '(' constructor_params ')'
+           ('where' constraints)?
+           NEWLINE INDENT struct_members DEDENT
+         - struct_members: fn declarations and computed properties only.
+           No inheritance (no : base_type). No body field initializers (all state
+           comes from constructor params). Fields are mutable (var semantics).
+         - Semantics: value type. Assignment copies all fields. No reference counting.
+           The compiler lays out structs inline (no heap allocation) unless the size
+           exceeds a platform threshold, after which it may box automatically.
+    D.2  Class declaration
+         - 'class' identifier ('<' type_params '>')? ('(' constructor_params ')')?
+           (':' base_type (',' interface_type)*)? ('where' constraints)?
+           NEWLINE INDENT class_members DEDENT
+         - class_members may include field declarations with ownership modifiers:
+             field_decl := ('weak' | 'unowned')? ('var' | 'let') identifier ':' type ('=' expr)?
+           weak var f: T?   — nullable; zeroed automatically when referent is freed
+           unowned let f: T — non-nullable; accessing after free is undefined (crash)
+    D.3  Sealed class
+         - 'sealed' 'class' identifier NEWLINE INDENT variant+ DEDENT
+         - variant := identifier ('(' params ')')? NEWLINE
+    D.4  Interface
+         - 'interface' identifier ('<' type_params '>')? NEWLINE INDENT interface_members DEDENT
+         - interface_members := method_sig | associated_type_decl | default_impl
+    D.4b Associated type declaration (inside interface body)
+         - 'type' identifier           (abstract associated type)
+    D.4c Associated type binding (inside class/record/struct body implementing the interface)
+         - 'type' identifier '=' type  (concrete binding)
+    D.4d Associated type constraint (in where clause)
+         - 'where' T '.' identifier (':' constraint | '==' type)
+    D.5  Record
+         - 'record' identifier '(' params ')' NEWLINE
+         - Immutable reference type. All fields are let. Auto-generates ==, str(), hash().
+    D.6  Enum
+         - 'enum' identifier (':' type)? NEWLINE INDENT case_list DEDENT
+    D.6  Extension
+         - 'extend' type (':' interface_type (',' interface_type)*)? ('where' constraints)? NEWLINE INDENT fn_decls DEDENT
+         - The optional ': interface_type' list is retroactive conformance: declares
+           that 'type' satisfies those interfaces. All interface methods must be
+           implemented in the extend block (unless already present on the type).
+           Conformance is nominal and module-scoped. Conflicting conformances for
+           the same type+interface pair across imported modules are a compile error.
+    D.7  Type alias
+         - 'type' identifier '=' type
+         - Semantics: transparent (structural) alias. The new name and the aliased
+           type are fully interchangeable; no implicit conversion is needed, and no
+           new type-checking boundary is introduced. Example: given
+           'type Meters = float', a float literal 42.0 is valid where Meters is
+           expected and vice-versa. For a nominal (distinct) wrapper type, use a
+           single-field struct or record instead.
+    D.8  Module and imports
+         - 'module' qualified_name
+         - 'import' qualified_name ('as' identifier)?
+         - 'import' qualified_name '.' identifier
+         - 'pub' 'import' qualified_name   (re-export; valid only in mod.nv)
+           Semantics: makes the named sub-module visible to consumers of this
+           package. A consumer can write 'import parent.submodule' and access its
+           pub symbols as 'submodule.Symbol'. Symbols are NOT merged into the
+           parent module's namespace; only the sub-module namespace is exposed.
+    D.9  Visibility modifiers
+         - 'pub'               exported from the package
+         - 'pub' '(' 'pkg' ')' visible to all modules in this package, not exported
+         - (none)              file-private (visible in this .nv file only)
+    D.10 Computed property
+         - 'fn' identifier ('→' type)?   (no parameter list — property, not method)
+           NEWLINE INDENT stmts DEDENT
+         - With explicit get/set:
+           'fn' identifier '→' type NEWLINE INDENT
+               ('get' ('→' expr | NEWLINE INDENT stmts DEDENT))
+               ('set' '(' identifier ')' (NEWLINE INDENT stmts DEDENT | stmt))?
+           DEDENT
+    D.11 Subscript operators (inside class/record/extend body)
+         - 'fn' '[' ']' '(' params ')' '→' type NEWLINE INDENT stmts DEDENT
+         - 'fn' '[' ']' '=' '(' params ',' identifier ':' type ')' NEWLINE INDENT stmts DEDENT
+    D.12 Multi-file module resolution
+         - All .nv files in directory dir/ declaring 'module foo.bar' form one module.
+         - The module name must match the directory path relative to the package root.
+         - Subdirectory dir/sub/ forms module foo.bar.sub automatically.
+         - A file named mod.nv in dir/ may re-export sub-modules with pub import.
+
+  SECTION E — Type Grammar
+    E.1  Named types: identifier, qualified (a.b.c), generic (T<U, V>)
+    E.2  Nullable: type '?'
+    E.3  Array: '[' type ']'        — e.g. [int], [str]
+    E.3b Map: '[' type ':' type ']' — e.g. [str: int]; literal syntax [k: v, ...]
+         Empty map literal: '[' ':' ']'  (i.e. [:])
+         Empty array literal: '[' ']'   (i.e. [])
+         Disambiguated in expression position: [expr, ...] is array; [expr: expr, ...]
+         is map. In type position: [T] is array; [K: V] is map.
+    E.4  Matrix: '[[' type ']]'
+    E.5  Function type: 'fn' '(' types ')' '→' type
+         - Zero params:  fn() → ()          (void callback)
+         - One param:    fn(int) → str
+         - Multi-param:  fn(int, int) → bool
+         - Void return () may also be written as the absence of a return type
+           annotation in a fn declaration, but in type position () is explicit.
+         - fn types are first-class values: storable in let/var, passable as
+           arguments, returnable from functions. No implicit currying.
+    E.6  Tuple type: '(' type (',' type)+ ')'
+    E.7  Named tuple type: '(' (identifier ':' type)+ ')'
+    E.8  Result: 'Result' '<' type (',' type)? '>'
+    E.9  Pointer (unsafe): 'ptr' '<' type '>'
+    E.10 Lazy sequence: 'Sequence' '<' type '>'
+         - A Sequence<T> is a lazy, pull-based stream. Returned by generator fns
+           (those with yield statements). Supports .map .filter .take .drop .zip
+           .enumerate .toList; all operations are lazy except .toList / for loops.
+
+  SECTION F — Pattern Grammar (for match arms)
+    F.1  Literal patterns: int, float, bool, str, nil
+    F.2  Range patterns: range notation ([a,b], etc.)
+    F.3  Type patterns: ClassName '(' binding_list ')'  (sealed variants)
+         - Positional:   Dog(name)
+         - Named fields: Circle(radius: r)
+         - Nested:       Ok(Some(x))  — patterns compose recursively
+    F.4  Wildcard: '_'
+    F.5  Binding: 'let' identifier  (binds and names a value in the arm)
+    F.6  Tuple pattern: '(' pattern (',' pattern)+ ')'
+    F.7  Guard: pattern 'if' expr
+    F.8  Multiple patterns: pattern (',' pattern)+   (comma — same arm, same body)
+    F.9  Or-patterns: pattern '|' pattern            (either variant → same body)
+         - Example: Add(_) | Mul(_): → "binary"
+         - All alternatives must bind the same set of names at the same types.
+    F.10 Recursive patterns: sealed types may reference themselves; the pattern
+         grammar is therefore recursive. The exhaustiveness checker must handle
+         recursive constructors without infinite expansion (use depth-bounded
+         unfolding or set-based coverage analysis).
+
+────────────────────────────────────────────────────────────────────────────────
+  3.3  Indentation Sensitivity Rules
+────────────────────────────────────────────────────────────────────────────────
+
+Nordvest uses significant indentation following these rules:
+
+  - The canonical indent unit is 4 spaces. The formatter enforces this.
+  - Tabs are forbidden in new code; the formatter converts them.
+  - A block begins after a colon-terminated line or after a declaration header
+    line (fn, class, if, for, while, match, etc.) — the next non-blank line
+    must be indented relative to the header.
+  - A block ends when a non-blank line is indented less than or equal to the
+    block's opener.
+  - Continuation lines (pipeline |>, multi-line array literals, multi-line
+    argument lists) may be indented at any level strictly greater than the
+    statement's starting column. The parser tracks "expression continuation"
+    vs. "new statement" based on whether the current expression is complete.
+  - One-liner sugar: a single-expression body may appear on the same line as
+    the header after an indented block would normally start, separated by the
+    body expression directly (no colon): "fn area() → π * r^2"
+
+────────────────────────────────────────────────────────────────────────────────
+  3.4  Grammar Document (spec/language.md) Outline
+────────────────────────────────────────────────────────────────────────────────
+
+  Chapter 1  Notation and Conventions
+  Chapter 2  Lexical Structure
+    2.1 Source encoding (UTF-8, NFC normalization)
+    2.2 Whitespace and indentation rules
+    2.3 Tokens: literals, identifiers, keywords, operators, punctuation
+    2.4 Unicode operators and their ASCII aliases
+  Chapter 3  Types
+    3.1 Primitive types (int, float, bool, str, byte, char, float32, float64, int64)
+    3.2 Nullable types
+    3.3 Composite types (arrays, matrices, tuples)
+    3.4 Function types
+    3.5 Named types (class, record, enum, sealed, interface)
+    3.6 Generic types and constraints
+    3.7 Type inference rules
+  Chapter 4  Expressions
+    4.1 Operator precedence and associativity
+    4.2 Arithmetic and comparison operators
+    4.3 Logical operators (∧ ∨ ¬ and aliases)
+    4.4 Mathematical operators (^ ∑ ∏ π e ∞)
+    4.5 Quantifier expressions (∀ ∃)
+    4.6 Range notation
+    4.7 String interpolation and format specifiers
+    4.8 Lambda expressions
+    4.9 List comprehensions
+    4.10 Pipeline operator |>
+    4.11 Null safety operators (?. ?? !)
+    4.12 Result propagation operator ?
+    4.13 Ternary operator
+    4.14 Match expression
+  Chapter 5  Statements
+    5.1 Variable declarations (let, var)
+    5.2 Assignment
+    5.3 Control flow (if, for, while, break, continue)
+    5.4 Return statement (→ and return)
+    5.5 Error handling (try, catch, finally, throw, throws)
+    5.6 Concurrency (go, spawn, async, await, select, TaskGroup)
+  Chapter 6  Declarations
+    6.1 Functions (fn, defaults, named args, variadic, first-class)
+    6.2 Classes (primary constructor, body fields, init, inheritance)
+    6.3 Interfaces (signatures, default implementations)
+    6.4 Records
+    6.5 Enums (simple, raw-value)
+    6.6 Sealed classes (discriminated unions)
+    6.7 Extension functions and retroactive conformance (extend T, extend T : Interface)
+    6.8 Type aliases
+    6.9 Generics and constraints
+  Chapter 7  Modules and Packages
+    7.1 Module declarations
+    7.2 Import statements
+    7.3 Visibility (pub)
+    7.4 Package structure on disk
+  Chapter 8  Pattern Matching
+    8.1 Match semantics and exhaustiveness
+    8.2 Pattern kinds
+    8.3 Guard clauses
+    8.4 Binding in patterns
+  Chapter 9  Null Safety
+    9.1 Nullable type semantics
+    9.2 nil literal
+    9.3 Safe navigation and coalescing
+    9.4 Narrowing flows (if let, guard let)
+  Chapter 10 Error Handling
+    10.1 Result<T> and Result<T,E>
+    10.2 Checked exceptions
+    10.3 ? propagation
+  Chapter 11 Concurrency
+    11.1 Goroutines: go, spawn, and the M:N scheduler
+    11.2 async as a body annotation; await expression
+    11.3 Channels and the select statement
+    11.4 Futures and combinators (all, any, race)
+    11.5 Structured concurrency with TaskGroup
+    11.6 Closure captures in goroutines ([copy name])
+  Chapter 12 Low-Level Features
+    12.1 Inline assembly (@asm, @bytes)
+    12.2 GPU kernels (@gpu, @cpu, @gpu.local)
+    12.3 C/C++ interop (@extern, @CLayout, @c, @cpp, @include)
+    12.4 ptr<T> and unsafe contexts
+  Chapter 13 Standard Library Overview (pointers to stdlib reference)
+  Chapter 14 Bitwise Operations
+    14.1 Tokens & ASCII aliases (&, |, ~, ⊕/xor, <<, >>)
+    14.2 Precedence relative to arithmetic and comparison
+    14.3 Compound assignment forms
+    14.4 Integer representation (width, signedness, two's complement)
+  Chapter 15 Lazy Sequences and Iterators
+    15.1 The Iterator interface and associated type Item
+    15.2 The Iterable interface; for-loop desugaring
+    15.3 Generator functions: yield semantics and Sequence<T>
+    15.4 Lazy combinators: map, filter, take, drop, zip, enumerate
+    15.5 Forcing evaluation: toList, for-loop, quantifiers
+  Chapter 16 Conditional Compilation
+    16.1 @if / @else syntax and scope rules
+    16.2 Compile-time predicates: platform, arch, debug, release, feature
+    16.3 Interaction with the formatter (nv fmt --check)
+  Chapter 17 Derive Annotations
+    17.1 @derive — trait list and All shorthand
+         Traits: Show, Eq, Compare, Hash, Copy, All
+         Applicability: struct, class, record, sealed (per-variant)
+         record auto-derives Show, Eq, Hash; @derive extends or adds traits
+    17.2 .copy() — shallow-copy-with-override
+         Generated by @derive(Copy) or @derive(All)
+         Signature: fn copy(field₁: T₁ = self.field₁, ...) → Self
+         Applicable to struct, record, class
+    17.3 @builder — builder pattern generation
+         Generates a nested Builder class and a static .build { } DSL block
+         Required fields (no default) validated at .build() time with compile error
+         Chained form: T.builder(required:).optField(v).build()
+         DSL block form: T.build \n  field = val \n  ...
+         Composes with @derive
+    17.4 @newtype — zero-cost nominal wrappers
+         Syntax: @newtype struct/record T(U)
+         Single-field only; .value unwraps to U
+         Auto-derives Eq, Hash, Compare, Show forwarded from U
+         Erased to U in generated LLVM IR
+    17.5 @lazy — deferred field initialization
+         Syntax: @lazy val/var ident: T = expr (body field only, not ctor param)
+         val: computed once, permanently cached
+         var: resets on nil assignment, recomputed on next access
+         Thread safety: not synchronized; callers must add locking if needed
+    17.6 by delegation — interface forwarding
+         Syntax: class C(...) : I by expr
+         Delegates all methods of I to expr; C may override individually
+         Multiple delegations allowed (one per interface)
+         Statically dispatched; no vtable overhead beyond the delegatee
+  Appendix A  Keywords
+  Appendix B  Operators Quick Reference
+  Appendix C  Grammar (full PEG, normative)
+  Appendix D  Unicode Operator Table
+
+
+================================================================================
+  4. REFERENCE DOCUMENTATION PLAN
+================================================================================
+
+The reference documentation is separate from the language spec. It is
+practitioner-oriented: "how do I do X?" rather than "what are the formal rules
+for X?". It lives in docs/ and is rendered as a static website.
+
+────────────────────────────────────────────────────────────────────────────────
+  4.1  Documentation Structure
+────────────────────────────────────────────────────────────────────────────────
+
+  docs/
+    getting-started/
+      install.md            Installation (package managers, source build)
+      hello-world.md        First program, nv run, nv build
+      tour.md               10-minute guided tour through key features
+    language/
+      variables.md          let, var, type inference, type aliases
+      functions.md          fn, defaults, named args, variadic, lambdas, |>
+      types.md              All types, nullable, generics, type constraints
+      classes.md            class, record, sealed, enum, interface, extend
+      control-flow.md       if, for, while, match, break, continue
+      null-safety.md        T?, ?., ??, !, if let, guard let
+      error-handling.md     Result, throws, try/catch, ? propagation
+      collections.md        Arrays, slices, ranges, comprehensions, matrices
+      math.md               ∀ ∃ ∑ ∏ ∈ ^, constants π e ∞, operators ∧ ∨ ¬
+      modules.md            module, import, pub, pub(pkg), multi-file modules
+      concurrency.md        go, spawn, select, async/await, Channel, Future, TaskGroup, closure captures
+      low-level.md          @asm, @bytes, @gpu, @extern, ptr<T>
+      string-interp.md      String interpolation, format specifiers, raw strings
+      bitwise.md            &, |, ~, ⊕/xor, <<, >>, compound assignments
+      iterators.md          Iterator, Iterable, Sequence<T>, yield, generators
+      conditional-compilation.md  @if, @else, platform/arch/feature predicates
+    stdlib/                 (auto-generated from doc comments + hand-written intros)
+      std.io.md
+      std.fs.md
+      std.math.md
+      std.string.md
+      std.collections.md
+      std.net.http.md
+      std.net.md
+      std.json.md
+      std.concurrent.md
+      std.test.md
+      std.gpu.md
+      std.ffi.md
+      std.process.md
+      std.time.md
+      std.log.md
+      std.crypto.md
+      std.encoding.md
+      std.compress.md
+      std.cli.md
+      std.regex.md
+      std.rand.md
+      std.hash.md
+      std.iter.md
+      std.net.url.md
+      std.fmt.md
+      std.uuid.md
+      std.bytes.md
+      std.config.md
+      std.sql.md
+      std.csv.md
+      std.xml.md
+      std.toml.md
+      std.unicode.md
+      std.bignum.md
+      std.archive.md
+      std.html.md
+      std.stats.md
+      std.mime.md
+      std.signal.md
+      std.template.md
+      std.debug.md
+    tools/
+      nv-run.md
+      nv-build.md
+      nv-test.md
+      nv-fmt.md
+      nv-doc.md
+      nv-pkg.md
+    guides/
+      migrating-from-python.md
+      migrating-from-kotlin.md
+      gpu-programming.md
+      c-interop.md
+      writing-a-library.md
+      performance-tips.md
+
+────────────────────────────────────────────────────────────────────────────────
+  4.2  Per-Page Template
+────────────────────────────────────────────────────────────────────────────────
+
+Each language reference page follows this structure:
+  1. One-sentence summary of the feature.
+  2. Syntax box (code block showing the grammatical form).
+  3. Semantics: a plain-English description of what happens at runtime.
+  4. Examples: 2–6 runnable code snippets, from simple to advanced.
+  5. Common patterns: idiomatic usage snippets.
+  6. Gotchas / pitfalls: things that trip up users from similar languages.
+  7. See also: links to related language pages and stdlib APIs.
+
+────────────────────────────────────────────────────────────────────────────────
+  4.3  Feature-to-Doc Mapping
+────────────────────────────────────────────────────────────────────────────────
+
+  EXAMPLE.txt Section          Primary doc page
+  ─────────────────────────── ─────────────────────────────────
+  1  Hello World               getting-started/hello-world.md
+  2  Variables & Types         language/variables.md
+  3  Functions & Tuples        language/functions.md
+  4  Classes & Interfaces      language/classes.md
+  5  Null Safety               language/null-safety.md
+  6  Arrays, Matrices, Ranges  language/collections.md
+  7  Mathematical Notation     language/math.md
+  8  Pattern Matching          language/control-flow.md (match section)
+  9  Generics                  language/types.md (generics section)
+  10 Error Handling            language/error-handling.md
+  11 Extension Functions &     language/classes.md (extend section +
+     Retroactive Conformance    retroactive conformance subsection)
+  12 Modules & Imports         language/modules.md
+  13 Concurrency               language/concurrency.md
+  14 Inline Bytecode           language/low-level.md
+  15 Comments                  language/variables.md (sidebar)
+  16 GPU Acceleration          language/low-level.md + guides/gpu-programming.md
+  17 C/C++ Interop             language/low-level.md + guides/c-interop.md
+  18 Complete: Matrix Ops      examples/ (not docs, but cross-linked)
+  19 Complete: AoC Puzzle      examples/ (cross-linked from language/collections.md)
+  20 Bitwise Operators         language/bitwise.md
+  21 Iterators & Lazy Seqs     language/iterators.md
+  22 Properties & Subscripts   language/classes.md (properties section)
+  23 Defer                     language/control-flow.md (defer section)
+  24 Type Tests & Casts        language/types.md (casting section)
+  25 Labeled Loops             language/control-flow.md (labeled loops section)
+  26 Conditional Compilation   language/conditional-compilation.md
+  27 Closure Captures          language/functions.md (closures section)
+  28 Regular Expressions       language/regex.md
+  29 Formatting, Rand, UUIDs   language/stdlib-basics.md
+  30 Iterator Combinators      language/iterators.md (combinators section)
+  31 URL Parsing & Data Fmts   language/stdlib-basics.md + guides/data-formats.md
+  32 Database Access           guides/database.md
+  33 Derive Annotations        language/derive.md
+
+
+================================================================================
+  5. STANDARD LIBRARY DESIGN
+================================================================================
+
+All standard library modules are written in Nordvest (Phase 2+), using @extern
+and @c/@cpp for thin OS-interface wrappers where necessary. Module names follow
+the qualified path convention (std.io, std.collections.HashMap, etc.).
+
+────────────────────────────────────────────────────────────────────────────────
+  5.1  std.io — Input/Output
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: stdin/stdout/stderr, formatted printing, basic file reading.
+
+  // Console output
+  fn print(value: str)                    // println with newline
+  fn print(value: str, end: str = "\n")   // explicit line ending
+  fn eprint(value: str)                   // stderr
+  fn printf(format: str, values: any...)  // printf-style formatting
+
+  // Console input
+  fn readLine() → str?                    // nil on EOF
+  fn readLines() → [str]                  // all lines until EOF
+  fn readInt() → Result<int>
+  fn readFloat() → Result<float>
+
+  // File (basic, see std.fs for full FS operations)
+  class File
+    pub static fn read(path: str) → str throws IOError
+    pub static fn readLines(path: str) → [str] throws IOError
+    pub static fn write(path: str, content: str) throws IOError
+    pub static fn append(path: str, content: str) throws IOError
+
+  // Buffered streams
+  class BufferedReader(stream: InputStream)
+    pub fn readLine() → str?
+    pub fn readAll() → str
+    pub fn lines() → [str]           // lazy iteration
+
+  class BufferedWriter(stream: OutputStream)
+    pub fn write(s: str)
+    pub fn writeLine(s: str)
+    pub fn flush()
+
+  // Standard streams
+  pub let stdin:  BufferedReader
+  pub let stdout: BufferedWriter
+  pub let stderr: BufferedWriter
+
+  // Error type
+  class IOError(message: str) : Error
+    pub let message: str
+    pub let code: int?                // OS error code, if available
+
+────────────────────────────────────────────────────────────────────────────────
+  5.2  std.fs — Filesystem Operations
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: paths, directory traversal, file metadata, copy/move/delete.
+
+  // Path type — cross-platform, immutable
+  record Path(value: str)
+    pub fn join(other: str) → Path
+    pub fn parent() → Path?
+    pub fn name() → str             // last component
+    pub fn stem() → str             // name without extension
+    pub fn extension() → str?
+    pub fn isAbsolute() → bool
+    pub fn resolve() → Path throws IOError   // canonicalize
+
+  // File system operations
+  class FS
+    pub static fn exists(path: Path) → bool
+    pub static fn isFile(path: Path) → bool
+    pub static fn isDir(path: Path) → bool
+    pub static fn size(path: Path) → int64 throws IOError
+    pub static fn modified(path: Path) → Timestamp throws IOError
+
+    pub static fn mkdir(path: Path) throws IOError
+    pub static fn mkdirAll(path: Path) throws IOError
+    pub static fn remove(path: Path) throws IOError
+    pub static fn removeAll(path: Path) throws IOError
+    pub static fn copy(src: Path, dst: Path) throws IOError
+    pub static fn move(src: Path, dst: Path) throws IOError
+
+    pub static fn list(path: Path) → [Path] throws IOError
+    pub static fn walk(path: Path) → [Path] throws IOError   // recursive
+    pub static fn glob(pattern: str) → [Path] throws IOError
+
+    pub static fn tempDir() → Path throws IOError
+    pub static fn tempFile(suffix: str = "") → Path throws IOError
+
+    pub static fn cwd() → Path throws IOError
+    pub static fn chdir(path: Path) throws IOError
+
+  // Watcher (for build tools, LSP, etc.)
+  class FSWatcher
+    pub fn watch(path: Path, callback: fn(FSEvent))
+    pub fn stop()
+
+  sealed class FSEvent
+    Created(path: Path)
+    Modified(path: Path)
+    Deleted(path: Path)
+    Renamed(from: Path, to: Path)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.3  std.math — Mathematical Functions
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: trig, exponential, logarithm, rounding, number theory helpers.
+
+  // Constants (also in global scope as language builtins)
+  pub let π:  float = 3.141592653589793
+  pub let e:  float = 2.718281828459045
+  pub let ∞:  float = Float.infinity
+  pub let τ:  float = 2.0 * π           // tau (2π)
+  pub let φ:  float = 1.618033988749895 // golden ratio
+
+  // Trig (radians)
+  fn sin(x: float) → float
+  fn cos(x: float) → float
+  fn tan(x: float) → float
+  fn asin(x: float) → float
+  fn acos(x: float) → float
+  fn atan(x: float) → float
+  fn atan2(y: float, x: float) → float
+  fn sinh(x: float) → float
+  fn cosh(x: float) → float
+  fn tanh(x: float) → float
+
+  // Exponential and logarithm
+  fn exp(x: float) → float          // e^x
+  fn exp2(x: float) → float         // 2^x
+  fn log(x: float) → float          // natural log
+  fn log2(x: float) → float
+  fn log10(x: float) → float
+  fn pow(base: float, exp: float) → float   // alias for ^ operator
+
+  // Rounding
+  fn floor(x: float) → float
+  fn ceil(x: float) → float
+  fn round(x: float) → float
+  fn round(x: float, decimals: int) → float
+  fn trunc(x: float) → float
+
+  // Misc
+  fn sqrt(x: float) → float
+  fn cbrt(x: float) → float
+  fn abs(x: float) → float
+  fn abs(x: int) → int
+  fn sign(x: float) → float    // -1.0, 0.0, 1.0
+  fn clamp(x: float, lo: float, hi: float) → float
+  fn lerp(a: float, b: float, t: float) → float
+  fn hypot(x: float, y: float) → float
+
+  // Integer math
+  fn gcd(a: int, b: int) → int
+  fn lcm(a: int, b: int) → int
+  fn isPrime(n: int) → bool
+  fn primes(limit: int) → [int]      // Sieve of Eratosthenes
+  fn factorial(n: int) → int
+  fn choose(n: int, k: int) → int    // binomial coefficient
+
+  // Number classification
+  fn isNaN(x: float) → bool
+  fn isInfinite(x: float) → bool
+  fn isFinite(x: float) → bool
+
+  // Random (seeded PRNG — not cryptographic)
+  class Random(seed: int64 = currentTimeMillis())
+    fn nextInt() → int
+    fn nextInt(lo: int, hi: int) → int
+    fn nextFloat() → float           // [0.0, 1.0)
+    fn nextBool() → bool
+    fn shuffle<T>(items: [T]) → [T]
+    fn sample<T>(items: [T], n: int) → [T]
+
+────────────────────────────────────────────────────────────────────────────────
+  5.4  std.string — String Utilities
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: string manipulation beyond the built-in str methods.
+
+  // These are also available as extension methods on str (see extend str)
+  fn length(s: str) → int
+  fn isEmpty(s: str) → bool
+  fn trim(s: str) → str
+  fn trimLeft(s: str) → str
+  fn trimRight(s: str) → str
+  fn split(s: str, delimiter: str) → [str]
+  fn split(s: str, delimiter: str, maxParts: int) → [str]
+  fn join(parts: [str], separator: str) → str
+  fn replace(s: str, from: str, to: str) → str
+  fn replaceAll(s: str, from: str, to: str) → str
+  fn contains(s: str, sub: str) → bool
+  fn startsWith(s: str, prefix: str) → bool
+  fn endsWith(s: str, suffix: str) → bool
+  fn indexOf(s: str, sub: str) → int?
+  fn lastIndexOf(s: str, sub: str) → int?
+  fn upper(s: str) → str
+  fn lower(s: str) → str
+  fn capitalize(s: str) → str
+  fn repeat(s: str, n: int) → str
+  fn pad(s: str, width: int, char: str = " ") → str
+  fn padLeft(s: str, width: int, char: str = " ") → str
+  fn padRight(s: str, width: str, char: str = " ") → str
+  fn toInt(s: str) → Result<int>
+  fn toFloat(s: str) → Result<float>
+  fn toBool(s: str) → Result<bool>
+  fn bytes(s: str) → [byte]
+  fn chars(s: str) → [char]
+  fn codePoints(s: str) → [int]
+
+  // String builder (efficient concatenation)
+  class StringBuilder
+    pub fn append(s: str) → StringBuilder   // chainable
+    pub fn appendLine(s: str) → StringBuilder
+    pub fn insert(index: int, s: str) → StringBuilder
+    pub fn delete(start: int, end: int) → StringBuilder
+    pub fn toString() → str
+    pub fn length() → int
+
+  // Regex
+  class Regex(pattern: str, flags: str = "")
+    pub fn matches(s: str) → bool
+    pub fn find(s: str) → Match?
+    pub fn findAll(s: str) → [Match]
+    pub fn replace(s: str, replacement: str) → str
+    pub fn split(s: str) → [str]
+    pub fn groups(s: str) → [str?]
+
+  record Match(value: str, start: int, end: int, groups: [str?])
+
+────────────────────────────────────────────────────────────────────────────────
+  5.5  std.collections — Data Structures
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: standard generic collections beyond the built-in array [T].
+
+  // HashMap<K, V> — hash table, O(1) average get/put
+  class HashMap<K, V> where K: Hashable
+    pub init(capacity: int = 16)
+    pub fn get(key: K) → V?
+    pub fn put(key: K, value: V)
+    pub fn remove(key: K) → V?
+    pub fn contains(key: K) → bool
+    pub fn keys() → [K]
+    pub fn values() → [V]
+    pub fn entries() → [(K, V)]
+    pub fn size() → int
+    pub fn isEmpty() → bool
+    pub fn getOrDefault(key: K, default: V) → V
+    pub fn getOrPut(key: K, default: fn() → V) → V
+    pub fn [](key: K) → V?          // subscript operator
+    pub fn []=(key: K, value: V)    // subscript assign
+
+  // HashSet<T>
+  class HashSet<T> where T: Hashable
+    pub fn add(item: T)
+    pub fn remove(item: T) → bool
+    pub fn contains(item: T) → bool
+    pub fn size() → int
+    pub fn isEmpty() → bool
+    pub fn union(other: HashSet<T>) → HashSet<T>
+    pub fn intersection(other: HashSet<T>) → HashSet<T>
+    pub fn difference(other: HashSet<T>) → HashSet<T>
+    pub fn isSubset(of: HashSet<T>) → bool
+    pub fn toList() → [T]
+
+  // Queue<T> — FIFO, backed by circular buffer
+  class Queue<T>
+    pub fn enqueue(item: T)
+    pub fn dequeue() → T?
+    pub fn peek() → T?
+    pub fn size() → int
+    pub fn isEmpty() → bool
+
+  // Deque<T> — double-ended queue
+  class Deque<T>
+    pub fn pushFront(item: T)
+    pub fn pushBack(item: T)
+    pub fn popFront() → T?
+    pub fn popBack() → T?
+    pub fn peekFront() → T?
+    pub fn peekBack() → T?
+    pub fn size() → int
+
+  // Stack<T> — LIFO (also available as the example in EXAMPLE.txt)
+  class Stack<T>
+    pub fn push(item: T)
+    pub fn pop() → T?
+    pub fn peek() → T?
+    pub fn size() → int
+    pub fn isEmpty() → bool
+
+  // PriorityQueue<T> — min-heap
+  class PriorityQueue<T> where T: Comparable<T>
+    pub fn enqueue(item: T)
+    pub fn dequeue() → T?
+    pub fn peek() → T?
+    pub fn size() → int
+
+  // SortedMap<K, V> — red-black tree, O(log n) ops
+  class SortedMap<K, V> where K: Comparable<K>
+    pub fn get(key: K) → V?
+    pub fn put(key: K, value: V)
+    pub fn remove(key: K)
+    pub fn min() → (K, V)?
+    pub fn max() → (K, V)?
+    pub fn range(lo: K, hi: K) → [(K, V)]
+
+  // Array utilities (extension methods on [T])
+  extend [T]
+    fn map<U>(f: fn(T) → U) → [U]
+    fn filter(pred: fn(T) → bool) → [T]
+    fn reduce<U>(initial: U, f: fn(U, T) → U) → U
+    fn forEach(action: fn(T))
+    fn any(pred: fn(T) → bool) → bool
+    fn all(pred: fn(T) → bool) → bool
+    fn find(pred: fn(T) → bool) → T?
+    fn findIndex(pred: fn(T) → bool) → int?
+    fn count(pred: fn(T) → bool) → int
+    fn sorted() → [T] where T: Comparable<T>
+    fn sorted(by: fn(T, T) → int) → [T]
+    fn reversed() → [T]
+    fn unique() → [T] where T: Hashable
+    fn flatten() → [U] where T == [U]
+    fn flatMap<U>(f: fn(T) → [U]) → [U]
+    fn zip<U>(other: [U]) → [(T, U)]
+    fn enumerate() → [(int, T)]
+    fn groupBy<K>(key: fn(T) → K) → HashMap<K, [T]> where K: Hashable
+    fn partition(pred: fn(T) → bool) → ([T], [T])
+    fn first() → T?
+    fn last() → T?
+    fn min() → T? where T: Comparable<T>
+    fn max() → T? where T: Comparable<T>
+    fn sum() → T where T: Numeric
+    fn join(separator: str = "") → str where T == str
+    fn append(item: T)              // mutating
+    fn appendAll(items: [T])        // mutating
+    fn insert(index: int, item: T)  // mutating
+    fn remove(index: int) → T      // mutating
+    fn removeLast() → T?            // mutating
+    fn withoutIndex(i: int) → [T]  // returns new [T] with element i removed
+    fn length: int                  // property
+    fn isEmpty: bool                // property
+
+────────────────────────────────────────────────────────────────────────────────
+  5.6  std.net.http — HTTP Client and Server
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: HTTP/1.1 and HTTP/2 client; simple HTTP server.
+
+  // HTTP Client
+  class HttpClient(baseUrl: str = "", timeout: int = 30)
+    headers: [str, str] = {}
+    retries: int = 0
+
+    pub async fn get(path: str, headers: [str,str] = {}) → Result<HttpResponse>
+    pub async fn post(path: str, body: str, contentType: str = "application/json")
+                    → Result<HttpResponse>
+    pub async fn put(path: str, body: str, contentType: str = "application/json")
+                    → Result<HttpResponse>
+    pub async fn delete(path: str) → Result<HttpResponse>
+    pub async fn request(req: HttpRequest) → Result<HttpResponse>
+
+  record HttpRequest(
+    method:  str,
+    url:     str,
+    headers: [str, str] = {},
+    body:    str? = nil
+  )
+
+  record HttpResponse(
+    status:  int,
+    headers: [str, str],
+    body:    str
+  )
+    pub fn isOk() → bool
+    pub fn json<T>() → Result<T>   // parse body as JSON into T
+    pub fn text() → str
+
+  // Top-level shorthand functions (uses a default client)
+  async fn http.get(url: str) → Result<HttpResponse>
+  async fn http.post(url: str, body: str) → Result<HttpResponse>
+
+  // HTTP Server
+  class HttpServer(port: int = 8080, host: str = "0.0.0.0")
+    pub fn get(path: str, handler: fn(HttpRequest) → HttpResponse)
+    pub fn post(path: str, handler: fn(HttpRequest) → HttpResponse)
+    pub fn put(path: str, handler: fn(HttpRequest) → HttpResponse)
+    pub fn delete(path: str, handler: fn(HttpRequest) → HttpResponse)
+    pub fn use(middleware: fn(HttpRequest, fn() → HttpResponse) → HttpResponse)
+    pub async fn listen() throws IOError
+
+  // Route parameters: "/users/:id" — path params available in HttpRequest.params
+  // WebSocket support is a stretch goal for Phase 3.
+
+────────────────────────────────────────────────────────────────────────────────
+  5.7  std.json — JSON Encoding and Decoding
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: parse JSON strings into Nordvest values; serialize Nordvest values
+  to JSON. Optionally decode directly into typed structs via reflection/generics.
+
+  // JSON value type (untyped)
+  sealed class JsonValue
+    JsonNull
+    JsonBool(value: bool)
+    JsonNumber(value: float)
+    JsonString(value: str)
+    JsonArray(elements: [JsonValue])
+    JsonObject(fields: [str, JsonValue])
+
+    pub fn str() → str              // pretty-print
+    pub fn compact() → str          // compact JSON string
+
+  // Parsing
+  fn json.parse(s: str) → Result<JsonValue>
+
+  // Typed decoding via interface
+  interface JsonDecodable
+    static fn fromJson(v: JsonValue) → Result<Self>
+
+  fn json.decode<T: JsonDecodable>(s: str) → Result<T>
+
+  // Typed encoding via interface
+  interface JsonEncodable
+    fn toJson() → JsonValue
+
+  fn json.encode<T: JsonEncodable>(value: T) → str
+
+  // Convenience helpers on JsonValue
+  extend JsonValue
+    fn asStr() → str?
+    fn asInt() → int?
+    fn asFloat() → float?
+    fn asBool() → bool?
+    fn asArray() → [JsonValue]?
+    fn asObject() → [str, JsonValue]?
+    fn [](key: str) → JsonValue?    // subscript for objects
+    fn [](index: int) → JsonValue?  // subscript for arrays
+
+  // Auto-derivation (compile-time code generation)
+  // A record or class annotated with @Json gets fromJson/toJson generated:
+  @Json
+  record User(name: str, age: int, email: str?)
+
+  fn main()
+    let raw = '{"name":"Alice","age":30}'
+    let user = json.decode<User>(raw).getOrThrow()
+    print(user.name)   // Alice
+
+────────────────────────────────────────────────────────────────────────────────
+  5.8  std.concurrent — Async Runtime, Channels, Futures
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: the async runtime, synchronization primitives, and concurrency
+  building blocks. The runtime is an M:N green-thread scheduler; channel sends
+  and I/O automatically suspend the calling coroutine — no OS thread blocks.
+
+  // Channel<T> — buffered or unbuffered message passing
+  class Channel<T>(capacity: int = 0)   // 0 = unbuffered (rendezvous)
+    pub fn send(value: T)               // suspends coroutine if full
+    pub fn trySend(value: T) → bool     // non-blocking; returns false if full
+    pub fn receive() → T?               // suspends until value available; nil when closed
+    pub fn tryReceive() → T?            // non-blocking; nil if empty or closed
+    pub fn close()
+    pub fn isClosed() → bool
+    // Channel is iterable: "for v in ch" iterates until closed
+
+  // Future<T>
+  class Future<T>
+    pub static fn value(v: T) → Future<T>         // immediately resolved
+    pub static fn all(futures: [Future<T>]) → Future<[T]>
+    pub static fn any(futures: [Future<T>]) → Future<T>
+    pub static fn race(futures: [Future<T>]) → Future<T>  // first to resolve
+    pub fn map<U>(f: fn(T) → U) → Future<U>
+    pub fn flatMap<U>(f: fn(T) → Future<U>) → Future<U>
+    pub fn onSuccess(f: fn(T))
+    pub fn onFailure(f: fn(Error))
+    pub fn cancel()                                // request cancellation
+    pub fn await() → T                            // suspend coroutine; use with await keyword
+
+  // TaskGroup — structured concurrency
+  // All tasks spawned inside the group must complete before the group resolves.
+  // If any task returns an error or panics, the remaining tasks are cancelled
+  // and the error propagates to the caller.
+  class TaskGroup
+    pub fn spawn(f: fn() → T)    // add a task to the group
+
+  // "await TaskGroup" desugars to: let _g = TaskGroup(); ...; await _g.join()
+
+  // Mutex and RWLock
+  class Mutex<T>(value: T)
+    pub fn lock(action: fn(T) → U) → U    // acquire, run, release
+    pub fn tryLock(action: fn(T) → U) → U?
+
+  class RWLock<T>(value: T)
+    pub fn read(action: fn(T) → U) → U
+    pub fn write(action: fn(T) → U) → U
+
+  // Atomic primitives
+  class Atomic<T>(value: T) where T: Numeric
+    pub fn load() → T
+    pub fn store(value: T)
+    pub fn fetchAdd(delta: T) → T
+    pub fn fetchSub(delta: T) → T
+    pub fn compareExchange(expected: T, desired: T) → bool
+
+  // Semaphore
+  class Semaphore(permits: int)
+    pub fn acquire()
+    pub fn release()
+    pub fn tryAcquire() → bool
+
+  // Runtime control
+  fn concurrent.spawn<T>(f: fn() → T) → Future<T>   // any fn, async or not
+  fn concurrent.sleep(ms: int)                       // suspend for duration
+  fn concurrent.yield()                              // voluntarily yield coroutine
+
+  // Desugaring reference:
+  //   go expr           →  concurrent.spawn(fn() { expr })          // Future discarded
+  //   spawn expr        →  concurrent.spawn(fn() → T { expr })      // Future returned
+  //   await TaskGroup { ... }  →  structured cancellation scope
+
+────────────────────────────────────────────────────────────────────────────────
+  5.9  std.test — Unit Testing Framework
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: a built-in test framework integrated with nv test.
+
+  // Test functions are annotated with @test; they live in any .nv file.
+  // By convention, test files are named foo_test.nv.
+
+  @test
+  fn testAddition()
+    assert(1 + 1 == 2)
+    assertEq(2 + 2, 4)
+    assertNe(2 + 2, 5)
+
+  @test
+  fn testNullable()
+    let x: int? = nil
+    assertNil(x)
+    let y: int? = 42
+    assertNotNil(y)
+    assertEq(y!, 42)
+
+  @test(description: "division by zero returns Err")
+  fn testDivision()
+    let result = divide(10.0, 0.0)
+    assertErr(result)
+    assertEq(result, Err("division by zero"))
+
+  // Assertion API
+  fn assert(condition: bool, message: str = "assertion failed")
+  fn assertEq<T: Equatable>(actual: T, expected: T)
+  fn assertNe<T: Equatable>(actual: T, expected: T)
+  fn assertLt<T: Comparable<T>>(actual: T, expected: T)
+  fn assertGt<T: Comparable<T>>(actual: T, expected: T)
+  fn assertNil<T>(value: T?)
+  fn assertNotNil<T>(value: T?)
+  fn assertErr<T>(result: Result<T>)
+  fn assertOk<T>(result: Result<T>)
+  fn assertThrows(action: fn(), errorType: type)
+  fn fail(message: str)
+
+  // Test grouping
+  @suite("Matrix operations")
+  fn testMatrixSuite()
+    @test fn testAdd() { ... }
+    @test fn testMul() { ... }
+
+  // Parameterized tests
+  @test(params: [[1,1,2], [2,3,5], [0,0,0]])
+  fn testAddParams(a: int, b: int, expected: int)
+    assertEq(a + b, expected)
+
+  // Benchmarks
+  @bench
+  fn benchMatMul()
+    let A = Matrix(100, 100)
+    let B = Matrix(100, 100)
+    A * B
+
+  // nv test output: TAP-compatible (Test Anything Protocol) by default.
+  // --format=junit produces JUnit XML for CI integration.
+
+────────────────────────────────────────────────────────────────────────────────
+  5.10  std.gpu — GPU Memory Management
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: explicit GPU memory management for high-performance compute; the
+  @gpu annotation handles the simple case automatically, but std.gpu gives
+  control when doing multi-pass or batched GPU work.
+
+  // GpuBuffer<T> — GPU-resident typed buffer
+  class GpuBuffer<T>
+    pub static fn alloc(size: int) → GpuBuffer<T> throws GpuError
+    pub static fn from(data: [T]) → GpuBuffer<T> throws GpuError
+    pub fn toCpu() → [T] throws GpuError
+    pub fn copyFrom(data: [T]) throws GpuError
+    pub fn fill(value: T) throws GpuError
+    pub fn size() → int
+    pub fn free()
+
+  // GpuDevice — enumerate and select GPU devices
+  class GpuDevice
+    pub static fn default() → GpuDevice throws GpuError
+    pub static fn all() → [GpuDevice]
+    pub let name: str
+    pub let memoryBytes: int64
+    pub let computeCapability: str
+
+  // Kernel dispatch — low-level control over thread block geometry
+  class KernelLaunch
+    pub fn gridSize(x: int, y: int = 1, z: int = 1) → KernelLaunch
+    pub fn blockSize(x: int, y: int = 1, z: int = 1) → KernelLaunch
+    pub fn sharedMem(bytes: int) → KernelLaunch
+
+  // @gpu functions can be dispatched manually via:
+  //   launch(addVectors).gridSize(1024).blockSize(256)(a, b)
+  fn launch<T>(kernel: T) → KernelLaunch
+
+  // Stream — async GPU execution (CUDA streams / Metal command queues)
+  class GpuStream
+    pub static fn create() → GpuStream throws GpuError
+    pub fn enqueue(f: fn())          // enqueue kernel on this stream
+    pub fn sync() throws GpuError    // wait for all enqueued work to complete
+
+  // Error type
+  class GpuError(message: str) : Error
+    pub let code: int?
+
+────────────────────────────────────────────────────────────────────────────────
+  5.11  std.ffi — C/C++ Interop Helpers
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: higher-level helpers for working with C libraries; ptr<T> utilities,
+  memory allocation, and type marshaling.
+
+  // ptr<T> — raw unmanaged pointer (unsafe, requires unsafe block)
+  // Declared as a built-in type; std.ffi provides utility functions.
+
+  fn ffi.malloc(size: int) → ptr<byte>
+  fn ffi.calloc(count: int, size: int) → ptr<byte>
+  fn ffi.free(p: ptr<byte>)
+  fn ffi.realloc(p: ptr<byte>, size: int) → ptr<byte>
+  fn ffi.memcpy(dst: ptr<byte>, src: ptr<byte>, n: int)
+  fn ffi.memset(dst: ptr<byte>, value: byte, n: int)
+  fn ffi.strlen(s: ptr<byte>) → int
+  fn ffi.cString(s: str) → ptr<byte>      // NUL-terminated copy of str
+  fn ffi.fromCString(p: ptr<byte>) → str  // copy until NUL
+
+  // Offset a pointer by n elements of type T
+  fn ffi.offset<T>(p: ptr<T>, n: int) → ptr<T>
+
+  // Unsafe block — required for raw pointer operations
+  // unsafe
+  //     let p = ffi.malloc(1024)
+  //     ...
+  //     ffi.free(p)
+
+  // Library loading (dynamic linking at runtime)
+  class DynLib(path: str)
+    pub static fn load(name: str) → Result<DynLib>
+    pub fn symbol<T>(name: str) → Result<T>   // T must be a fn type
+    pub fn close()
+
+────────────────────────────────────────────────────────────────────────────────
+  5.12  std.process — Subprocess and Environment
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: run subprocesses, access environment variables, OS-level utilities.
+
+  // Environment variables
+  fn process.env(name: str) → str?
+  fn process.envOrDefault(name: str, default: str) → str
+  fn process.allEnv() → [str, str]
+  fn process.setEnv(name: str, value: str)
+
+  // Command-line arguments
+  fn process.args() → [str]
+
+  // Exit
+  fn process.exit(code: int = 0)
+
+  // Subprocess execution
+  class Command(program: str)
+    pub fn arg(value: str) → Command      // chainable builder
+    pub fn args(values: [str]) → Command
+    pub fn env(key: str, val: str) → Command
+    pub fn cwd(path: str) → Command
+    pub fn stdin(input: str) → Command
+
+    pub fn run() → Result<ProcessOutput> throws IOError
+    pub async fn runAsync() → Result<ProcessOutput> throws IOError
+
+  record ProcessOutput(exitCode: int, stdout: str, stderr: str)
+    pub fn isSuccess() → bool
+
+  // Convenience: run a shell command
+  fn process.run(command: str) → Result<ProcessOutput> throws IOError
+  fn process.shell(command: str) → Result<str> throws IOError   // stdout only
+
+  // Current process info
+  fn process.pid() → int
+  fn process.hostname() → str throws IOError
+  fn process.platform() → str    // "linux", "darwin", "windows"
+  fn process.arch() → str        // "x86_64", "arm64"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.13  std.time — Date, Time, and Duration
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: monotonic timestamps, wall-clock date/time, timezone-aware formatting.
+
+  record Instant      // opaque monotonic timestamp; not wall-clock
+    pub static fn now() → Instant
+    pub fn elapsed() → Duration    // time since this Instant was captured
+    pub fn -(other: Instant) → Duration
+
+  record Duration(nanos: int64)
+    pub static fn ns(n: int64) → Duration
+    pub static fn ms(n: int) → Duration
+    pub static fn s(n: int) → Duration
+    pub static fn minutes(n: int) → Duration
+    pub static fn hours(n: int) → Duration
+    pub fn toNs() → int64
+    pub fn toMs() → int64
+    pub fn toSeconds() → float
+    pub fn +(other: Duration) → Duration
+
+  record DateTime(year: int, month: int, day: int,
+                  hour: int, minute: int, second: int, nanosecond: int = 0,
+                  timezone: TimeZone = TimeZone.utc)
+    pub static fn now(tz: TimeZone = TimeZone.utc) → DateTime
+    pub static fn fromUnix(secs: int64, tz: TimeZone = TimeZone.utc) → DateTime
+    pub static fn parse(s: str, format: str) → Result<DateTime>
+    pub fn format(fmt: str) → str      // strftime-style format codes
+    pub fn toUnix() → int64
+    pub fn toInstant() → Instant
+    pub fn +(d: Duration) → DateTime
+    pub fn -(d: Duration) → DateTime
+
+  record TimeZone(id: str)
+    pub static let utc: TimeZone
+    pub static fn local() → TimeZone
+    pub static fn of(id: str) → Result<TimeZone>   // IANA tz id, e.g. "Europe/Oslo"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.14  std.log — Structured Logging
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: leveled, structured logging with swappable backends.
+
+  enum Level
+    Debug, Info, Warn, Error
+
+  // Global convenience functions (use the root logger)
+  fn log.debug(msg: str, fields: [str, any] = {})
+  fn log.info(msg: str, fields: [str, any] = {})
+  fn log.warn(msg: str, fields: [str, any] = {})
+  fn log.error(msg: str, fields: [str, any] = {})
+
+  // Named logger — scoped to a component or module
+  class Logger(name: str, level: Level = Level.Info)
+    pub fn debug(msg: str, fields: [str, any] = {})
+    pub fn info(msg: str, fields: [str, any] = {})
+    pub fn warn(msg: str, fields: [str, any] = {})
+    pub fn error(msg: str, fields: [str, any] = {})
+    pub fn withField(key: str, value: any) → Logger    // child logger with extra field
+
+  // Backend — implement to route log records to any sink
+  interface LogHandler
+    fn emit(level: Level, name: str, msg: str, fields: [str, any], at: Instant)
+
+  fn log.setHandler(h: LogHandler)    // replace the global handler (call at startup)
+  fn log.setLevel(level: Level)       // global minimum level filter
+
+  // Built-in handlers
+  fn log.consoleHandler(format: str = "text") → LogHandler  // "text" or "json"
+  fn log.fileHandler(path: str) → LogHandler throws IOError
+
+────────────────────────────────────────────────────────────────────────────────
+  5.15  std.crypto — Cryptographic Primitives
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: secure hashing, HMAC, secure random number generation.
+  Note: encryption and TLS live in std.net.tls (Phase 3 addition).
+
+  // Hash functions — return raw bytes
+  fn crypto.sha256(data: [byte]) → [byte]
+  fn crypto.sha512(data: [byte]) → [byte]
+  fn crypto.blake3(data: [byte]) → [byte]
+
+  // HMAC
+  enum HashFn   Sha256, Sha512, Blake3
+  fn crypto.hmac(key: [byte], data: [byte], hash: HashFn = HashFn.Sha256) → [byte]
+
+  // Secure random
+  fn crypto.randomBytes(n: int) → [byte]
+  fn crypto.randomInt(lo: int, hi: int) → int       // uniform in [lo, hi)
+  fn crypto.randomFloat() → float                    // uniform in [0.0, 1.0)
+
+  // Constant-time comparison — prevents timing side-channels
+  fn crypto.equal(a: [byte], b: [byte]) → bool
+
+────────────────────────────────────────────────────────────────────────────────
+  5.16  std.encoding — Base64, Hex, URL Encoding
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: encode/decode binary data to/from text representations.
+
+  // Base64 — standard and URL-safe variants
+  fn encoding.base64Encode(data: [byte]) → str
+  fn encoding.base64Decode(s: str) → Result<[byte]>
+  fn encoding.base64UrlEncode(data: [byte]) → str      // RFC 4648 §5 (no padding)
+  fn encoding.base64UrlDecode(s: str) → Result<[byte]>
+
+  // Hexadecimal
+  fn encoding.hexEncode(data: [byte]) → str          // lowercase hex
+  fn encoding.hexDecode(s: str) → Result<[byte]>
+
+  // URL percent-encoding
+  fn encoding.urlEncode(s: str) → str
+  fn encoding.urlDecode(s: str) → Result<str>
+  fn encoding.urlEncodeComponent(s: str) → str       // encodes '/' as well
+
+────────────────────────────────────────────────────────────────────────────────
+  5.17  std.net — TCP and UDP Networking
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: low-level TCP and UDP networking; std.net.http is built on top.
+
+  // TCP — client
+  async fn tcp.connect(host: str, port: int) → Result<TcpStream> throws IOError
+
+  class TcpStream
+    pub async fn read(buf: [byte]) → Result<int> throws IOError  // bytes read
+    pub async fn readExact(buf: [byte]) throws IOError
+    pub async fn write(data: [byte]) throws IOError
+    pub async fn flush() throws IOError
+    pub fn close()
+    pub let localAddr: str
+    pub let remoteAddr: str
+
+  // TCP — server
+  class TcpListener(addr: str, port: int)
+    pub static fn bind(addr: str, port: int) → Result<TcpListener> throws IOError
+    pub async fn accept() → Result<TcpStream> throws IOError
+    pub fn close()
+    pub let localAddr: str
+
+  // UDP
+  class UdpSocket
+    pub static fn bind(port: int = 0) → Result<UdpSocket> throws IOError
+    pub async fn sendTo(data: [byte], host: str, port: int) throws IOError
+    pub async fn recvFrom(buf: [byte]) → Result<(int, str, int)> throws IOError
+                                        // (bytesRead, remoteHost, remotePort)
+    pub fn close()
+
+────────────────────────────────────────────────────────────────────────────────
+  5.18  std.compress — Data Compression
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: compress and decompress byte arrays; used by std.net.http for
+  Content-Encoding and by std.fs for compressed file formats.
+
+  fn compress.gzip(data: [byte]) → [byte]
+  fn compress.gunzip(data: [byte]) → Result<[byte]>
+  fn compress.deflate(data: [byte]) → [byte]
+  fn compress.inflate(data: [byte]) → Result<[byte]>
+  fn compress.zstd(data: [byte], level: int = 3) → [byte]
+  fn compress.zstdDecompress(data: [byte]) → Result<[byte]>
+  fn compress.snappy(data: [byte]) → [byte]
+  fn compress.snappyDecompress(data: [byte]) → Result<[byte]>
+
+  // Streaming (for large data)
+  class GzipWriter(out: OutputStream)
+    pub fn write(data: [byte]) throws IOError
+    pub fn close() throws IOError
+
+  class GzipReader(in: InputStream)
+    pub fn read(buf: [byte]) → Result<int> throws IOError
+    pub fn close()
+
+────────────────────────────────────────────────────────────────────────────────
+  5.19  std.cli — Command-Line Argument Parsing
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: declarative CLI argument parsing with auto-generated help text.
+
+  class ArgParser(name: str, description: str = "", version: str? = nil)
+    pub fn flag(name: str, short: str? = nil, help: str = "") → ArgParser
+    pub fn option<T>(name: str, short: str? = nil, default: T? = nil,
+                     help: str = "", metavar: str? = nil) → ArgParser
+    pub fn positional<T>(name: str, help: str = "", required: bool = true) → ArgParser
+    pub fn subcommand(name: str, description: str = "") → ArgParser
+    pub fn parse(args: [str] = process.args()) → Result<Args>
+
+  class Args
+    pub fn flag(name: str) → bool
+    pub fn option<T>(name: str) → T?
+    pub fn positional<T>(index: int) → T?
+    pub fn subcommand() → str?             // which subcommand was invoked
+    pub fn remaining() → [str]             // args after --
+
+  // Example
+  fn main()
+    let p = ArgParser("mytool", "A demonstration tool")
+      .flag("verbose", short: "v", help: "enable verbose output")
+      .option<int>("count", short: "n", default: 1, help: "number of iterations")
+      .positional<str>("input", help: "input file path")
+
+    let args = p.parse().getOrThrow()
+    let verbose = args.flag("verbose")
+    let count = args.option<int>("count") ?? 1
+    let input = args.positional<str>(0)!
+
+────────────────────────────────────────────────────────────────────────────────
+  5.20  std.regex — Regular Expressions
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: compile and execute regular expression patterns against strings.
+
+  class Regex(pattern: str)
+    pub static fn compile(pattern: str) → Result<Regex>
+    pub fn matches(s: str) → bool                       // whole-string match
+    pub fn contains(s: str) → bool                      // any match in s
+    pub fn find(s: str) → Match?                        // first match
+    pub fn findAll(s: str) → [Match]                    // all non-overlapping
+    pub fn replace(s: str, replacement: str) → str      // first match only
+    pub fn replaceAll(s: str, replacement: str) → str   // $0 $1 in replacement
+    pub fn split(s: str) → [str]                        // split on each match
+
+  record Match
+    pub let value: str                // matched text
+    pub let start: int                // byte offset in source string
+    pub let end: int
+    pub fn group(index: int) → str?   // positional capture group (1-based)
+    pub fn group(name: str) → str?    // named capture group (?P<name>...)
+
+  // Convenience top-level functions (compile on every call — cache Regex for loops)
+  fn regex.matches(pattern: str, s: str) → bool
+  fn regex.find(pattern: str, s: str) → Match?
+  fn regex.replaceAll(pattern: str, s: str, replacement: str) → str
+
+  // Example
+  let email = Regex.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")?
+  let valid = email.matches("user@example.com")
+  let m = email.find("contact: user@example.com")?.value    // "user@example.com"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.21  std.rand — Pseudo-Random Number Generation
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: seedable PRNGs for simulations, tests, and non-security randomness.
+  For cryptographically secure random values use std.crypto.randomBytes.
+
+  // Global RNG — seeded from OS entropy at startup; thread-safe
+  fn rand.int(lo: int, hi: int) → int      // uniform in [lo, hi)
+  fn rand.float() → float                   // uniform in [0.0, 1.0)
+  fn rand.bool() → bool
+  fn rand.choice<T>(items: [T]) → T?        // nil if items is empty
+  fn rand.shuffle<T>(items: [T])            // Fisher-Yates, in-place
+  fn rand.sample<T>(items: [T], n: int) → [T]   // n distinct elements without replacement
+
+  // Seedable Rng — reproducible sequences (not thread-safe)
+  class Rng(seed: int64)
+    pub fn int(lo: int, hi: int) → int
+    pub fn float() → float
+    pub fn bool() → bool
+    pub fn choice<T>(items: [T]) → T?
+    pub fn shuffle<T>(items: [T])
+    pub fn bytes(n: int) → [byte]
+
+  // Algorithm: Xoshiro256** (fast, high quality, not suitable for cryptography)
+
+  // Example
+  let dice = Rng(seed: 42)
+  let rolls = [dice.int(1, 7) for _ in [0, 10[]    // reproducible 10-roll sequence
+  var deck = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+  rand.shuffle(deck)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.22  std.hash — Non-Cryptographic Hash Functions
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: fast, non-cryptographic hash functions for hash tables, checksums,
+  and data deduplication. For security-sensitive hashing use std.crypto.
+
+  // One-shot functions — return a 64-bit integer
+  fn hash.fnv64(data: [byte]) → int64
+  fn hash.fnv64str(s: str) → int64
+  fn hash.xxhash64(data: [byte], seed: int64 = 0) → int64
+  fn hash.siphash13(data: [byte], key0: int64, key1: int64) → int64
+  fn hash.crc32(data: [byte]) → int32       // IEEE polynomial
+
+  // Streaming hasher — incremental hashing
+  class Xxh64Hasher(seed: int64 = 0)
+    pub fn write(data: [byte])
+    pub fn writeStr(s: str)
+    pub fn writeInt(n: int64)
+    pub fn finish() → int64
+    pub fn reset()
+
+  // Hashable interface — built-in types implement this; define for custom types
+  interface Hashable
+    fn hashInto(h: Xxh64Hasher)
+
+  // Example
+  let h = Xxh64Hasher()
+  h.writeStr("hello")
+  h.writeStr("world")
+  let digest = h.finish()           // stable 64-bit hash
+
+  let checksum = hash.crc32(fileBytes)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.23  std.iter — Iterator Combinators
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: lazy sequence combinators that compose over any Iterable<T>.
+  All functions return Sequence<T> (lazy); call .toList() to materialise.
+
+  fn iter.zip<A, B>(a: Iterable<A>, b: Iterable<B>) → Sequence<(A, B)>
+  fn iter.zip3<A, B, C>(a: Iterable<A>, b: Iterable<B>, c: Iterable<C>)
+      → Sequence<(A, B, C)>
+  fn iter.enumerate<T>(items: Iterable<T>) → Sequence<(int, T)>
+  fn iter.chain<T>(seqs: [Iterable<T>]) → Sequence<T>       // concat sequences
+  fn iter.flatten<T>(nested: Iterable<Iterable<T>>) → Sequence<T>
+  fn iter.windows<T>(items: Iterable<T>, n: int) → Sequence<[T]>  // sliding window
+  fn iter.chunks<T>(items: Iterable<T>, n: int) → Sequence<[T]>   // non-overlapping
+  fn iter.stepBy<T>(items: Iterable<T>, step: int) → Sequence<T>
+  fn iter.interleave<T>(a: Iterable<T>, b: Iterable<T>) → Sequence<T>
+  fn iter.scan<T, S>(items: Iterable<T>, init: S, f: (S, T) → S) → Sequence<S>
+  fn iter.product<A, B>(a: Iterable<A>, b: Iterable<B>) → Sequence<(A, B)>
+  fn iter.repeat<T>(value: T) → Sequence<T>                 // infinite
+  fn iter.count(start: int = 0, step: int = 1) → Sequence<int>    // infinite counter
+  fn iter.cycle<T>(items: Iterable<T>) → Sequence<T>        // infinite cycle
+  fn iter.once<T>(value: T) → Sequence<T>                   // single-element sequence
+  fn iter.empty<T>() → Sequence<T>                          // zero-element sequence
+
+  // Example
+  let pairs = iter.zip([1, 2, 3], ["a", "b", "c"]).toList()
+  // → [(1, "a"), (2, "b"), (3, "c")]
+
+  let running = iter.scan([1, 2, 3, 4], 0, (acc, x) → acc + x).toList()
+  // → [1, 3, 6, 10]
+
+  for (i, val) in iter.enumerate(["a", "b", "c"])
+      print("{i}: {val}")
+
+────────────────────────────────────────────────────────────────────────────────
+  5.24  std.net.url — URL Parsing and Building
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: parse, build, and resolve URLs; encode/decode query strings.
+  Percent-encoding at the byte level lives in std.encoding; this module
+  handles full URL semantics (scheme, authority, path, query, fragment).
+
+  record Url
+    pub let scheme: str              // "https", "file", etc.
+    pub let host: str                // empty string if absent
+    pub let port: int?               // nil if not explicit
+    pub let path: str                // always starts with "/" for http(s)
+    pub let query: str?              // raw query string, without leading "?"
+    pub let fragment: str?           // without leading "#"
+    pub let userInfo: str?           // "user:pass" before @, if present
+
+    pub static fn parse(s: str) → Result<Url>
+    pub fn queryParams() → HashMap<str, [str]>     // values are lists (multi-value)
+    pub fn withPath(path: str) → Url
+    pub fn withQuery(params: HashMap<str, str>) → Url
+    pub fn withFragment(fragment: str) → Url
+    pub fn resolve(ref: str) → Result<Url>         // resolve a relative URL
+    pub fn authority() → str                        // "host:port" or "host"
+    pub fn str() → str                             // reconstruct full URL string
+
+  // Query encoding/decoding helpers
+  fn url.encodeQuery(params: HashMap<str, str>) → str          // "k=v&k2=v2"
+  fn url.encodeQueryMulti(params: HashMap<str, [str]>) → str   // multi-value
+  fn url.decodeQuery(s: str) → Result<HashMap<str, [str]>>
+  fn url.encodePath(segment: str) → str    // percent-encode a single path segment
+  fn url.decodePath(s: str) → Result<str>
+
+  // Example
+  let u = Url.parse("https://example.com:8080/api/users?page=2&limit=20#results")?
+  print(u.host)          // "example.com"
+  print(u.port)          // 8080
+  print(u.path)          // "/api/users"
+  print(u.queryParams()["page"])   // ["2"]
+
+  let next = u.withQuery({"page": "3", "limit": "20"})
+  print(next.str())      // "https://example.com:8080/api/users?page=3&limit=20"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.25  std.fmt — String and Number Formatting
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: printf-style formatting, number/table layout, human-readable sizes.
+  String interpolation ({val:.2f}) handles simple cases; std.fmt is for
+  programmatic or locale-aware formatting.
+
+  // Printf-style
+  fn fmt.sprintf(format: str, values: any...) → str
+  // format verbs: %d %i (int), %f %e %g (float), %s (str), %x %X (hex),
+  //               %o (octal), %b (binary), %c (char), %v (default), %q (quoted)
+  // width/precision: %8.2f   left-pad flag: %-8d   zero-pad: %08d
+
+  // Number formatting
+  fn fmt.int(n: int, base: int = 10,
+             width: int = 0, padChar: char = ' ', prefix: bool = false) → str
+  fn fmt.float(x: float, format: char = 'f', precision: int = 6,
+               width: int = 0, padChar: char = ' ') → str
+    // format: 'f' fixed-point, 'e' scientific, 'g' shortest, 'x' hex float
+
+  // Column / table layout
+  fn fmt.padLeft(s: str, width: int, pad: char = ' ') → str
+  fn fmt.padRight(s: str, width: int, pad: char = ' ') → str
+  fn fmt.center(s: str, width: int, pad: char = ' ') → str
+  fn fmt.truncate(s: str, maxLen: int, ellipsis: str = "...") → str
+  fn fmt.wrap(s: str, width: int) → [str]    // word-wrap into lines
+
+  // Human-readable sizes and durations
+  fn fmt.bytes(n: int64, si: bool = false) → str     // "1.43 MiB" or "1.50 MB"
+  fn fmt.duration(ns: int64) → str                    // "1h23m04s", "456ms", "1.2µs"
+  fn fmt.number(n: float, decimals: int = 2, sep: char = ',') → str  // "1,234.56"
+
+  // Example
+  print(fmt.sprintf("%-10s %8.2f", "price:", 3.14159))  // "price:         3.14"
+  print(fmt.bytes(1_500_000))                             // "1.43 MiB"
+  print(fmt.duration(90_061_000_000_000))                 // "25h01m01s"
+  print(fmt.number(1_234_567.89))                         // "1,234,567.89"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.26  std.uuid — UUID Generation and Parsing
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: generate and parse UUIDs. v4 for random identifiers; v7 for
+  time-ordered IDs suitable as database primary keys (sortable by creation time).
+
+  record UUID
+    pub static fn v4() → UUID              // random (uses std.crypto entropy)
+    pub static fn v7() → UUID              // time-ordered, monotonic within ms
+    pub static fn parse(s: str) → Result<UUID>
+    pub static let nil: UUID               // 00000000-0000-0000-0000-000000000000
+
+    pub fn str() → str                    // "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    pub fn bytes() → [byte]               // 16 bytes, big-endian
+    pub fn isNil() → bool
+    pub fn version() → int                // 4 or 7 (or 1/3/5 for parsed UUIDs)
+    pub fn == (other: UUID) → bool
+
+  // Example
+  let id = UUID.v4()
+  print(id.str())      // "f47ac10b-58cc-4372-a567-0e02b2c3d479" (random each run)
+
+  let rowId = UUID.v7()   // sortable — suitable for DB primary keys
+
+  let parsed = UUID.parse("f47ac10b-58cc-4372-a567-0e02b2c3d479")?
+  print(parsed.version())    // 4
+
+────────────────────────────────────────────────────────────────────────────────
+  5.27  std.bytes — Mutable Byte Buffer
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: efficient mutable byte buffer for building binary data, network
+  protocol frames, and serializers without intermediate allocations.
+
+  class ByteBuffer(capacity: int = 64)
+    pub fn write(data: [byte])
+    pub fn writeByte(b: byte)
+    pub fn writeStr(s: str)                  // UTF-8 bytes, no null terminator
+    pub fn writeInt8(n: int8)
+    pub fn writeInt16BE(n: int16)
+    pub fn writeInt32BE(n: int32)
+    pub fn writeInt64BE(n: int64)
+    pub fn writeInt16LE(n: int16)
+    pub fn writeInt32LE(n: int32)
+    pub fn writeInt64LE(n: int64)
+    pub fn writeFloat32BE(x: float32)
+    pub fn writeFloat64BE(x: float)
+    pub fn toBytes() → [byte]                // snapshot (copy)
+    pub fn str() → str                       // interpret contents as UTF-8
+    pub fn length → int
+    pub fn capacity → int
+    pub fn reset()                           // clear without reallocating
+
+  class ByteReader(data: [byte])
+    pub fn readByte() → Result<byte>
+    pub fn readBytes(n: int) → Result<[byte]>
+    pub fn readInt16BE() → Result<int16>
+    pub fn readInt32BE() → Result<int32>
+    pub fn readInt64BE() → Result<int64>
+    pub fn readInt16LE() → Result<int16>
+    pub fn readInt32LE() → Result<int32>
+    pub fn readInt64LE() → Result<int64>
+    pub fn readStr(n: int) → Result<str>     // read n bytes as UTF-8
+    pub fn remaining → int
+    pub fn position → int
+    pub fn seek(offset: int)                 // absolute byte offset
+
+  // Example — encode a simple binary frame
+  fn encodeFrame(msgType: int16, payload: [byte]) → [byte]
+      let buf = ByteBuffer()
+      buf.writeInt16BE(msgType)
+      buf.writeInt32BE(payload.length)
+      buf.write(payload)
+      → buf.toBytes()
+
+────────────────────────────────────────────────────────────────────────────────
+  5.28  std.sql — Database Abstraction Layer
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: driver-independent SQL interface (modelled on Go's database/sql).
+  Drivers are registered separately; a bundled SQLite driver is included.
+
+  interface Driver
+    fn open(dsn: str) → Result<Connection> throws IOError
+
+  interface Connection
+    async fn prepare(query: str) → Result<Statement> throws IOError
+    async fn execute(query: str, params: any...) → Result<ExecResult> throws IOError
+    async fn query(query: str, params: any...) → Result<Rows> throws IOError
+    async fn begin() → Result<Transaction> throws IOError
+    async fn ping() → Result<()> throws IOError
+    fn close() throws IOError
+
+  interface Transaction : Connection
+    async fn commit() throws IOError
+    async fn rollback() throws IOError
+
+  interface Statement
+    async fn execute(params: any...) → Result<ExecResult> throws IOError
+    async fn query(params: any...) → Result<Rows> throws IOError
+    fn close()
+
+  class Rows
+    pub fn next() → bool                           // advance; false when done
+    pub fn scan(columns: any&...) throws IOError   // populate vars from current row
+    pub fn columns() → [str]
+    pub fn close()
+
+  record ExecResult
+    pub let rowsAffected: int64
+    pub let lastInsertId: int64?
+
+  // Driver registration and connection
+  fn sql.register(name: str, driver: Driver)
+  async fn sql.open(driverName: str, dsn: str) → Result<Connection> throws IOError
+
+  // Bundled SQLite driver — import std.sql.sqlite to register it
+  // DSN: "file:path/to/db.sqlite" or ":memory:"
+
+  // Example
+  import std.sql.sqlite
+
+  async fn main()
+      let db = sql.open("sqlite", ":memory:")?
+      defer db.close()
+      db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")?
+      db.execute("INSERT INTO users VALUES (?, ?)", 1, "Alice")?
+      let rows = db.query("SELECT id, name FROM users")?
+      defer rows.close()
+      while rows.next()
+          var id: int; var name: str
+          rows.scan(&id, &name)?
+          print("{id}: {name}")
+
+────────────────────────────────────────────────────────────────────────────────
+  5.29  std.csv — CSV Parsing and Serialization
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: read and write CSV/TSV files with configurable delimiter and quoting.
+
+  class CsvReader(input: InputStream, sep: char = ',', quote: char = '"',
+                  skipEmpty: bool = false)
+    pub fn readRow() → [str]?                // nil on EOF; fields are unquoted
+    pub fn rows() → Sequence<[str]>          // lazy iteration
+    pub fn readAll() → [[str]]
+
+  class CsvWriter(out: OutputStream, sep: char = ',', quote: char = '"')
+    pub fn writeRow(fields: [str]) throws IOError
+    pub fn flush() throws IOError
+    pub fn close()
+
+  // Convenience — operate on strings
+  fn csv.parse(s: str, sep: char = ',') → [[str]]
+  fn csv.format(rows: [[str]], sep: char = ',') → str
+  fn csv.parseMap(s: str, sep: char = ',') → [HashMap<str, str>]
+    // first row is the header; subsequent rows become maps
+
+  // Example
+  let records = csv.parseMap("name,age\nAlice,30\nBob,25")
+  print(records[0]["name"])   // "Alice"
+  print(records[0]["age"])    // "30"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.30  std.xml — XML Parsing
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: DOM-style and SAX-style XML parsing; XML namespace support.
+
+  // DOM — parse whole document into memory
+  class XmlDocument
+    pub static fn parse(s: str) → Result<XmlDocument>
+    pub static fn parseBytes(data: [byte]) → Result<XmlDocument>
+    pub fn root() → XmlElement
+    pub fn str() → str                             // serialize back to XML
+
+  class XmlElement
+    pub let name: str                              // local name (no prefix)
+    pub let nsUri: str?                            // namespace URI, if any
+    pub let text: str?                             // direct text content
+    pub let attrs: HashMap<str, str>
+    pub fn children() → [XmlElement]
+    pub fn child(name: str) → XmlElement?          // first direct child by name
+    pub fn find(name: str) → [XmlElement]          // all descendants by name
+    pub fn attr(name: str) → str?
+
+  class XmlError(message: str, line: int, col: int) : Error
+
+  // SAX — event-driven, memory-efficient for large documents
+  interface XmlHandler
+    fn startElement(name: str, nsUri: str?, attrs: HashMap<str, str>)
+    fn endElement(name: str, nsUri: str?)
+    fn characters(text: str)
+    fn processingInstruction(target: str, data: str)
+
+  fn xml.parse(s: str, handler: XmlHandler) throws XmlError
+
+  // Example
+  let doc = XmlDocument.parse(r"""
+    <catalog>
+      <book id="1"><title>Nordvest Primer</title></book>
+      <book id="2"><title>Advanced Systems</title></book>
+    </catalog>
+  """)?
+  for book in doc.root().find("book")
+      print("{book.attr("id")}: {book.child("title")?.text ?? ""}")
+
+────────────────────────────────────────────────────────────────────────────────
+  5.31  std.toml — TOML Configuration Files
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: parse and serialize TOML v1.0; primary format for nv.pkg project files.
+
+  fn toml.parse(s: str) → Result<TomlTable>
+  fn toml.parseFile(path: str) → Result<TomlTable> throws IOError
+  fn toml.encode(table: TomlTable) → str
+
+  sealed class TomlValue
+    Str(value: str)
+    Int(value: int64)
+    Float(value: float)
+    Bool(value: bool)
+    DateTime(value: time.DateTime)
+    LocalDate(year: int, month: int, day: int)
+    Array(items: [TomlValue])
+    Table(map: HashMap<str, TomlValue>)
+
+  type TomlTable = HashMap<str, TomlValue>
+
+  extend TomlValue
+    fn str() → str?
+    fn int() → int64?
+    fn float() → float?
+    fn bool() → bool?
+    fn array() → [TomlValue]?
+    fn table() → TomlTable?
+    fn [](key: str) → TomlValue?     // shorthand into Table variant
+    fn [](i: int) → TomlValue?       // shorthand into Array variant
+
+  // Example
+  let pkg = toml.parseFile("nv.pkg")?
+  let name    = pkg["package"]?["name"]?.str() ?? "unnamed"
+  let version = pkg["package"]?["version"]?.str() ?? "0.0.0"
+  let deps    = pkg["dependencies"]?.table() ?? {}
+
+────────────────────────────────────────────────────────────────────────────────
+  5.32  std.unicode — Unicode Properties and Normalization
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: Unicode character properties, normalization, and grapheme cluster
+  iteration for correct handling of multi-codepoint characters (e.g. emoji).
+
+  // Character properties
+  fn unicode.isLetter(c: char) → bool
+  fn unicode.isDigit(c: char) → bool
+  fn unicode.isAlphanumeric(c: char) → bool
+  fn unicode.isSpace(c: char) → bool
+  fn unicode.isUpper(c: char) → bool
+  fn unicode.isLower(c: char) → bool
+  fn unicode.isPunct(c: char) → bool
+  fn unicode.toUpper(c: char) → char
+  fn unicode.toLower(c: char) → char
+  fn unicode.category(c: char) → UnicodeCategory
+  fn unicode.name(c: char) → str?        // e.g. "LATIN SMALL LETTER A"
+  fn unicode.fromCodePoint(cp: int) → char?
+
+  // Normalization (Unicode Standard Annex #15)
+  enum NormForm   NFC, NFD, NFKC, NFKD
+  fn unicode.normalize(s: str, form: NormForm = NormForm.NFC) → str
+  fn unicode.isNormalized(s: str, form: NormForm) → bool
+
+  // Grapheme clusters — iterate user-perceived characters (emoji-correct)
+  fn unicode.graphemes(s: str) → Sequence<str>
+  fn unicode.graphemeLen(s: str) → int     // cluster count, not bytes or chars
+
+  // Codepoint iteration
+  fn unicode.codePoints(s: str) → Sequence<int>
+
+  enum UnicodeCategory
+    UppercaseLetter, LowercaseLetter, TitlecaseLetter, ModifierLetter, OtherLetter
+    NonspacingMark, SpacingMark, EnclosingMark
+    DecimalNumber, LetterNumber, OtherNumber
+    ConnectorPunct, DashPunct, OpenPunct, ClosePunct, OtherPunct
+    MathSymbol, CurrencySymbol, OtherSymbol
+    Space, Control, Format, Unassigned
+
+  // Example
+  let flag = "🇺🇸"
+  print(flag.length)                    // 8 bytes
+  print(unicode.graphemeLen(flag))      // 1 cluster
+  for g in unicode.graphemes("café")
+      print(g)    // "c", "a", "f", "é" (é as single NFC cluster)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.33  std.bignum — Arbitrary-Precision Arithmetic
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: exact arithmetic on integers and decimals of arbitrary size.
+  BigInt for number theory and cryptographic math; Decimal for finance.
+
+  class BigInt
+    pub static fn from(n: int64) → BigInt
+    pub static fn parse(s: str, base: int = 10) → Result<BigInt>
+    pub static let zero: BigInt
+    pub static let one: BigInt
+
+    pub fn +(other: BigInt) → BigInt
+    pub fn -(other: BigInt) → BigInt
+    pub fn *(other: BigInt) → BigInt
+    pub fn ÷(other: BigInt) → BigInt              // truncating division
+    pub fn %(other: BigInt) → BigInt
+    pub fn ^(exp: int) → BigInt                   // integer exponentiation
+    pub fn negate() → BigInt
+    pub fn abs() → BigInt
+    pub fn gcd(other: BigInt) → BigInt
+    pub fn lcm(other: BigInt) → BigInt
+    pub fn isPrime() → bool                       // Miller-Rabin probabilistic
+    pub fn bits() → int                           // number of bits required
+    pub fn toInt() → int?                         // nil if overflows int64
+    pub fn str(base: int = 10) → str
+    pub fn == (other: BigInt) → bool
+    pub fn < (other: BigInt) → bool
+
+  class Decimal
+    pub static fn from(n: int64) → Decimal
+    pub static fn fromFloat(x: float) → Decimal  // may be inexact
+    pub static fn parse(s: str) → Result<Decimal>
+
+    pub fn +(other: Decimal) → Decimal
+    pub fn -(other: Decimal) → Decimal
+    pub fn *(other: Decimal) → Decimal
+    pub fn ÷(other: Decimal) → Decimal
+    pub fn round(places: int, mode: RoundMode = RoundMode.HalfEven) → Decimal
+    pub fn scale() → int                         // digits after decimal point
+    pub fn str() → str
+    pub fn toFloat() → float
+    pub fn == (other: Decimal) → bool
+    pub fn < (other: Decimal) → bool
+
+  enum RoundMode   HalfUp, HalfDown, HalfEven, Floor, Ceiling, Truncate
+
+  // Example
+  let n = BigInt.parse("999999999999999999999999999999")?
+  print((n * BigInt.from(2)).str())   // "1999999999999999999999999999998"
+
+  let price = Decimal.parse("19.99")?
+  let total = (price * Decimal.parse("1.08")?).round(2)
+  print(total.str())     // "21.59"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.34  std.archive — ZIP and TAR Archives
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: read and write ZIP and TAR archives. Built on std.compress streams.
+
+  // ZIP — read
+  class ZipReader
+    pub static fn open(path: str) → Result<ZipReader> throws IOError
+    pub fn entries() → [ZipEntry]
+    pub fn read(name: str) → Result<[byte]> throws IOError
+    pub fn stream(name: str) → Result<InputStream> throws IOError
+    pub fn close()
+
+  record ZipEntry
+    pub let name: str
+    pub let size: int64
+    pub let compressedSize: int64
+    pub let modTime: time.DateTime
+    pub let isDir: bool
+
+  // ZIP — write
+  class ZipWriter
+    pub static fn create(path: str) → Result<ZipWriter> throws IOError
+    pub fn add(name: str, data: [byte], level: int = 6) throws IOError
+    pub fn addFile(name: str, srcPath: str) throws IOError
+    pub fn addDir(name: str) throws IOError
+    pub fn close() throws IOError
+
+  // TAR — read
+  class TarReader(stream: InputStream)
+    pub fn entries() → Sequence<TarEntry> throws IOError
+
+  record TarEntry
+    pub let name: str
+    pub let size: int64
+    pub let mode: int
+    pub let modTime: time.DateTime
+    pub let isDir: bool
+    pub fn read() → [byte] throws IOError
+
+  // TAR — write
+  class TarWriter(stream: OutputStream)
+    pub fn add(name: str, data: [byte], mode: int = 0o644,
+               modTime: time.DateTime? = nil) throws IOError
+    pub fn close() throws IOError
+
+  // Example
+  let zip = ZipReader.open("package.zip")?
+  defer zip.close()
+  for entry in zip.entries()
+      print("{entry.name} ({entry.size} bytes)")
+      if !entry.isDir
+          let data = zip.read(entry.name)?
+
+────────────────────────────────────────────────────────────────────────────────
+  5.35  std.html — HTML Parsing and Sanitization
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: parse HTML5, query with CSS selectors, sanitize user content.
+
+  // Parsing — error-tolerant HTML5 parser
+  class HtmlDocument
+    pub static fn parse(s: str) → HtmlDocument
+    pub fn querySelector(selector: str) → HtmlElement?
+    pub fn querySelectorAll(selector: str) → [HtmlElement]
+    pub fn title() → str?
+    pub fn head() → HtmlElement?
+    pub fn body() → HtmlElement?
+
+  class HtmlElement
+    pub let tag: str
+    pub let attrs: HashMap<str, str>
+    pub fn textContent() → str              // all descendant text, tags stripped
+    pub fn innerHtml() → str
+    pub fn outerHtml() → str
+    pub fn children() → [HtmlElement]
+    pub fn parent() → HtmlElement?
+    pub fn querySelector(selector: str) → HtmlElement?
+    pub fn querySelectorAll(selector: str) → [HtmlElement]
+    pub fn attr(name: str) → str?
+    pub fn hasClass(name: str) → bool
+    pub fn id() → str?
+
+  // CSS selector support: tag, .class, #id, [attr], [attr=val], >, space, +, ~
+  // Pseudo-classes: :first-child, :last-child, :nth-child(n), :not(sel)
+
+  // Sanitization
+  class Sanitizer(allowedTags: [str]? = nil, allowedAttrs: [str]? = nil)
+    pub fn sanitize(s: str) → str
+
+  fn html.sanitize(s: str) → str          // default safe allowlist
+  fn html.escape(s: str) → str            // & → &amp;  < → &lt;  etc.
+  fn html.unescape(s: str) → str
+
+  // Example
+  let doc = HtmlDocument.parse("<ul><li>one</li><li>two</li></ul>")
+  for li in doc.querySelectorAll("li")
+      print(li.textContent())   // "one", "two"
+
+  let safe = html.sanitize("<b>Hello</b><script>alert(1)</script>")
+  // → "<b>Hello</b>"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.36  std.stats — Descriptive Statistics
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: basic descriptive statistics over numeric sequences.
+  For heavy numerical computing use a dedicated package.
+
+  // All functions accept any Iterable<float>
+  fn stats.mean(data: Iterable<float>) → float
+  fn stats.median(data: Iterable<float>) → float
+  fn stats.mode(data: Iterable<float>) → [float]          // may be multimodal
+  fn stats.variance(data: Iterable<float>, ddof: int = 0) → float  // ddof=1 → sample
+  fn stats.stddev(data: Iterable<float>, ddof: int = 0) → float
+  fn stats.sum(data: Iterable<float>) → float
+  fn stats.min(data: Iterable<float>) → float
+  fn stats.max(data: Iterable<float>) → float
+  fn stats.range(data: Iterable<float>) → float            // max - min
+  fn stats.percentile(data: Iterable<float>, p: float) → float    // p in [0, 100]
+  fn stats.quantile(data: Iterable<float>, q: float) → float      // q in [0.0, 1.0]
+  fn stats.iqr(data: Iterable<float>) → float              // interquartile range
+  fn stats.geometricMean(data: Iterable<float>) → float
+  fn stats.harmonicMean(data: Iterable<float>) → float
+
+  // Correlation
+  fn stats.covariance(x: Iterable<float>, y: Iterable<float>) → float
+  fn stats.correlation(x: Iterable<float>, y: Iterable<float>) → float  // Pearson r
+  fn stats.spearman(x: Iterable<float>, y: Iterable<float>) → float     // rank-based
+
+  // Distribution
+  fn stats.histogram(data: Iterable<float>, bins: int) → [(float, float, int)]
+    // list of (lo, hi, count) per bin; bins are equal-width
+
+  // Example
+  let scores = [88.0, 72.0, 95.0, 60.0, 85.0, 90.0]
+  print(stats.mean(scores))             // 81.67
+  print(stats.stddev(scores, ddof: 1))  // 12.53
+  print(stats.percentile(scores, 90))   // 93.5
+
+────────────────────────────────────────────────────────────────────────────────
+  5.37  std.mime — MIME Type Detection
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: resolve MIME types from file extensions or magic bytes; parse
+  Content-Type headers.
+
+  fn mime.fromExtension(ext: str) → str?        // ".html" → "text/html"
+  fn mime.fromPath(path: str) → str?            // infers from file name
+  fn mime.fromBytes(data: [byte]) → str?        // magic-byte sniffing (first 512 B)
+  fn mime.extension(mimeType: str) → str?       // "image/png" → ".png"
+  fn mime.extensions(mimeType: str) → [str]     // all known extensions for type
+  fn mime.isText(mimeType: str) → bool
+  fn mime.isBinary(mimeType: str) → bool
+
+  // Content-Type header parsing
+  // "text/html; charset=UTF-8" → ("text/html", {"charset": "UTF-8"})
+  fn mime.parse(s: str) → Result<(str, HashMap<str, str>)>
+  fn mime.format(type: str, params: HashMap<str, str> = {}) → str
+  fn mime.charset(contentType: str) → str?      // extract charset param
+
+  // Example
+  print(mime.fromExtension(".json"))    // "application/json"
+  let (type, params) = mime.parse("text/html; charset=UTF-8")?
+  print(type)                           // "text/html"
+  print(params["charset"])              // "UTF-8"
+
+────────────────────────────────────────────────────────────────────────────────
+  5.38  std.signal — OS Signal Handling
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: register handlers for POSIX signals; integrates with the async
+  runtime so signal delivery is safe relative to channel and async operations.
+
+  enum Signal
+    Interrupt    // SIGINT  — Ctrl-C
+    Terminate    // SIGTERM — graceful shutdown request
+    Hangup       // SIGHUP  — terminal closed / config reload convention
+    User1        // SIGUSR1
+    User2        // SIGUSR2
+    Alarm        // SIGALRM — timer
+    Pipe         // SIGPIPE — broken pipe (default: ignore)
+    Child        // SIGCHLD — child process state change
+
+  // Callback-style
+  fn signal.handle(sig: Signal, handler: () → ())
+  fn signal.reset(sig: Signal)     // restore default disposition
+  fn signal.ignore(sig: Signal)    // SIG_IGN
+
+  // Channel-style — preferred in async code; close channel to stop delivery
+  fn signal.channel(sigs: [Signal]) → Channel<Signal>
+
+  // Example — graceful shutdown
+  async fn main()
+      let srv = startServer()
+      let sigs = signal.channel([Signal.Interrupt, Signal.Terminate])
+      let sig = await sigs.receive()
+      print("Received {sig}, shutting down...")
+      srv.shutdown()
+
+────────────────────────────────────────────────────────────────────────────────
+  5.39  std.template — Text Templating
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: text templating engine for code generation, HTML responses, and
+  the nv new project scaffolding tool. No auto-escaping — use HtmlTemplate
+  for HTML output.
+
+  class Template
+    pub static fn parse(text: str) → Result<Template>
+    pub static fn parseFile(path: str) → Result<Template> throws IOError
+    pub fn render(data: any) → Result<str>       // data: record or HashMap
+    pub fn renderTo(out: OutputStream, data: any) throws TemplateError
+
+  // Template syntax:
+  //   {{ expr }}                — interpolate expression (toString called)
+  //   {{ expr | filter }}       — apply filter: upper, lower, trim, escape, etc.
+  //   {%- if cond -%}           — conditional; - trims adjacent whitespace
+  //   {% else if cond %}
+  //   {% else %}  {% end %}
+  //   {% for x in items %}...{% end %}
+  //   {% for x, i in items %}...{% end %}   — with index
+  //   {% include "partial.tmpl" %}
+  //   {# comment #}             — template comment; not rendered
+
+  // HTML-safe variant — auto-escapes {{ expressions }} using html.escape
+  class HtmlTemplate : Template
+
+  class TemplateError(message: str, line: int) : Error
+
+  // Example
+  let tmpl = Template.parse(r"""
+  Hello, {{ name }}!
+  Scores: {% for s in scores %}{{ s }} {% end %}
+  """)?
+  print(tmpl.render({"name": "Alice", "scores": [90, 85, 92]})??)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.40  std.debug — Diagnostics and Profiling
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: stack traces, memory stats, simple profiling, and debug assertions.
+  Profiling helpers and debug assertions are stripped in --release builds.
+
+  // Stack traces
+  fn debug.stackTrace() → [StackFrame]
+  fn debug.printStackTrace(skip: int = 0)     // to stderr
+
+  record StackFrame
+    pub let file: str
+    pub let line: int
+    pub let column: int
+    pub let function: str
+    pub let module: str
+
+  // Memory diagnostics
+  fn debug.heapUsed() → int64            // bytes currently live on the heap
+  fn debug.heapTotal() → int64           // total bytes ever allocated
+  fn debug.gc()                          // hint to collect garbage
+
+  // Timing
+  class Timer
+    pub static fn start() → Timer
+    pub fn elapsed() → time.Duration     // time since start
+    pub fn lap() → time.Duration         // time since last lap (or start)
+    pub fn reset()
+
+  fn debug.bench(f: () → (), iterations: int = 1000) → time.Duration  // mean
+
+  // Debug assertions — stripped in --release builds
+  fn debug.assert(cond: bool, msg: str = "assertion failed")
+  fn debug.assertEq<T: Printable>(a: T, b: T)
+  fn debug.assertNe<T: Printable>(a: T, b: T)
+  fn debug.unreachable(msg: str = "unreachable code reached") → Nothing
+
+  // Example
+  fn measured()
+      let t = debug.Timer.start()
+      expensiveWork()
+      print("elapsed: {t.elapsed()}")
+
+  debug.assert(users.length > 0, "expected at least one user")
+  debug.assertEq(result, expected)
+
+────────────────────────────────────────────────────────────────────────────────
+  5.41  std.config — Configuration System
+────────────────────────────────────────────────────────────────────────────────
+
+  Purpose: type-safe configuration binding from TOML files and environment
+  variables, with profile support, optional hot-reload, and compile-time
+  binding generation via the @config and @env annotations.
+
+  Source priority (highest wins):
+    1. Environment variables
+    2. CLI overrides   (--config.<key>=<val> passed to the program)
+    3. config.local.toml   (local developer overrides; gitignored by nv new)
+    4. config.{profile}.toml  (e.g. config.prod.toml, config.test.toml)
+    5. config.toml             (project defaults; committed to source control)
+    6. Struct field defaults   (code-level fallback)
+
+  Profile activation:
+    - NV_ENV environment variable (NV_ENV=prod)
+    - --env=<profile> CLI flag passed to nv run / nv build
+
+  Key-name normalisation:
+    Sources use different naming conventions; the binding layer normalises all
+    three forms to the same logical key before merging:
+      TOML key:     snake_case or kebab-case  (max_conns, max-conns)
+      Env var:      UPPER_SNAKE_CASE          (DATABASE_MAX_CONNS)
+      Struct field: camelCase                 (maxConns)
+
+  ── ConfigLoader ──────────────────────────────────────────────────────────────
+
+  class ConfigLoader
+    pub static fn default() → ConfigLoader
+        // Standard stack: config.toml → config.{NV_ENV}.toml →
+        // config.local.toml → env vars
+    pub fn fromFile(path: str) → ConfigLoader
+    pub fn fromEnv(prefix: str? = nil) → ConfigLoader
+    pub fn fromArgs(args: [str]) → ConfigLoader    // --key=val pairs
+    pub fn withProfile(name: str) → ConfigLoader
+    pub fn withDefaults(table: [str: ConfigValue]) → ConfigLoader
+    pub fn load() throws IOError → Result<Config>
+
+  ── Config ────────────────────────────────────────────────────────────────────
+
+  class Config
+    pub fn [](key: str) → ConfigValue?       // dot-path: cfg["server.port"]
+    pub fn bind<T>(prefix: str = "") → Result<T>
+        // Calls T.load(from: self) — generated by @config.
+        // Calls validate() on the bound value if the method exists.
+    pub fn merge(other: Config) → Config     // self wins on conflicts
+    pub fn profile() → str?                  // active profile name
+    pub fn onReload(handler: fn(Config) → ())
+        // Registers a callback fired when any watched source file changes.
+        // Only active for fields annotated @config(reload: true).
+
+  ── ConfigValue ───────────────────────────────────────────────────────────────
+
+  sealed class ConfigValue
+    Str(value: str)
+    Int(value: int64)
+    Float(value: float64)
+    Bool(value: bool)
+    Duration(value: time.Duration)   // parsed from "30s", "1m30s", "500ms"
+    Array(items: [ConfigValue])
+    Table(entries: [str: ConfigValue])
+
+  extend ConfigValue
+    pub fn str()      → str?
+    pub fn int()      → int64?
+    pub fn float()    → float64?
+    pub fn bool()     → bool?
+    pub fn duration() → time.Duration?
+    pub fn [](key: str) → ConfigValue?   // subscript into Table variant
+    pub fn [](i: int)   → ConfigValue?   // subscript into Array variant
+
+  ── ConfigError ───────────────────────────────────────────────────────────────
+
+  sealed class ConfigError
+    MissingField(path: str)
+    TypeMismatch(path: str, expected: str, got: str)
+    ParseError(source: str, message: str)
+    ValidationFailed(message: str)
+
+  ── @config annotation ────────────────────────────────────────────────────────
+
+  Syntax:  @config("prefix")
+           @config("prefix", reload: true)
+
+  Applied to struct, record, or class. At compile time, generates:
+    - static fn load(from cfg: Config) → Result<T>
+      Extracts each field from the subtree at "prefix", applies type coercion,
+      uses struct field defaults when keys are absent, and returns
+      Err(ConfigError.missingField(path)) for required fields that are missing.
+    - If T defines fn validate() → Result<()>, load() calls it after binding.
+
+  reload: true — the ConfigLoader watches the source files for changes and
+  fires onReload callbacks. The struct itself is immutable per-snapshot; callers
+  must hold a var binding and reassign on reload.
+
+  ── @env field annotation ─────────────────────────────────────────────────────
+
+  Syntax:  @env("VAR_NAME")
+           @env("VAR_NAME", sensitive: true)
+
+  Applies to a constructor parameter inside a @config struct. Binds the named
+  environment variable to the field; the env var wins over the TOML file value
+  (consistent with overall priority order).
+
+  sensitive: true — the value is masked as "***" in:
+    - @derive(Show) output
+    - std.log formatted output
+    - debug.stackTrace() variable dumps
+  The compiler enforces this; leaking the value requires an explicit .value cast.
+
+  Auto-derived env name (when @env is absent):
+    UPPER_SNAKE(prefix) + "_" + UPPER_SNAKE(fieldName)
+    e.g.  @config("database") + maxConns  →  DATABASE_MAX_CONNS
+
+  ── Example ───────────────────────────────────────────────────────────────────
+
+  import std.config
+
+  @config("server")
+  struct ServerConfig(
+      host:    str      = "0.0.0.0",
+      port:    int      = 8080,
+      timeout: Duration = Duration.seconds(30),
+      tls:     bool     = false
+  )
+      fn validate() → Result<()>
+          if self.tls and self.port == 80
+              → Err(ConfigError.validationFailed("TLS enabled but port is 80"))
+          → Ok(())
+
+  @config("database")
+  struct DatabaseConfig(
+      @env("DATABASE_URL")
+      url: str,
+
+      @env("DB_MAX_CONNECTIONS")
+      maxConns: int = 20,
+
+      @env("DB_PASSWORD", sensitive: true)
+      password: str? = nil
+  )
+
+  fn main() throws
+      let cfg    = ConfigLoader.default().load()?
+      let server = cfg.bind<ServerConfig>()?
+      let db     = cfg.bind<DatabaseConfig>()?
+      print("Listening on {server.host}:{server.port}")
+      startServer(server, db)
+
+
+================================================================================
+  6. TOOLING — THE nv CLI
+================================================================================
+
+The "nv" binary is the single entry point for all language tooling. It is
+written in Kotlin for the bootstrap (Phase 1), then rewritten in Nordvest
+during Phase 4.
+
+────────────────────────────────────────────────────────────────────────────────
+  6.1  nv run — Compile and Execute
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv run [options] <file.nv> [-- <program args>]
+
+  Behavior:
+    - Compiles <file.nv> and all transitive imports to a temporary binary.
+    - Executes the binary, passing any arguments after -- to the program.
+    - The temporary binary is cached by content hash; re-running an unchanged
+      file does not recompile.
+
+  Options:
+    --release           Enable optimizations (LLVM -O2). Default: debug mode.
+    --target <triple>   Cross-compile target (e.g. aarch64-linux-gnu).
+    --gpu-target <t>    GPU backend: cuda | metal | vulkan. Default: auto-detect.
+    --no-cache          Force recompile.
+    --verbose           Print compilation steps.
+    --emit-llvm         Print LLVM IR to stdout and exit (don't compile to binary).
+
+────────────────────────────────────────────────────────────────────────────────
+  6.2  nv build — Compile to Binary
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv build [options] <file.nv>
+
+  Behavior:
+    - Compiles to a native binary (default output name: stem of input file).
+    - Equivalent to nv run --no-exec but places output in the current directory.
+
+  Options:
+    -o <output>         Output binary name.
+    --release           Optimized build (-O2, strip debug info).
+    --debug             Debug build with DWARF info and sanitizers.
+    --target <triple>   Cross-compile.
+    --gpu-target <t>    GPU backend.
+    --static            Statically link the runtime.
+    --emit-llvm         Emit .ll file instead of binary.
+    --emit-asm          Emit .s assembly instead of binary.
+    --lib               Compile as a shared library (.so / .dylib / .dll).
+
+────────────────────────────────────────────────────────────────────────────────
+  6.3  nv test — Run Tests
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv test [options] [<path>]
+
+  Behavior:
+    - Discovers all files matching *_test.nv and any .nv file containing @test
+      annotations in <path> (default: current directory, recursive).
+    - Compiles all test functions into a single test binary.
+    - Runs the binary; reports pass/fail/skip per test.
+
+  Options:
+    --filter <pattern>  Run only tests whose name matches pattern (glob or regex).
+    --format <fmt>      Output format: tap (default), junit, json, pretty.
+    --bench             Also run @bench benchmarks; report ns/op.
+    --timeout <ms>      Timeout per test (default: 5000 ms).
+    --parallel <n>      Run tests in parallel with n workers (default: 1).
+    --coverage          Generate coverage report (lcov format).
+    --no-fail-fast      Continue running after first failure.
+
+────────────────────────────────────────────────────────────────────────────────
+  6.4  nv fmt — Format Source Code
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv fmt [options] [<file.nv>...]
+
+  Behavior:
+    - Reformats each file in place (or to stdout with --stdout).
+    - If no files are given, formats all .nv files in the current directory
+      recursively.
+    - Exits with code 0 if no changes were made; code 1 otherwise (useful for
+      CI "format check" step with --check).
+
+  Style rules enforced:
+    - 4-space indentation, no tabs.
+    - Prefer Unicode operators: → over ->, ≠ over !=, ≤ over <=, ≥ over >=,
+      ∧ over &&, ∨ over ||, ¬ over !, ÷ for integer division,
+      ⊕ over xor. (Override with --ascii to keep ASCII forms.)
+    - No ternary operator (?:) — use inline if/then/else instead.
+    - One blank line between top-level declarations.
+    - Two blank lines between sections delimited by ─── comments.
+    - Trailing whitespace removed.
+    - Align consecutive let/var declarations when they share context.
+    - Normalize string quote style (always double-quoted).
+    - Long lines wrapped at 100 columns.
+
+  Options:
+    --check             Dry run; exit 1 if any file would change.
+    --stdout            Write formatted output to stdout, not in place.
+    --ascii             Use ASCII operator aliases (->  !=  <=  etc.).
+    --diff              Show unified diff of changes instead of rewriting.
+
+────────────────────────────────────────────────────────────────────────────────
+  6.5  nv doc — Generate Documentation
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv doc [options] [<path>]
+
+  Behavior:
+    - Scans all .nv source files for /** doc comments */ attached to pub
+      declarations.
+    - Generates an HTML (or Markdown) documentation site.
+    - Supports @param, @returns, @throws, @example tags inside doc comments.
+    - Cross-links types and functions automatically.
+
+  Output structure (generated into ./docs/ by default):
+    index.html        Module index
+    <module>.html     Per-module page with all pub declarations
+    search.js         Client-side search index
+
+  Options:
+    -o <dir>          Output directory (default: ./docs/).
+    --format <fmt>    html (default) | markdown | json (machine-readable).
+    --include-private Include non-pub declarations.
+    --base-url <url>  For hosted docs (affects links).
+
+────────────────────────────────────────────────────────────────────────────────
+  6.6  nv pkg — Package Manager
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv pkg <subcommand> [options]
+
+  Philosophy:
+    - Packages are Git repositories (content-addressed by tag/commit SHA).
+    - No central registry required; any Git URL works.
+    - An optional public registry (pkg.nordvest.dev) provides discoverability.
+    - Lock files (nv.lock) ensure reproducible builds.
+    - Semantic versioning (semver) for version constraints.
+
+  Package manifest file: nv.pkg (TOML-like key-value format)
+
+    name    = "myapp"
+    version = "1.0.0"
+    authors = ["Alice <alice@example.com>"]
+    license = "MIT"
+
+    [deps]
+    "github.com/someone/mylib" = "^1.2.0"
+    "github.com/other/utils"   = "0.5.1"
+
+    [dev-deps]
+    "github.com/someone/testutils" = "*"
+
+    # Optional feature flags — enable with nv build --feature ssl
+    [features]
+    ssl = ["github.com/someone/tls@^1.0.0"]
+    gpu = []
+
+    # Platform-conditional dependencies
+    [target.linux.deps]
+    "github.com/someone/epoll-utils" = "^0.3.0"
+
+    [target.darwin.deps]
+    "github.com/someone/kqueue-utils" = "^0.3.0"
+
+    [target.windows.deps]
+    "github.com/someone/iocp-utils" = "^0.2.0"
+
+  Subcommands:
+
+    nv pkg init                    Create a new nv.pkg in the current directory.
+    nv pkg add <url[@version]>     Add a dependency and update nv.lock.
+    nv pkg remove <name>           Remove a dependency.
+    nv pkg install                 Fetch and build all dependencies.
+    nv pkg update [<name>]         Update one or all deps to latest matching version.
+    nv pkg list                    List installed packages and their versions.
+    nv pkg search <query>          Search the public registry.
+    nv pkg publish                 Tag and publish the current package to the registry.
+    nv pkg audit                   Check for known security advisories.
+    nv pkg vendor                  Copy all resolved deps into vendor/ for offline /
+                                   air-gapped builds. vendor/ takes precedence over
+                                   the cache when present. Commit vendor/ to pin deps.
+    nv pkg sign                    Sign the current package with the author's key via
+                                   Sigstore (transparency log). nv pkg install verifies
+                                   signatures when the registry provides them.
+
+  Dependency resolution:
+    - Uses a SAT-based resolver (PubGrub algorithm) for conflict detection.
+    - All transitive deps are recorded in nv.lock with exact SHA references.
+    - nv.lock must be committed to version control for application projects.
+    - Library projects should not commit nv.lock (so users get fresh resolution).
+    - Platform-conditional deps ([target.X.deps]) are resolved only for the
+      current platform unless cross-compiling (nv build --target).
+    - Feature deps ([features]) are opt-in; resolved only when the feature is
+      explicitly enabled via nv build --feature <name>.
+
+  Workspace support:
+    - A workspace root nv.pkg with a [workspace] section lists member packages.
+    - nv build / nv test at the workspace root builds/tests all members.
+    - Shared deps are deduplicated across workspace members.
+
+────────────────────────────────────────────────────────────────────────────────
+  6.7  nv new — Project Scaffolding (Phase 3 addition)
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv new [--lib] <project-name>
+
+  Behavior:
+    - Creates <project-name>/ directory with:
+        main.nv         (or lib.nv for --lib)
+        nv.pkg
+        tests/main_test.nv
+        .gitignore
+
+  Templates:
+    --lib               Library project (no main fn, module declaration).
+    --bin               Executable project (default).
+    --gpu               GPU compute project (adds @gpu example).
+    --http              HTTP service project (adds std.net.http example).
+
+
+================================================================================
+  SUMMARY: MILESTONE SCHEDULE
+================================================================================
+
+  Milestone  Phase  Deliverable
+  ─────────  ─────  ────────────────────────────────────────────────────────
+  M0         0      Repo, build system, grammar skeleton, CI
+  M1         1      All 27 EXAMPLE.txt sections compile and run; nv run/build/fmt
+  M2         2      Async/await, GPU, C interop, lazy sequences, associated types,
+                    conditional compilation, full stdlib v1 (incl. std.time/log/
+                    crypto/encoding/net/compress/cli), nv test/doc/pkg
+  M3         3      LSP, formatter, package registry, VS Code & IntelliJ plugins (Tier 1)
+  M4         4      Self-hosting compiler; IntelliJ Tier 2 PSI plugin; debugger
+
+
+================================================================================
+  APPENDIX: KEY DESIGN DECISIONS TO REVISIT POST-v1
+================================================================================
+
+  A.  Memory management strategy
+      Current plan: reference counting (RC) with cycle detection via a
+      background thread (like Swift/Python). Revisit: ownership types
+      (Rust-style borrow checker) once the language is self-hosted and can
+      bear the complexity of the type system extension.
+
+  B.  Compile-time metaprogramming
+      Chapter 17's @derive/@builder/@newtype/@lazy/by system is the v1
+      answer for the common structural-boilerplate cases. Post-v1, a user-
+      extensible macro system (hygienic, type-checked) would allow library
+      authors to define their own derive traits and code-gen annotations.
+      Defer until self-hosting so the macro expander can be written in
+      Nordvest. The std.json @Json annotation is a bridge case: implemented
+      as a compiler-known annotation in v1, replaceable by a user macro
+      once the macro system lands.
+
+  C.  Ownership and ptr<T> safety
+      Currently ptr<T> is "always unsafe". A future region/lifetime system
+      could allow safe raw pointers in restricted contexts. Keep the unsafe
+      keyword as a marker even in v1 so the audit trail is clear.
+
+  D.  Operator overloading scope
+      Currently: +, -, *, /, %, ^, ==, <, >, <=, >= inside class bodies.
+      Revisit: custom infix operators (Haskell-style) — defer to post-v1 to
+      avoid parsing complexity during the bootstrap phase.
+
+  E.  Package registry governance
+      A public registry requires spam prevention, namespace squatting policy,
+      and DMCA compliance. Design this carefully in Phase 3 before launch;
+      do not rush it.
+
+  F.  WASM target
+      A WebAssembly backend (via LLVM's wasm32-unknown-unknown target) would
+      enable browser-side Nordvest and the "Try Nordvest" playground. The LLVM
+      backend makes this relatively cheap to add in Phase 3.
+
+  G.  Integer-division token ambiguity
+      The two-slash // sequence creates a lexer ambiguity with line comments.
+      Resolution: ÷ (U+00F7) is the sole integer-division token.
+      // is ALWAYS a line comment in Nordvest, with no exceptions.
+      There is no // integer-division operator.
+
+  H.  ? disambiguation
+      The ? character has exactly two uses: nullable type modifier (T?) and
+      Result propagation (expr?). There is no ternary operator — use inline
+      if/then/else instead. This eliminates the three-way disambiguation
+      complexity entirely. The two remaining uses are structurally distinct:
+      T? appears in type position; expr? appears as a postfix on an expression.
+
+  I.  Raw / multi-line strings
+      r"..." is a raw string literal: no escape processing, no interpolation.
+      Backslashes are literal; braces {} are literal. For multi-line raw strings,
+      r"""...""" uses triple double-quotes; the leading newline after the opening
+      """ is stripped, and indentation is stripped to the level of the closing
+      """. These are Phase 1 features (see A.4).
+
+  J.  Operator overloading scope (extended)
+      Bitwise operators &, |, ⊕ are now user-overloadable alongside arithmetic
+      operators. The full set inside class bodies: +, -, *, /, ÷, %, ^, &, |,
+      ⊕, ==, <, >, ≤, ≥. Revisit: compound operators (&=, |=, ⊕=, <<=, >>=)
+      are auto-derived from their base forms (a &= b  →  a = a & b).
+
+================================================================================
+  7. IDE PLUGINS (VS CODE & INTELLIJ)
+================================================================================
+
+Both plugins ship as separate repositories under the nordvest-lang GitHub organisation:
+  nordvest-lang/nv-vscode       — VS Code extension (TypeScript)
+  nordvest-lang/nv-intellij     — IntelliJ Platform plugin (Kotlin)
+
+They share the nv-lsp server (Section 3.2) as their semantic backend; the
+plugins themselves only add editor-native UX that LSP cannot express.
+
+────────────────────────────────────────────────────────────────────────────────
+  7.1  VS CODE EXTENSION
+────────────────────────────────────────────────────────────────────────────────
+
+Repository:  nordvest-lang/nv-vscode
+Language:    TypeScript (vscode extension API + vscode-languageclient)
+Marketplace: publish to VS Code Marketplace under publisher "nordvest-lang"
+Phase:       initial release in Phase 3; polish in Phase 4
+
+  7.1.1  File type & syntax highlighting
+         - Register the .nv file extension and "nordvest" language ID.
+         - Ship a TextMate grammar (syntaxes/nordvest.tmLanguage.json) for
+           offline highlighting (used when nv-lsp is not running, and in
+           GitHub/GitLab diffs via the Linguist grammar).
+         - TextMate scope map:
+             keyword.control.nv       fn if else match for while return guard
+             keyword.other.nv         let var import module pub extend sealed by
+             keyword.annotation.nv    @derive @builder @newtype @lazy @if @else
+                                      @gpu @extern @CLayout @asm @bytes @c @cpp
+             storage.type.nv          int float bool str byte char int64 float32
+             constant.language.nv     true false nil π e ∞
+             constant.numeric.nv      integer and float literals, _ separators
+             string.quoted.double.nv  "…" including {interpolation} spans
+             variable.language.nv     self
+             punctuation.arrow.nv     → ->
+             keyword.operator.math.nv ∀ ∃ ∑ ∏ ∈ ∧ ∨ ¬ ≤ ≥ ≠
+             comment.line.nv          //
+             comment.block.nv         /* */  /** */
+         - Bracket pairs: () [] [[]] {} — enables auto-close and rainbow brackets.
+         - Indentation rules: increaseIndentPattern after fn/class/if/else/match
+           etc. (no trailing colon needed; indentation is structural).
+
+  7.1.2  LSP client integration
+         - Use vscode-languageclient to launch nv-lsp as a child process.
+         - Locate nv-lsp via: (1) nv-lsp in PATH, (2) extension-bundled binary
+           (platform-specific vsix), (3) user-configured path in settings.
+         - Restart server command via command palette: "Nordvest: Restart Server".
+         - Status bar item shows server state (starting / ready / error) and
+           the Nordvest version in use.
+
+  7.1.3  Unicode input helper
+         Nordvest's mathematical operators are Unicode characters that cannot be
+         typed on a standard keyboard. The extension provides two input methods:
+
+         a) Backslash escape sequences (default, like LaTeX):
+              \forall  →  ∀       \exists  →  ∃       \sum     →  ∑
+              \prod    →  ∏       \in      →  ∈       \and     →  ∧
+              \or      →  ∨       \not     →  ¬       \leq     →  ≤
+              \geq     →  ≥       \neq     →  ≠       \pi      →  π
+              \inf     →  ∞       \->      →  →       \e       →  e (math e)
+            Triggered on space or operator character after a recognized sequence.
+
+         b) Completion items: typing the ASCII alternative (e.g. >=, !=, ->)
+            offers a completion that inserts the Unicode form. Acceptance is
+            optional — ASCII alternatives remain valid Nordvest.
+
+  7.1.4  Editor integrations
+         - Format on save (delegates to nv-lsp / nv fmt).
+         - Run current file: keybinding (Ctrl+F5 / Cmd+F5) triggers
+           "nv run ${file}" in the integrated terminal.
+         - Problem matcher for nv output errors so they appear in the Problems
+           panel and inline in the editor gutter.
+         - Tasks: auto-generate tasks.json entries for nv build, nv test, nv run.
+         - Snippets: fn, class, record, sealed, match, if let, guard let, for,
+           while, import, module, Result, async fn — available via snippet prefix.
+
+  7.1.5  Release & packaging
+         - Platform-specific vsix bundles include pre-built nv-lsp binaries for
+           linux-x64, linux-arm64, darwin-arm64, darwin-x64, win32-x64.
+         - A universal vsix (without bundled binary) is published for users who
+           install nv separately.
+         - Versioning: extension version tracks Nordvest language version
+           (e.g. extension 0.3.x supports language spec 0.3).
+
+────────────────────────────────────────────────────────────────────────────────
+  7.2  INTELLIJ PLATFORM PLUGIN
+────────────────────────────────────────────────────────────────────────────────
+
+Repository:  nordvest-lang/nv-intellij
+Language:    Kotlin (IntelliJ Platform SDK + Gradle IntelliJ Plugin)
+Marketplace: JetBrains Marketplace under "Nordvest"
+Target IDEs: IntelliJ IDEA (Community & Ultimate), CLion, PyCharm, all other
+             JetBrains IDEs via the shared IntelliJ Platform
+Phase:       initial release Phase 3; PSI-full implementation Phase 4
+
+  Implementation approach — two-tier:
+
+  Tier 1 (Phase 3, ships with M3): LSP4IJ backend
+    Use the LSP4IJ open-source IntelliJ LSP client library to wire nv-lsp into
+    IntelliJ. This gives diagnostics, completion, go-to-definition, hover,
+    formatting, and rename with low implementation cost. Combine with a hand-
+    written lexer for syntax highlighting (LSP semantic tokens are available
+    but too slow for keystroke-level highlighting in IntelliJ).
+
+  Tier 2 (Phase 4): full PSI plugin
+    Replace LSP4IJ with a native IntelliJ PSI (Program Structure Interface)
+    implementation. This enables the deeper integrations only PSI can provide
+    (structural search & replace, extract refactoring, intention actions,
+    cross-project find usages, debugger). Keep nv-lsp as the type-checking
+    source of truth; the PSI layer parses and indexes structure without
+    repeating type inference.
+
+  7.2.1  File type and language registration
+         - Register NordvestFileType (.nv, icon: nordvest-lang logo) and
+           NordvestLanguage (ID: "Nordvest").
+         - Associate .nv with the Nordvest language in IntelliJ's file type
+           settings; users can override if needed.
+
+  7.2.2  Lexer and syntax highlighting
+         - Write a hand-rolled IntelliJ Lexer (implementing com.intellij.lexer.Lexer
+           directly, not via JFlex, to keep Unicode operator handling explicit).
+         - Token types cover the same scopes as the VS Code TextMate grammar.
+         - The SyntaxHighlighter maps token types to TextAttributesKey values;
+           the default scheme mirrors IntelliJ's built-in Kotlin scheme so that
+           Nordvest looks at home in the IDE without extra configuration.
+         - Color scheme settings page: "Editor → Colors → Nordvest" lets users
+           customize per-token colors.
+         - Brace/bracket matching: (), [], [[]], {} pairs including the
+           asymmetric range delimiters [ and ] used in range notation.
+
+  7.2.3  PSI tree (Tier 2)
+         - Define PsiElementTypes and IElementTypes for every AST node.
+         - Implement a PsiParser backed by the same recursive-descent logic as
+           the compiler parser (ported to Kotlin PSI stubs). The compiler and
+           IDE share the same grammar productions to prevent drift.
+         - Stub index: index top-level declarations (fn, class, record, sealed,
+           interface, module) for fast workspace-wide symbol lookup without
+           parsing every file.
+
+  7.2.4  Completion (Tier 2)
+         - CompletionContributor: provides keyword completions, top-level
+           symbol completions from the stub index, and member completions from
+           the resolved type of the receiver expression.
+         - Unicode operator completions: type \forall, get ∀ inserted. Same
+           backslash-escape table as the VS Code extension.
+         - Smart completion (Ctrl+Shift+Space): filters completions to types
+           compatible with the expected type at the caret.
+
+  7.2.5  Inspections and quick-fixes
+         - "Redundant nullable" — T? in a context that can never be nil.
+         - "Missing match case" — offer to add the missing sealed variants.
+         - "Replace -> with →" (and vice-versa with a project-level setting).
+         - "Convert ASCII operator to Unicode" — >=, !=, -> → ≥, ≠, →.
+         - "Introduce variable" refactoring (extract subexpression to let).
+         - "Add ? propagation" — wrap a Result call site with ?.
+
+  7.2.6  Run configurations
+         - NordvestRunConfigurationType: "nv run <file>" with working directory,
+           environment variables, and program arguments fields.
+         - NordvestTestRunConfigurationType: "nv test [filter]" with test name
+           filter and output options.
+         - Run gutter icons next to fn main() and fn test*() functions.
+
+  7.2.7  nv tool integration
+         - Detect nv binary via PATH or a project-level SDK setting
+           (Settings → Languages & Frameworks → Nordvest SDK).
+         - "Download and install" action in the SDK settings opens the official
+           download page or uses a bundled installer script.
+         - File watcher: invoke "nv fmt" on save (configurable; off by default).
+         - Build tool window: parse nv build output and populate the "Problems"
+           tool window with file-linked errors.
+
+  7.2.8  Debugger (Phase 4 stretch)
+         - Nordvest emits DWARF debug info via LLVM; CLion and IntelliJ with
+           the Native Debugging Support plugin can attach to nv-built binaries.
+         - A NordvestDebugProcess adapts IntelliJ's XDebugger to the DWARF
+           symbol data, enabling breakpoints, step-through, and variable
+           inspection in .nv source files.
+
+────────────────────────────────────────────────────────────────────────────────
+  7.3  SHARED ASSETS & GOVERNANCE
+────────────────────────────────────────────────────────────────────────────────
+
+  7.3.1  Shared TextMate / tmLanguage grammar
+         The same nordvest.tmLanguage.json is used by the VS Code extension,
+         the Linguist grammar (GitHub syntax highlighting), and as a reference
+         for the IntelliJ syntax highlighter. It lives in a separate repository
+         nordvest-lang/nv-textmate-grammar, published to the TextMate / Linguist
+         grammar registries, and consumed as a submodule/package by both plugins.
+
+  7.3.2  Icon and branding
+         The .nv file icon, language logo, and color palette are defined once in
+         nordvest-lang/nv-assets. Both plugins import from there to keep branding
+         consistent across editors and the documentation site.
+
+  7.3.3  Versioning and compatibility
+         - Plugin versions track language spec versions (semver minor = language
+           minor; patch = plugin-only fixes).
+         - Each plugin declares a minimum nv-lsp version and a minimum IDE
+           version it supports. Older nv-lsp versions degrade gracefully (missing
+           extended LSP features are silently skipped).
+
+  7.3.4  Testing strategy
+         - VS Code: Jest + @vscode/test-electron for extension tests; a headless
+           VS Code instance runs integration tests against a synthetic .nv
+           workspace.
+         - IntelliJ: the IntelliJ Platform Test Framework (LightPlatformTestCase /
+           CodeInsightTestFixture) drives parser, highlighter, completion, and
+           inspection tests against known .nv files.
+         - Both use the same golden .nv test corpus as the compiler test suite
+           (from tests/ in the main repo) to prevent grammar drift.
+
+================================================================================
+  END OF PLAN
+================================================================================

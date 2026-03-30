@@ -1,0 +1,7 @@
+// Hello World — Nordvest language
+// From EXAMPLE.txt section 1
+
+module examples.hello
+
+fn main()
+    print("Hello, World!")

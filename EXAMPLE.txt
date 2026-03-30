@@ -1,0 +1,2522 @@
+================================================================================
+  NORDVEST LANGUAGE — DESIGN & EXAMPLES
+================================================================================
+
+Nordvest is a statically typed, compiled language with clean indentation-based syntax.
+It draws from Python (whitespace, expressiveness), Java (OOP, type safety),
+Go (simplicity, tuples, tooling), Kotlin (null safety, conciseness), and adds
+first-class mathematical notation.
+
+The single tool "nv" handles everything:
+
+    nv run main.nv          # compile + run
+    nv build main.nv        # compile to native binary
+    nv test                 # run tests
+    nv fmt main.nv          # format source
+
+
+────────────────────────────────────────────────────────────────────────────────
+  1. HELLO WORLD
+────────────────────────────────────────────────────────────────────────────────
+
+fn main()
+    print("Hello, world!")
+
+
+────────────────────────────────────────────────────────────────────────────────
+  2. VARIABLES & TYPES
+────────────────────────────────────────────────────────────────────────────────
+
+fn main()
+    // Immutable binding (preferred) — type is inferred
+    let name = "Alice"
+    let age  = 30
+    let pi   = 3.14159
+
+    // Mutable variable — explicit type optional
+    var count: int = 0
+    var label: str
+
+    count = count + 1
+    label = "step {count}"      // string interpolation with { }
+
+    // Basic types: int  float  bool  str  byte  char
+    let big:  int64 = 1_000_000
+    let tiny: float = 1.5e-3
+    let flag: bool  = true
+
+    // Type alias — transparent (structural) alias; Meters and float are interchangeable.
+    // For a nominal wrapper type (distinct from float), use a single-field struct.
+    type Meters = float
+    let dist: Meters = 42.0
+
+
+────────────────────────────────────────────────────────────────────────────────
+  3. FUNCTIONS & TUPLES
+────────────────────────────────────────────────────────────────────────────────
+
+// → may be used in place of -> everywhere (return type and return statement)
+// When the return type can be inferred, it may be omitted entirely.
+
+// Explicit return type with →
+fn square(x: float) → float
+    → x * x                          // → expr  is a return statement
+
+// Return type inferred from the → expression — no annotation needed
+fn cube(x: float)
+    → x^3
+
+// Traditional return also works; → and return are interchangeable
+fn abs(x: float) → float
+    if x < 0.0
+        return -x
+    return x
+
+// Multiple return values (tuple)
+fn minmax(values: [int]) → (int, int)
+    → values.min(), values.max()
+
+// Named tuple return — documents intent
+fn divmod(a: int, b: int) → (quotient: int, remainder: int)
+    → a / b, a % b
+
+// Destructuring at call site
+(lo, hi)  = minmax([3, 1, 4, 1, 5, 9, 2, 6])
+(q, r)    = divmod(17, 5)
+(_, rest) = divmod(100, 7)    // _ discards a value
+
+// Default parameters
+fn greet(name: str, greeting: str = "Hello")
+    → "{greeting}, {name}!"
+
+// Named arguments — specify parameter names at the call site.
+// Allows skipping optional parameters and reordering for clarity.
+fn connect(host: str, port: int = 8080, timeout: int = 30, secure: bool = false)
+    ...
+
+connect("db.local")                               // use all defaults
+connect("db.local", port: 5432)                   // override just port
+connect("db.local", secure: true, port: 443)      // named args can reorder
+connect("db.local", 5432, timeout: 60)            // positional first, then named
+// connect("db.local", port: 5432, true)          // ✗  cannot return to positional after named
+
+// Named arguments can always be used even without defaults, for clarity:
+greet(greeting: "Hi", name: "Alice")
+
+// Nullable parameters — T? with an explicit nil default makes a param fully optional.
+// The caller may omit it entirely; nil is the absent-value sentinel.
+fn log(message: str, level: str? = nil, tag: str? = nil)
+    let l = level ?? "INFO"
+    print("[{l}] {message}")
+
+log("server started")                             // level = nil  →  "INFO", tag omitted
+log("retrying", level: "WARN")                    // tag still nil
+log("upload done", tag: "io", level: "DEBUG")     // named args, any order
+
+// Variadic
+fn sum(values: int...) → int
+    var total = 0
+    for v in values
+        total += v
+    → total
+
+// First-class functions — fn(params) → ReturnType is the function type
+let transform: fn(int) → int       = square                   // assign named fn
+let compare:   fn(int, int) → bool = (a, b) → a < b           // multi-param lambda
+let callback:  fn() → ()           = () → print("done")       // void function type
+
+// Lambda forms
+let double  = x → x * 2                    // single param — no parens needed
+let add     = (x, y) → x + y               // multi-param — parens required
+let noArgs  = () → print("hi")             // zero params
+
+// Parameter types are inferred from context; explicit annotation is allowed:
+let stringify: fn(int) → str = x → "{x}"
+
+// Higher-order functions
+let result = [1, 2, 3, 4].map(x → x * 2)
+let sorted = pairs.sortWith((a, b) → a.first < b.first)
+
+// Trailing lambda — when the last argument is a lambda it may be written
+// outside the parentheses using { }; parens may be omitted entirely when
+// the lambda is the only argument.
+let evens = [1, 2, 3, 4, 5].filter { x → x % 2 == 0 }
+pairs.sortWith { (a, b) → a.first < b.first }
+
+// Multi-line trailing lambda — closing } ends the lambda body
+items.forEach { item →
+    print(item.name)
+    total += item.price
+}
+
+// No currying or partial application — |> with _ covers composition:
+//   raw |> filter(_, x → x > 0) |> map(_, x → x * 2)
+
+// Inline if expression — if/then/else on one line for conditional values.
+// The `then` keyword distinguishes inline form from the statement form.
+fn signum(x: float) → int
+    → if x > 0.0 then 1 else if x < 0.0 then -1 else 0
+
+let abs = x → if x < 0.0 then -x else x   // works in lambdas too
+
+// Power operator ^, and built-in constants π, e, ∞
+fn circleArea(r: float)
+    → π * r^2
+
+// Pipeline operator |> — passes left-hand value as first argument to right
+// Enables left-to-right composition of free functions and method calls
+fn normalize(values: [float]) → [float]
+    let m = values.max()
+    → values.map(x → x / m)
+
+fn process(raw: [float]) → [float]
+    → raw
+        |> filter(_, x → x > 0.0)   // _ is the positional hole for the piped value
+        |> normalize
+        |> map(_, x → x.round(4))
+
+// Equivalent without pipeline:
+//   map(normalize(filter(raw, x → x > 0.0)), x → x.round(4))
+
+
+────────────────────────────────────────────────────────────────────────────────
+  4. CLASSES & INTERFACES
+────────────────────────────────────────────────────────────────────────────────
+
+interface Shape
+    fn area()      → float
+    fn perimeter() → float
+    fn describe()  → str       // default implementation allowed
+        → "Shape with area {self.area():.2f}"
+
+// Primary constructor — fields declared on the class line, init generated automatically
+class Point(x: float, y: float)
+    fn distance(other: Point) → float
+        let dx = self.x - other.x
+        let dy = self.y - other.y
+        → (dx^2 + dy^2).sqrt()
+
+    fn str() → str             // toString equivalent
+        → "({self.x}, {self.y})"
+
+
+class Circle(center: Point, radius: float = 1.0) : Shape
+    fn area()      → π * self.radius^2
+    fn perimeter() → 2.0 * π * self.radius
+
+
+class Rectangle(topLeft: Point, bottomRight: Point) : Shape
+    fn width()  → (self.bottomRight.x - self.topLeft.x).abs()
+    fn height() → (self.bottomRight.y - self.topLeft.y).abs()
+
+    fn area()      → self.width() * self.height()
+    fn perimeter() → 2.0 * (self.width() + self.height())
+
+
+// When a constructor needs custom logic, write an explicit init block
+// Note: init has no return type and no fn keyword — it is not a method
+class Square(topLeft: Point, side: float) : Rectangle
+    init
+        super.init(topLeft, Point(topLeft.x + side, topLeft.y - side))
+
+
+// ─── Named arguments with constructors ──────────────────────────────────────
+// Named arguments work uniformly for functions and constructors.
+
+let c1 = Circle(center: Point(0.0, 0.0), radius: 3.0)
+let c2 = Circle(radius: 2.5, center: Point(1.0, 1.0))  // reordered
+let c3 = Circle(Point(0.0, 0.0))                        // radius uses default 1.0
+
+
+// ─── Class body fields vs constructor parameters ─────────────────────────────
+//
+// Primary constructor params  → constructor arguments; callers supply them.
+//                               Annotate with = default to make them optional.
+// Body field declarations     → per-instance initializers, NOT constructor args.
+//                               Every new instance starts with the declared value.
+//                               Run before the init block (or auto-init) executes.
+//
+// Use body fields for mutable state that always starts the same way.
+// Use constructor params when the value comes from the caller.
+
+class HttpClient(baseUrl: str, timeout: int = 30)
+    headers: [str: str] = [:]    // every new instance starts with an empty map
+    retries: int = 3             // every new instance starts with retries = 3
+
+fn main()
+    let client = HttpClient("https://api.example.com")
+    client.retries = 5            // body fields are mutable (var semantics) unless declared let
+    let fast = HttpClient("https://cdn.example.com", timeout: 5)
+
+
+// Usage
+fn printShapeInfo(s: Shape)
+    print("Area: {s.area():.4f}  Perimeter: {s.perimeter():.4f}")
+    print(s.describe())
+
+fn main()
+    let c = Circle(Point(0.0, 0.0), 5.0)
+    let r = Rectangle(Point(0.0, 4.0), Point(6.0, 0.0))
+    printShapeInfo(c)
+    printShapeInfo(r)
+
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+// Simple named constants — cases with no associated data
+
+enum Direction
+    North, South, East, West
+
+enum Suit
+    Clubs, Diamonds, Hearts, Spades
+
+// Enums with raw values
+enum HttpStatus: int
+    Ok = 200, NotFound = 404, ServerError = 500
+
+// Match on enum is exhaustive
+fn describe(d: Direction) → str
+    match d
+        North: → "heading north"
+        South: → "heading south"
+        East:  → "heading east"
+        West:  → "heading west"
+
+// For cases with associated data, use sealed (see section 8)
+
+
+// ─── Records ─────────────────────────────────────────────────────────────────
+// Immutable data type — auto-generates ==, str(), and hash()
+// Identical to class(fields) but signals "pure data, no behavior"
+
+record Color(r: int, g: int, b: int)
+record Coordinate(lat: float, lon: float)
+
+fn main()
+    let red = Color(255, 0, 0)
+    let blue = Color(0, 0, 255)
+    print(red == blue)    // false
+    print(red)            // Color(r: 255, g: 0, b: 0)
+
+
+// ─── Structs (value types) ───────────────────────────────────────────────────
+// struct is a stack-allocated value type with copy semantics.
+// Prefer struct for small, performance-sensitive data (Vec2, Color, Rect).
+// No inheritance; no reference counting; copied on assignment.
+//
+// struct vs record vs class:
+//   struct   value type — stack-allocated, copied on assignment, mutable fields
+//   record   immutable reference type — heap-allocated, auto ==/str()/hash()
+//   class    mutable reference type — heap-allocated, reference counted
+
+struct Vec2(x: float, y: float)
+    fn length() → (self.x^2 + self.y^2).sqrt()
+    fn +(other: Vec2) → Vec2
+        → Vec2(self.x + other.x, self.y + other.y)
+
+fn main()
+    var a = Vec2(1.0, 2.0)
+    var b = a             // b is an independent copy
+    b.x = 10.0
+    print(a.x)            // 1.0 — a is unchanged
+
+
+// ─── Weak and unowned references ─────────────────────────────────────────────
+// Reference cycles between classes cause memory leaks under reference counting.
+// Break cycles with weak or unowned references.
+//
+// weak var x: T?     — does not keep the referent alive; becomes nil when freed
+// unowned let x: T   — non-nil; crashes if accessed after the referent is freed
+//
+// Rule of thumb: parent holds strong references to children; children hold
+// weak references back to their parent.
+
+class TreeNode(value: int)
+    var children: [TreeNode] = []
+    weak var parent: TreeNode? = nil    // weak — breaks parent↔child cycle
+
+    fn addChild(child: TreeNode)
+        child.parent = self
+        self.children.append(child)
+
+// unowned — when the referenced object is guaranteed to outlive the reference
+class Account(name: str)
+    unowned let bank: Bank          // account cannot outlive its bank
+
+class Bank(name: str)
+    var accounts: [Account] = []
+
+
+────────────────────────────────────────────────────────────────────────────────
+  5. NULL SAFETY
+────────────────────────────────────────────────────────────────────────────────
+
+// Nullable type — suffix ?
+fn findUser(id: int) → User?
+    // returns nil if not found
+    ...
+
+fn main()
+    let user: User? = findUser(42)
+
+    // Safe navigation — short-circuits to nil if any step is nil
+    let city = user?.address?.city
+
+    // Null-coalescing — provide a default
+    let displayName = user?.name ?? "Guest"
+
+    // Forced unwrap — crashes if nil (use sparingly)
+    let name = user!.name
+
+    // if let — enters block only if non-nil; binding scoped to the block
+    if let u = findUser(42)
+        print("Welcome, {u.name}!")   // u is non-nullable here
+    else
+        print("User not found")
+
+    // Chained if let — all bindings must succeed to enter
+    if let u = findUser(42), let city = u.address?.city
+        print("User is in {city}")
+
+    // guard let — early return pattern (binding remains in scope after)
+    guard let u = user else
+        print("User not found")
+        return
+
+    // u is non-nullable from here on
+    print("Welcome, {u.name}!")
+
+    // Nullable method chaining
+    let len = user?.name?.length() ?? 0
+
+
+────────────────────────────────────────────────────────────────────────────────
+  6. ARRAYS, MATRICES & RANGE NOTATION
+────────────────────────────────────────────────────────────────────────────────
+
+// 1D array — zero-indexed
+let primes: [int]   = [2, 3, 5, 7, 11]
+let first           = primes[0]
+let last            = primes[primes.length - 1]
+
+// 2D matrix — A[row, col]
+let M: [[float]] = [
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0],
+    [7.0, 8.0, 9.0],
+]
+let center = M[1, 1]    // 5.0
+
+// Range notation mirrors mathematical interval notation:
+//   [a, b]   closed interval — both endpoints included      a ≤ i ≤ b
+//   ]a, b[   open interval   — both endpoints excluded      a < i < b
+//   [a, b[   half-open       — left included, right excluded  a ≤ i < b  (most common)
+//   ]a, b]   half-open       — left excluded, right included  a < i ≤ b
+
+let n = 8
+
+for i in [0, n[         // 0, 1, 2, …, n-1  (standard array traversal)
+    print(primes[i])
+
+for i in [1, n]         // 1, 2, 3, …, n    (inclusive both ends)
+    print("row {i}")
+
+for i in ]0, n[         // 1, 2, 3, …, n-1  (strictly interior)
+    M[i, 0] = M[i-1, 0] + M[i+1, 0]
+
+// Iterate collection directly
+for p in primes
+    print(p)
+
+// Enumerate with index
+for (i, p) in primes.enumerate()
+    print("{i}: {p}")
+
+// Slices — same interval notation
+let middle = primes[1, 4[   // elements at index 1, 2, 3
+
+// Matrix row/column slices
+let row1   = M[1, *]        // entire row 1
+let col2   = M[*, 2]        // entire column 2
+
+// List comprehensions
+let squares = [x^2    for x in [1, 10]]          // 1, 4, 9, …, 100
+let evens   = [x      for x in primes if x % 2 == 0]
+let grid    = [i + j  for i in [0, 3[, j in [0, 3[]  // nested
+
+// While loop
+var x = 1.0
+while x < 1000.0
+    x *= 2.0
+
+
+────────────────────────────────────────────────────────────────────────────────
+  7. MATHEMATICAL NOTATION
+────────────────────────────────────────────────────────────────────────────────
+
+// ∀ (for all) — true if predicate holds for every element
+// ∈ is interchangeable with "in" throughout
+fn allPositive(values: [float])
+    → ∀ x ∈ values: x > 0.0
+
+// ∃ (exists) — true if predicate holds for at least one element
+fn hasNegative(values: [float])
+    → ∃ x ∈ values: x < 0.0
+
+// ∑ (sum) — sum of an expression over a collection
+// ∏ (product) — product of an expression over a collection
+fn sumOfSquares(values: [float]) → float
+    → ∑ x ∈ values: x^2
+
+fn factorial(n: int) → int
+    → ∏ k ∈ [1, n]: k
+
+// Inline usage
+fn variance(values: [float], μ: float) → float
+    → (∑ x ∈ values: (x - μ)^2) / values.length
+
+// ∑ and ∏ also accept a bare iterable (no binding) for direct summation
+fn total(values: [float]) → float   → ∑ values
+fn product(values: [float]) → float → ∏ values
+
+// ∧ (logical and)  ∨ (logical or)  ¬ (logical not)
+fn isValidAge(age: int)   → age ≥ 0 ∧ age ≤ 150
+fn isWeekend(day: str)    → day == "Saturday" ∨ day == "Sunday"
+fn isNotEmpty(s: str)     → ¬s.isEmpty()
+
+// Chaining — precedence: ¬ > ∧ > ∨  (same as classical logic)
+fn inRange(x: float, lo: float, hi: float) → x ≥ lo ∧ x ≤ hi
+
+fn isValid(x: float, values: [float])
+    → ¬x.isNaN() ∧ (∃ v ∈ values: v == x)
+
+// ─── Quantifier loop form ────────────────────────────────────────────────────
+//
+// ∀, ∃, ∑, ∏ all use the same colon (:) syntax for the body expression:
+//
+//   ∀ x ∈ col: pred       boolean — true if pred holds for all x
+//   ∃ x ∈ col: pred       boolean — true if pred holds for some x
+//   ∑ x ∈ col: expr       numeric — sum of expr for each x
+//   ∏ x ∈ col: expr       numeric — product of expr for each x
+//
+// ∀ and ∃ can also open an imperative block with → (arrow):
+//
+//   ∀ x ∈ col →           iterates every element (like: for x in col)
+//   ∃ x ∈ col: pred →     runs body for first x where pred is true, then stops
+
+fn printAll(values: [float])
+    ∀ v ∈ values →
+        print(v)
+
+fn warnFirst(values: [float])
+    ∃ v ∈ values: v < 0.0 →
+        print("First negative value: {v}")
+
+// Mixing both forms
+fn summarize(scores: [int])
+    if ∀ s ∈ scores: s ≥ 60        // boolean — no block
+        print("All passed")
+    ∃ s ∈ scores: s == 100 →        // imperative — body runs for first perfect score
+        print("Perfect score found: {s}")
+
+// Mathematical operators
+//   ^   power          x^2, 2^n
+//   %   modulo         n % 2
+//   ÷   integer div    n ÷ 2     (÷ is the only integer division operator)
+//   ≤   less-or-equal  (also <=  accepted)
+//   ≥   greater-or-eq  (also >=  accepted)
+//   ≠   not-equal      (also !=  accepted)
+//
+// NOTE: // is always a comment — there is no // integer-division operator.
+// The ÷ character (U+00F7) is canonical; nv fmt inserts it automatically.
+
+// Built-in constants
+//   π      3.14159265…
+//   e      2.71828182…
+//   ∞      positive infinity
+//   -∞     negative infinity
+
+fn normalDistribution(x: float, μ: float, σ: float)
+    → (1.0 / (σ * (2.0 * π).sqrt())) * e^(-(x - μ)^2 / (2.0 * σ^2))
+
+// Quantifiers in conditions
+fn main()
+    let scores = [82, 91, 74, 88, 95, 67]
+
+    if ∀ s ∈ scores: s ≥ 60
+        print("Everyone passed!")
+
+    if ∃ s ∈ scores: s ≥ 90
+        print("At least one A grade.")
+
+    let passed   = [s for s ∈ scores if s ≥ 60]
+    let perfect  = ∀ s ∈ scores: s == 100
+    let total    = ∑ s ∈ scores: s
+    let average  = total.toFloat() / scores.length
+
+
+────────────────────────────────────────────────────────────────────────────────
+  8. PATTERN MATCHING
+────────────────────────────────────────────────────────────────────────────────
+
+// match is exhaustive — compiler enforces all cases
+fn classify(n: int) → str
+    match n
+        0:          → "zero"
+        1, 2, 3:    → "small"
+        [4, 9]:     → "medium"       // inclusive range
+        [10, 99]:   → "large"
+        _:          → "huge"
+
+// Match on type — sealed class variants have no redundant class keyword inside
+sealed class Animal
+    Dog(name: str)
+    Cat(name: str, indoor: bool)
+    Bird(species: str)
+
+fn describe(a: Animal) → str
+    match a
+        Dog(name):              → "{name} wags its tail"
+        Cat(name, true):        → "{name} lounges inside"
+        Cat(name, false):       → "{name} roams outside"
+        Bird(species):          → "A {species} takes flight"
+
+// Match with guard
+fn grade(score: int) → str
+    match score
+        [90, 100] if score ≠ 100: → "A"
+        100:                      → "A+"
+        [80, 90[:                 → "B"
+        [70, 80[:                 → "C"
+        _:                        → "F"
+
+// Match on tuples — combine multiple values into a single exhaustive match
+fn quadrant(x: float, y: float) → str
+    match (x, y)
+        (> 0.0, > 0.0): → "Q1"
+        (< 0.0, > 0.0): → "Q2"
+        (< 0.0, < 0.0): → "Q3"
+        (> 0.0, < 0.0): → "Q4"
+        _:              → "on axis"
+
+fn httpMessage(status: int, body: str?) → str
+    match (status, body)
+        (200, let b): → "OK: {b}"
+        (404, _):     → "Not found"
+        (let c, _):   → "HTTP {c}"
+
+// Match on Result
+fn safeSqrt(x: float) → Result<float>
+    if x < 0.0
+        → Err("cannot take square root of negative number")
+    → Ok(x.sqrt())
+
+fn main()
+    match safeSqrt(16.0)
+        Ok(val):  print("√16 = {val}")
+        Err(msg): print("Error: {msg}")
+
+// Or-patterns — match multiple variants in a single arm with |
+sealed class Expr
+    Num(value: float)
+    Add(left: Expr, right: Expr)
+    Mul(left: Expr, right: Expr)
+    Neg(expr: Expr)
+
+fn isLeaf(e: Expr) → bool
+    match e
+        Num(_):             → true
+        Add(_) | Mul(_):    → false
+        Neg(inner):         → isLeaf(inner)
+
+// Nested destructuring — patterns compose arbitrarily deep
+fn describeResult(r: Result<int?>) → str
+    match r
+        Ok(nil):      → "ok but empty"
+        Ok(let n):    → "ok: {n}"
+        Err(msg):     → "error: {msg}"
+
+// Recursive ADTs — sealed classes may reference themselves
+sealed class Tree<T>
+    Leaf(value: T)
+    Node(left: Tree<T>, right: Tree<T>)
+
+fn depth<T>(t: Tree<T>) → int
+    match t
+        Leaf(_):            → 1
+        Node(left, right):  → 1 + max(depth(left), depth(right))
+
+fn sum(t: Tree<int>) → int
+    match t
+        Leaf(v):            → v
+        Node(left, right):  → sum(left) + sum(right)
+
+// Recursive ADT — singly linked list
+sealed class List<T>
+    Nil
+    Cons(head: T, tail: List<T>)
+
+fn length<T>(xs: List<T>) → int
+    match xs
+        Nil:            → 0
+        Cons(_, tail):  → 1 + length(tail)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  9. GENERICS
+────────────────────────────────────────────────────────────────────────────────
+
+// Generic function
+fn identity<T>(x: T) → T  → x
+
+fn first<T>(items: [T]) → T?
+    if items.isEmpty()
+        → nil
+    → items[0]
+
+// Generic class
+class Stack<T>
+    items: [T] = []
+
+    fn push(item: T)
+        self.items.append(item)
+
+    fn pop() → T?
+        if self.items.isEmpty()
+            → nil
+        → self.items.removeLast()
+
+    fn peek() → self.items.last
+    fn size() → self.items.length
+
+// Single constraint — inline after colon
+interface Comparable<T>
+    fn compareTo(other: T) → int   // <0, 0, >0
+
+fn max<T: Comparable<T>>(a: T, b: T) → T
+    → if a.compareTo(b) ≥ 0 then a else b
+
+fn sorted<T: Comparable<T>>(items: [T]) → [T]
+    ...
+
+// Multiple constraints — where clause keeps the signature readable
+fn printAndCompare<T>(a: T, b: T) where T: Comparable<T>, T: Printable
+    print("{a} vs {b} → {max(a, b)} wins")
+
+fn sortAndDeduplicate<T>(items: [T]) → [T] where T: Comparable<T>, T: Hashable
+    → items.sorted().unique()
+
+// where on a generic class
+class SortedList<T> where T: Comparable<T>
+    items: [T] = []
+
+    fn insert(item: T)
+        self.items.append(item)
+        self.items.sort()
+
+// Usage
+let s = Stack<int>()
+s.push(1)
+s.push(2)
+s.push(3)
+let top = s.pop()       // 3
+
+// Associated types — declare 'type Name' inside an interface body.
+// Implementers bind the name to a concrete type; callers constrain it.
+interface Container
+    type Item
+    fn add(item: Item)
+    fn get(index: int) → Item?
+    fn size() → int
+
+class Bag<T> : Container
+    type Item = T
+    items: [T] = []
+    fn add(item: T)          self.items.append(item)
+    fn get(index: int) → T?  → self.items[index]
+    fn size() → int          → self.items.length
+
+// where clause may constrain an associated type
+fn printAll<C: Container>(c: C) where C.Item: Printable
+    for i in [0, c.size()[
+        print(c.get(i)!)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  10. ERROR HANDLING
+────────────────────────────────────────────────────────────────────────────────
+
+// Result<T> for recoverable errors (no hidden control flow)
+// Result<T, E> optionally carries the error type.
+// Result<T> is shorthand for Result<T, Error>, where Error is a built-in interface:
+//
+//   interface Error
+//       fn message() → str
+//       fn cause()   → Error?    // default: nil (no chained cause)
+//
+// Err("string") constructs a simple string-backed Error.
+// For typed errors, define a class implementing Error and use Result<T, MyError>.
+//
+// throws vs Result<T>:
+//   Result<T>  — explicit in the type signature; propagate with ?; no hidden flow.
+//   throws E   — syntactic sugar: fn f() throws E is equivalent to fn f() → Result<T, E>
+//                where T is inferred from return statements. Use throws when the
+//                error is a side effect (I/O, network), Result<T> when the error is
+//                a normal outcome (parsing, lookup). The compiler accepts both and
+//                they interoperate: a throws fn can be called with ? in a Result context.
+
+fn parseInt(s: str) → Result<int>
+    if ∀ c ∈ s: c.isDigit()
+        → Ok(s.toInt())
+    → Err("'{s}' is not a valid integer")
+
+fn divide(a: float, b: float) → Result<float>
+    if b == 0.0
+        → Err("division by zero")
+    → Ok(a / b)
+
+// Propagate with ? — unwraps Ok or returns Err immediately
+fn compute(a: str, b: str) → Result<float>
+    let x = parseInt(a)?     // propagates Err upward
+    let y = parseInt(b)?
+    → divide(x.toFloat(), y.toFloat())
+
+// Handle at call site
+fn main()
+    match compute("10", "3")
+        Ok(result): print("Result: {result:.4f}")
+        Err(msg):   print("Failed: {msg}")
+
+    // or use getOrElse / getOrThrow
+    let val = compute("10", "2").getOrElse(0.0)
+
+// Checked exceptions for I/O and system errors (Java-style, explicit)
+fn readConfig(path: str) → str throws IOError
+    → File.read(path)
+
+fn main()
+    try
+        let config = readConfig("app.conf")
+        print(config)
+    catch e: IOError
+        print("Could not read config: {e.message}")
+    finally
+        print("Done")
+
+
+────────────────────────────────────────────────────────────────────────────────
+  11. EXTENSION FUNCTIONS
+────────────────────────────────────────────────────────────────────────────────
+
+// extend adds methods to any existing type — including built-in types and
+// types from other modules — without subclassing or modifying the original.
+// Extension methods are statically dispatched and cannot access private fields.
+
+extend int
+    fn isPrime() → bool
+        if self < 2: → false
+        → ∀ i ∈ [2, self ÷ 2]: self % i ≠ 0
+
+    fn clamp(lo: int, hi: int) → int
+        → self.max(lo).min(hi)
+
+    fn factorial() → int
+        → ∏ k ∈ [1, self]: k
+
+extend str
+    fn words() → [str]      → self.split(" ")
+    fn capitalize() → str   → self[0].toUpper() + self[1, self.length[
+
+// Extend generic types — T must satisfy constraints used in the body
+extend [T] where T: Comparable<T>
+    fn second() → T?
+        → if self.length ≥ 2 then self[1] else nil
+
+    fn minmax() → (T, T)
+        → self.min(), self.max()
+
+// Usage — reads left-to-right like built-in methods
+fn main()
+    print(17.isPrime())               // true
+    print(42.clamp(0, 10))            // 10
+    print(5.factorial())              // 120
+
+    let sentence = "hello world foo"
+    print(sentence.words())           // ["hello", "world", "foo"]
+
+    let nums = [3, 1, 4, 1, 5, 9]
+    let (lo, hi) = nums.minmax()      // (1, 9)
+
+
+// ─── Retroactive conformance ─────────────────────────────────────────────────
+// extend T : Interface declares that an existing type satisfies an interface
+// without modifying the original type. Useful for third-party or built-in types.
+//
+// Rules:
+//   - All interface methods must be implemented in the extend block (or already
+//     present on the type and signature-compatible).
+//   - Conformance is nominal and module-scoped: only code that imports the
+//     module containing the extend : Interface declaration can use it.
+//   - Two modules may not declare conflicting conformances for the same
+//     type + interface pair (compiler error on import conflict).
+
+interface Printable
+    fn prettyPrint() → str
+
+// Make the built-in int satisfy Printable
+extend int : Printable
+    fn prettyPrint() → str
+        → "int({self})"
+
+// Make a third-party type satisfy a local interface
+// (assume graphics.ExternalVec2 has .x and .y fields)
+import graphics
+
+extend graphics.ExternalVec2 : Printable
+    fn prettyPrint() → str
+        → "Vec2({self.x}, {self.y})"
+
+fn showAll(items: [Printable])
+    for item ∈ items
+        print(item.prettyPrint())
+
+fn main()
+    showAll([1, 2, 3])                               // uses extend int : Printable
+    showAll([graphics.ExternalVec2(1.0, 2.0)])       // uses extend ExternalVec2 : Printable
+
+
+────────────────────────────────────────────────────────────────────────────────
+  12. MODULES & IMPORTS
+────────────────────────────────────────────────────────────────────────────────
+
+// Each file declares its module at the top
+module geometry
+
+// Imports
+import std.math
+import std.io
+import std.collections.HashMap
+import myapp.utils as utils
+
+// Three visibility levels:
+//   pub         — visible to all importers of this package
+//   pub(pkg)    — visible within all modules of this package only
+//   (default)   — visible within this file only
+pub class Vector2D(pub x: float, pub y: float)
+    pub fn length()    → (self.x^2 + self.y^2).sqrt()
+
+    pub fn normalize() → Vector2D
+        let len = self.length()
+        → Vector2D(self.x / len, self.y / len)
+
+    pub(pkg) fn validate()          // package-internal helper
+        if self.length() == 0.0
+            throw Error("zero vector")
+
+    fn cacheKey() → str             // file-private helper
+        → "{self.x},{self.y}"
+
+
+// ─── Multi-file modules ──────────────────────────────────────────────────────
+// All .nv files in a directory sharing the same module declaration belong to
+// the same module. Subdirectories form sub-modules automatically.
+//
+//   geometry/core.nv     → module geometry        (one logical module)
+//   geometry/helpers.nv  → module geometry        (same module, second file)
+//   geometry/shapes/     → module geometry.shapes (automatic sub-module)
+//
+// A mod.nv controls which sub-modules are re-exported:
+//
+//   // geometry/mod.nv
+//   module geometry
+//   pub import geometry.shapes    // expose geometry.shapes to package consumers
+//
+// Consumers can then write: import geometry.shapes
+// and access pub symbols as: geometry.shapes.Circle, etc.
+// Symbols are NOT merged into the geometry namespace.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  13. CONCURRENCY
+────────────────────────────────────────────────────────────────────────────────
+
+import std.concurrent
+
+// The runtime is an M:N green-thread scheduler (one OS thread per CPU core,
+// work-stealing). Every goroutine is a lightweight coroutine — channel sends
+// and I/O suspend the coroutine, not the OS thread.
+//
+// async fn — compile-time rule: await is only valid inside an async fn.
+// Calling an async fn from a non-async context requires:
+//   spawn asyncFn(...)   → returns Future<T>, which can be awaited later
+//   go asyncFn(...)      → fire-and-forget; result discarded
+// Any fn (async or not) can be launched with go or spawn.
+
+// Async/await — clean, no callback hell
+async fn fetchData(url: str) → Result<str>
+    let response = await http.get(url)?
+    → Ok(response.body)
+
+async fn processAll(urls: [str]) → [str]
+    // Launch all concurrently, await all results
+    let futures = [fetchData(url) for url ∈ urls]
+    let results = await Future.all(futures)
+    → [r.getOrElse("") for r ∈ results]
+
+// Channels (Go-inspired) for explicit message passing
+fn producer(ch: Channel<int>)
+    for i in [1, 10]
+        ch.send(i)
+    ch.close()
+
+fn consumer(ch: Channel<int>)
+    for value in ch           // iterates until channel closed
+        print("Got: {value}")
+
+fn main()
+    let ch = Channel<int>(capacity: 5)
+    go producer(ch)           // fire-and-forget goroutine
+    consumer(ch)
+
+// spawn — like go, but returns a Future<T> you can await.
+// Works with any function, async or not.
+async fn fetchTwo(a: str, b: str) → (str, str)
+    let fa = spawn fetchData(a)     // goroutine started immediately
+    let fb = spawn fetchData(b)
+    → (await fa getOrElse "", await fb getOrElse "")
+
+// select — multiplex across channels; the first ready branch runs.
+// Mirrors match syntax. An after clause provides a timeout.
+async fn relay(src: Channel<str>, dst: Channel<str>, quit: Channel<bool>)
+    @loop while true
+        select
+            msg from src:   dst.send(msg)
+            _ from quit:    break @loop
+            after 5000ms:   print("relay: still waiting...")
+
+// select with a default branch — non-blocking poll
+fn tryDrain(ch: Channel<int>) → [int]
+    var out: [int] = []
+    while true
+        select
+            v from ch:  out.append(v)
+            default:    break
+    → out
+
+// TaskGroup — structured concurrency: all spawned tasks complete before the
+// group exits. A failure in any task cancels the rest and propagates the error.
+async fn fetchAll(urls: [str]) → Result<[str]>
+    var results: [str] = []
+    await TaskGroup
+        for url in urls
+            spawn
+                let r = fetchData(url)?
+                results.append(r)
+    → Ok(results)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  14. INLINE BYTECODE
+────────────────────────────────────────────────────────────────────────────────
+
+// Embed native assembly directly in source.
+// @asm[arch] block — compiler selects the matching architecture.
+// Variable names from the enclosing Nordvest scope are accessible by name.
+
+fn fastAbs(x: int) → int
+    @asm[x86_64]
+        mov  rax, x
+        neg  rax
+        cmovl rax, x       // conditional move: keep x if x was negative
+        ret
+
+    @asm[arm64]
+        cmp  x0, #0
+        cneg x0, x0, mi
+        ret
+
+// Multiple architectures, fallback to Nordvest implementation
+fn dotProduct(a: [float], b: [float]) → float
+    @asm[x86_64, avx2]
+        // SIMD vectorized dot product for x86 with AVX2
+        vxorps   ymm0, ymm0, ymm0
+        mov      rcx, a.length
+        ...loop:
+        vmovups  ymm1, [a.ptr]
+        vfmadd231ps ymm0, ymm1, [b.ptr]
+        add      a.ptr, 32
+        add      b.ptr, 32
+        sub      rcx, 8
+        jnz      loop
+        vhaddps  ymm0, ymm0, ymm0
+        vhaddps  ymm0, ymm0, ymm0
+        ret
+
+    @asm[arm64, neon]
+        // ARM NEON vectorized implementation
+        ...
+
+    // Pure Nordvest fallback — used on unsupported architectures
+    var sum = 0.0
+    for i in [0, a.length[
+        sum += a[i] * b[i]
+    → sum
+
+// Raw bytecode (hex literal) — for ultra-low-level embedding
+fn cpuId() → int
+    @bytes[x86_64]
+        0x0F 0xA2   // CPUID instruction
+        0xC3        // RET
+
+
+────────────────────────────────────────────────────────────────────────────────
+  15. COMMENTS
+────────────────────────────────────────────────────────────────────────────────
+
+// Single-line comment — from // to end of line
+
+let x = 42   // inline comment on the same line
+
+/* Multi-line comment
+   can span many lines */
+
+/**
+ * Doc comment — attached to the declaration that follows it.
+ * Rendered by `nv doc` as HTML/Markdown documentation.
+ *
+ * @param r   the radius of the circle
+ * @returns   the area: π·r²
+ */
+fn circleArea(r: float) → float
+    → π * r^2
+
+
+────────────────────────────────────────────────────────────────────────────────
+  16. GPU ACCELERATION
+────────────────────────────────────────────────────────────────────────────────
+
+// @gpu  — compiles a function as a GPU kernel (CUDA / Metal / Vulkan,
+//          selected by the target platform).
+// @cpu  — explicit default; keeps the function on the CPU.
+// The compiler handles data-parallel dispatch automatically.
+
+@gpu
+fn addVectors(a: [float32], b: [float32]) → [float32]
+    → [a[i] + b[i] for i in [0, a.length[]
+
+// Calling a @gpu function from CPU code is identical to any other call.
+// The runtime transfers data to the GPU, executes the kernel, and
+// transfers results back automatically.
+fn main()
+    let a: [float32] = [1.0, 2.0, 3.0, 4.0]
+    let b: [float32] = [5.0, 6.0, 7.0, 8.0]
+    let c = addVectors(a, b)   // executed on the GPU
+    print(c)                   // [6.0, 8.0, 10.0, 12.0]
+
+// @gpu(block) — marks an inline block for GPU execution inside a CPU function
+fn processData(data: [float32]) → [float32]
+    var result: [float32]
+    @gpu(block)
+        let m = data.max()
+        result = [x / m for x in data]
+    → result
+
+// Explicit memory management — use .toGPU() / .toCPU() when you want to
+// keep data resident on the GPU across multiple kernel calls.
+fn multiPass(data: [float32]) → [float32]
+    let d  = data.toGPU()        // transfer once
+    let d2 = addVectors(d, d)    // stays on GPU
+    let d4 = addVectors(d2, d2)  // stays on GPU
+    → d4.toCPU()                 // single transfer back
+
+// @gpu.local — per-thread register / shared memory hint
+@gpu
+fn matMulKernel(A: [[float32]], B: [[float32]]) → [[float32]]
+    let rows = A.length
+    let cols = B[0].length
+    let n    = B.length
+    let C    = Matrix(rows, cols)
+    ∀ i ∈ [0, rows[ →
+        ∀ j ∈ [0, cols[ →
+            @gpu.local var sum: float32 = 0.0
+            ∀ k ∈ [0, n[ →
+                sum += A[i][k] * B[k][j]
+            C.set(i, j, sum)
+    → C
+
+
+────────────────────────────────────────────────────────────────────────────────
+  17. C / C++ INTEROPERABILITY
+────────────────────────────────────────────────────────────────────────────────
+
+// @extern declares a function implemented in an external C library.
+// The linker resolves it at link time — no wrapper code needed.
+
+// When the Nordvest function name matches the C symbol exactly:
+@extern("libm")
+fn sin(x: float64) → float64
+
+@extern("libm")
+fn cos(x: float64) → float64
+
+// When the C symbol name differs from the desired Nordvest name, use fn:
+@extern(fn: "stbi_load", lib: "stb_image")
+fn loadImage(path: str, w: ptr<int>, h: ptr<int>, ch: ptr<int>, req: int) → ptr<byte>
+
+// Usage is identical to any other Nordvest function
+fn main()
+    let angle = π / 4.0
+    print("sin(π/4) ≈ {sin(angle):.6f}")   // sin(π/4) ≈ 0.707107
+
+// C++ symbols — use cxx: to reference a C++ class method.
+// Nordvest handles name demangling automatically.
+@extern(cxx: "MyLib::dot", lib: "mylib")
+fn vec3Dot(a: Vec3, b: Vec3) → float32
+
+// @CLayout — ensures fields are ordered and padded exactly as a C compiler
+// would. Use struct (value type) for by-value C structs passed on the stack
+// or by pointer; use class (reference type) for C++ objects behind a pointer.
+@CLayout
+struct Vec3(x: float32, y: float32, z: float32)  // value type — copies like a C struct
+
+@CLayout
+class Vec3Obj(x: float32, y: float32, z: float32)  // reference type — pointer semantics
+
+// unsafe block — required whenever ptr<T> is dereferenced or used in raw
+// pointer arithmetic in pure Nordvest code. @c and @cpp blocks implicitly
+// create an unsafe context; explicit unsafe blocks are used for ptr<T> ops
+// written directly in Nordvest.
+
+fn rawFill(dst: ptr<byte>, value: byte, n: int)
+    unsafe
+        for i in [0, n[
+            dst[i] = value    // raw pointer indexing inside unsafe block
+
+// @c and @cpp blocks — inline C or C++ for one-off interop that doesn't
+// warrant a separate library.
+fn memcopy(dst: ptr<byte>, src: ptr<byte>, n: int)
+    @c
+        memcpy(dst, src, n);
+
+fn sortInts(data: [int])
+    @cpp
+        std::sort(data.ptr, data.ptr + data.length);
+
+// @include imports a C/C++ header; combine with @extern for
+// header-only or single-header libraries.
+@include("stb_image.h")
+@extern
+fn stbiLoad(path: str, w: ptr<int>, h: ptr<int>, ch: ptr<int>, req: int) → ptr<byte>
+
+
+────────────────────────────────────────────────────────────────────────────────
+  18. COMPLETE PROGRAM: MATRIX OPERATIONS
+────────────────────────────────────────────────────────────────────────────────
+
+module linalg
+
+import std.math
+import std.io
+
+pub class Matrix
+    rows: int
+    cols: int
+    data: [[float]]
+
+    pub init(rows: int, cols: int, fill: float = 0.0)
+        self.rows = rows
+        self.cols = cols
+        self.data = [[fill for _ in [0, cols[] for _ in [0, rows[]
+
+    pub fn get(i: int, j: int) → self.data[i, j]
+    pub fn set(i: int, j: int, val: float)
+        self.data[i, j] = val
+
+    pub fn +(other: Matrix) → Result<Matrix>
+        if self.rows ≠ other.rows ∨ self.cols ≠ other.cols
+            → Err("dimension mismatch: ({self.rows}×{self.cols}) + ({other.rows}×{other.cols})")
+        let result = Matrix(self.rows, self.cols)
+        ∀ i ∈ [0, self.rows[ →
+            ∀ j ∈ [0, self.cols[ →
+                result.set(i, j, self.get(i, j) + other.get(i, j))
+        → Ok(result)
+
+    pub fn *(other: Matrix) → Result<Matrix>
+        if self.cols ≠ other.rows
+            → Err("dimension mismatch for multiplication")
+        let result = Matrix(self.rows, other.cols)
+        ∀ i ∈ [0, self.rows[ →
+            ∀ j ∈ [0, other.cols[ →
+                let sum = ∑ k ∈ [0, self.cols[: self.get(i, k) * other.get(k, j)
+                result.set(i, j, sum)
+        → Ok(result)
+
+    pub fn transpose() → Matrix
+        let result = Matrix(self.cols, self.rows)
+        ∀ i ∈ [0, self.rows[ →
+            ∀ j ∈ [0, self.cols[ →
+                result.set(j, i, self.get(i, j))
+        → result
+
+    pub fn frobenius() → (∑ x ∈ self.data.flatten(): x^2).sqrt()
+        // ∑ x ∈ iterable: expr  sums the expression over each element
+
+    pub fn isSymmetric() → bool
+        if self.rows ≠ self.cols
+            → false
+        → ∀ i ∈ [0, self.rows[: ∀ j ∈ [0, self.cols[: self.get(i, j) == self.get(j, i)
+
+    pub fn str() → str
+        let rows = [self.data[i].map(x → "{x:6.2f}").join(" ") for i ∈ [0, self.rows[]
+        → rows.join("\n")
+
+
+fn main()
+    let A = Matrix(3, 3)
+    for i in [0, 3[
+        for j in [0, 3[
+            A.set(i, j, (i * 3 + j + 1).toFloat())
+
+    let B = A.transpose()
+
+    print("A =\n{A}\n")
+    print("B = Aᵀ =\n{B}\n")
+
+    match A * B
+        Ok(C):
+            print("A × Aᵀ =\n{C}\n")
+            print("Symmetric: {C.isSymmetric()}")
+            print("Frobenius norm: {C.frobenius():.4f}")
+        Err(e):
+            print("Error: {e}")
+
+
+────────────────────────────────────────────────────────────────────────────────
+  19. COMPLETE PROGRAM: ADVENT-STYLE PUZZLE
+────────────────────────────────────────────────────────────────────────────────
+
+// Demonstrates: file I/O, data parsing, collections, quantifiers, tuples
+module aoc
+
+import std.io
+import std.collections.HashMap
+
+fn parseInput(path: str) → [[int]] throws IOError
+    let lines = File.readLines(path)
+    → [line.split(" ").map(s → s.toInt()) for line ∈ lines if ¬line.isEmpty()]
+
+fn isSafe(report: [int]) → bool
+    if report.length < 2
+        → true
+    let diffs = [report[i+1] - report[i] for i ∈ [0, report.length - 1[]
+    let allPos = ∀ d ∈ diffs: d ≥ 1 ∧ d ≤ 3
+    let allNeg = ∀ d ∈ diffs: d ≥ -3 ∧ d ≤ -1
+    → allPos ∨ allNeg
+
+fn isSafeWithDampener(report: [int]) → bool
+    if isSafe(report)
+        → true
+    → ∃ i ∈ [0, report.length[: isSafe(report.withoutIndex(i))
+
+fn main()
+    try
+        let reports  = parseInput("input.txt")
+        let part1    = reports.count(isSafe)
+        let part2    = reports.count(isSafeWithDampener)
+        print("Part 1 — safe reports:                {part1}")
+        print("Part 2 — safe with dampener:          {part2}")
+    catch e: IOError
+        print("Error reading input: {e.message}")
+
+
+────────────────────────────────────────────────────────────────────────────────
+  20. BITWISE OPERATORS
+────────────────────────────────────────────────────────────────────────────────
+
+// & | ~ ⊕ << >> — operate on integer bit patterns
+// ⊕ is XOR; ASCII alias: xor. ^ remains exponentiation.
+// | is disambiguated from |> by the lexer (maximal munch).
+
+let flags = 0b1010 & 0b1100    // AND  → 0b1000
+let mask  = 0b1010 | 0b0101    // OR   → 0b1111
+let inv   = ~0b1010             // NOT  (width of int)
+let xord  = 0b1010 ⊕ 0b1100   // XOR  → 0b0110
+let hi    = 1 << 8              // left shift  → 256
+let lo    = 256 >> 4            // right shift → 16
+
+// Compound assignment
+var x = 0xFF
+x &= 0x0F    // x = 0x0F
+x |= 0x80    // x = 0x8F
+x ⊕= 0x01   // x = 0x8E
+
+// Bit flags pattern
+enum Permission: int
+    Read    = 1 << 0    // 0b001
+    Write   = 1 << 1    // 0b010
+    Execute = 1 << 2    // 0b100
+
+fn hasPermission(flags: int, perm: Permission) → bool
+    → flags & perm.rawValue ≠ 0
+
+fn main()
+    var perms = Permission.Read.rawValue | Permission.Write.rawValue
+    print(hasPermission(perms, Permission.Read))     // true
+    print(hasPermission(perms, Permission.Execute))  // false
+
+
+────────────────────────────────────────────────────────────────────────────────
+  21. ITERATORS & LAZY SEQUENCES
+────────────────────────────────────────────────────────────────────────────────
+
+// Iterator / Iterable — the protocol that for-loops desugar to
+interface Iterator
+    type Item
+    fn next() → Item?      // nil signals exhaustion
+
+interface Iterable
+    type Item
+    fn iter() → Iterator where Iterator.Item == Item
+
+// Built-in [T], str, Channel<T>, and Sequence<T> all implement Iterable.
+// for x in coll  desugars to  let it = coll.iter(); while let x = it.next() { ... }
+
+// Generator function — return type Sequence<T> makes the fn lazy.
+// yield suspends the function and produces one value; the caller pulls on demand.
+fn fibonacci() → Sequence<int>
+    var (a, b) = (0, 1)
+    while true
+        yield a
+        (a, b) = (b, a + b)
+
+fn naturals(from: int = 0) → Sequence<int>
+    var i = from
+    while true
+        yield i
+        i += 1
+
+fn range(lo: int, hi: int, step: int = 1) → Sequence<int>
+    var i = lo
+    while i < hi
+        yield i
+        i += step
+
+// Sequence<T> supports the same combinators as [T] — lazily
+let fibs   = fibonacci().take(10).toList()         // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+let evens  = naturals().filter(n → n % 2 == 0).take(5)
+let mapped = range(1, 6).map(n → n * n)            // 1 4 9 16 25 — not yet evaluated
+
+for n in mapped       // forces evaluation one element at a time
+    print(n)
+
+// Custom countdown — a generator function is simpler than a manual iterator class
+fn countdown(from: int) → Sequence<int>
+    var i = from
+    while i ≥ 0
+        yield i
+        i -= 1
+
+for n in countdown(5)
+    print(n)    // 5 4 3 2 1 0
+
+// When a reusable named type is needed, implement Iterable via a generator fn
+class Countdown(from: int) : Iterable<int>
+    type Item = int
+    fn iter() → Sequence<int>
+        → countdown(self.from)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  22. PROPERTIES & SUBSCRIPTS
+────────────────────────────────────────────────────────────────────────────────
+
+// Computed property — fn with no parameter list.
+// Called as obj.name (no parentheses); settable via get/set blocks.
+
+class Circle(radius: float)
+    pub fn area → float               // property: c.area, not c.area()
+        → π * self.radius^2
+
+    pub fn diameter → float           // one-liner property
+        → 2.0 * self.radius
+
+class Temperature(celsius: float)
+    pub fn fahrenheit → float
+        get → self.celsius * 9.0 / 5.0 + 32.0
+        set(f) self.celsius = (f - 32.0) * 5.0 / 9.0
+
+fn main()
+    let c = Circle(5.0)
+    print(c.area)           // 78.5398...
+    print(c.diameter)       // 10.0
+
+    var t = Temperature(100.0)
+    print(t.fahrenheit)     // 212.0
+    t.fahrenheit = 32.0
+    print(t.celsius)        // 0.0
+
+
+// Subscript operator — fn [] (getter) and fn []= (setter)
+// Lets user types support obj[key] and obj[key] = value syntax.
+
+class Grid<T>(rows: int, cols: int, fill: T)
+    data: [T] = [fill for _ in [0, rows * cols[]
+
+    fn [](row: int, col: int) → T
+        → self.data[row * self.cols + col]
+
+    fn []=(row: int, col: int, value: T)
+        self.data[row * self.cols + col] = value
+
+fn main()
+    let g = Grid<int>(3, 3, fill: 0)
+    g[1, 1] = 42
+    print(g[1, 1])          // 42
+    print(g[0, 0])          // 0
+
+
+────────────────────────────────────────────────────────────────────────────────
+  23. DEFER
+────────────────────────────────────────────────────────────────────────────────
+
+// defer schedules a statement to run when the enclosing scope exits —
+// whether by normal return, early return, or thrown exception.
+// Multiple defers in one scope run in LIFO (last-in, first-out) order.
+
+fn processFile(path: str) → Result<int> throws IOError
+    let f = File.open(path)
+    defer f.close()              // always runs, even on early return
+
+    let lines = f.readLines()
+    if lines.isEmpty()
+        → Ok(0)                  // f.close() still fires here
+    → Ok(lines.length)
+
+// LIFO order
+fn withLocks()
+    lockA()
+    defer unlockA()    // fires second
+    lockB()
+    defer unlockB()    // fires first
+
+// defer with a block
+fn withConnection(url: str)
+    let conn = db.connect(url)
+    defer
+        conn.rollback()    // rollback any uncommitted transaction
+        conn.close()
+
+
+────────────────────────────────────────────────────────────────────────────────
+  24. TYPE TESTS & SAFE CASTS
+────────────────────────────────────────────────────────────────────────────────
+
+// is  — boolean type check; narrows the type in the then-branch (smart cast)
+// as? — explicit safe downcast; returns T? (nil if cast fails)
+// as! — forced downcast; panics if cast fails — use only when type is certain
+
+// Smart cast: `is` narrows the variable type inside the then-branch.
+// The compiler proves the narrowing is safe (variable not reassigned).
+fn describe(s: Shape) → str
+    if s is Circle
+        → "a circle of radius {s.radius:.2f}"   // s is narrowed to Circle here
+    if s is Rectangle
+        → "a {s.width():.1f}×{s.height():.1f} rectangle"  // narrowed to Rectangle
+    → "unknown shape"
+
+// as? is still useful when you need the narrowed value separately, or in
+// contexts where the compiler cannot prove the smart cast is safe.
+fn totalArea(shapes: [Shape]) → float
+    var sum = 0.0
+    for s in shapes
+        if s is Circle
+            sum += π * s.radius^2       // s narrowed to Circle
+        else if s is Rectangle
+            sum += s.width() * s.height()   // s narrowed to Rectangle
+    → sum
+
+// as! — only when type is guaranteed at the call site
+fn mustBeCircle(s: Shape) → Circle
+    → s as! Circle
+
+// Note: for sealed classes, prefer exhaustive match — the compiler checks coverage.
+// is / as? are for interface values and open class hierarchies.
+
+fn area(s: Shape) → float
+    match s
+        Circle(radius: r):          → π * r^2
+        Rectangle(w: w, h: h):      → w * h
+
+
+────────────────────────────────────────────────────────────────────────────────
+  25. LABELED LOOPS
+────────────────────────────────────────────────────────────────────────────────
+
+// A label @name prefixes a for or while loop.
+// break @name exits that loop; continue @name skips to its next iteration.
+
+fn findFirst(grid: [[int]], target: int) → (int, int)?
+    @outer for i in [0, grid.length[
+        for j in [0, grid[0].length[
+            if grid[i][j] == target
+                → (i, j)        // or: break @outer
+    → nil
+
+fn processWithRetry(pipeline: [Step], maxRetries: int)
+    var attempts = 0
+    @retry while attempts < maxRetries
+        for step in pipeline
+            if step.fails()
+                attempts += 1
+                continue @retry   // restart the while loop
+        → ()    // all steps succeeded — exit normally
+
+
+────────────────────────────────────────────────────────────────────────────────
+  26. CONDITIONAL COMPILATION
+────────────────────────────────────────────────────────────────────────────────
+
+// @if(pred) / @else — compile-time conditional; the excluded branch is not
+// compiled at all. Works at declaration scope only (not inside expressions).
+
+// Available predicates:
+//   platform == "linux" | "darwin" | "windows"
+//   arch == "x86_64" | "arm64" | "wasm32"
+//   debug                (true in debug builds)
+//   release              (true in release builds)
+//   feature("name")      (true if the named feature is set in nv.pkg)
+
+@if(platform == "windows")
+    import std.ffi.win32
+    fn platformSep() → str → "\\"
+@else
+    import std.ffi.posix
+    fn platformSep() → str → "/"
+
+@if(debug)
+fn assertPositive(x: int)
+    assert(x > 0, "expected positive, got {x}")
+@else
+fn assertPositive(x: int)    // compiled away in release builds
+
+// Feature flags — opt-in capabilities declared in nv.pkg [features]
+@if(feature("tls"))
+    import std.net.tls
+    fn secureConnect(host: str, port: int) → Result<TlsStream>
+        → tls.connect(host, port)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  27. CLOSURE CAPTURES
+────────────────────────────────────────────────────────────────────────────────
+
+// Closures capture enclosing variables by reference (RC increment) by default.
+// Immutable (let) captures are always safe.
+
+let threshold = 10
+let isAbove = x → x > threshold       // 'threshold' captured by reference
+
+// Explicit capture list [name] — snapshots the value at closure-creation time.
+// Use when the variable may change after the closure is created.
+var limit = 100
+let check = [limit] x → x < limit     // 'limit' frozen at 100
+
+// go-spawned coroutines: the compiler warns if a mutable var is captured
+// implicitly. Use [copy name] to take a value snapshot, or a Channel<T>
+// to transfer values explicitly.
+var count = 0
+go [copy count]
+    count += 1          // operates on the copy; original is unaffected
+
+// Immutable captures need no annotation
+let base = 100
+go
+    print(base + 42)    // fine — base cannot change
+
+// Raw strings — r"..." (no escape processing, no interpolation)
+// r"""...""" for multi-line; indentation stripped to the closing """ level.
+let pattern = r"\d+\.\d+"          // backslashes are literal
+let query = r"""
+    SELECT id, name
+    FROM users
+    WHERE age > 18
+"""
+
+
+────────────────────────────────────────────────────────────────────────────────
+  28. REGULAR EXPRESSIONS
+────────────────────────────────────────────────────────────────────────────────
+
+// std.regex — compile patterns once, reuse across calls.
+// Use r"..." raw strings so backslashes are literal.
+
+import std.regex
+
+fn extractEmails(text: str) → [str]
+    let re = Regex.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")?
+    → re.findAll(text).map(m → m.value)
+
+// Named capture groups with (?P<name>...)
+fn parseDate(s: str) → (int, int, int)?
+    let re = Regex.compile(r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})")?
+    let m = re.find(s) ?? → nil
+    → (m.group("y")?.toInt() ?? → nil,
+       m.group("m")?.toInt() ?? → nil,
+       m.group("d")?.toInt() ?? → nil)
+
+fn main()
+    let emails = extractEmails("contact alice@example.com or bob@test.org")
+    print(emails)   // ["alice@example.com", "bob@test.org"]
+
+    let (y, mo, d) = parseDate("Today is 2026-03-29") ?? (0, 0, 0)
+    print("{y}-{mo}-{d}")   // 2026-3-29
+
+    // $0 = full match, $1 = first group — replaceAll with back-references
+    let dedupe = Regex.compile(r"\b(\w+)\s+\1\b")?
+    print(dedupe.replaceAll("the the quick fox fox", "$1"))   // "the quick fox"
+
+    // split on any run of whitespace
+    let ws = Regex.compile(r"\s+")?
+    print(ws.split("  hello   world  "))   // ["hello", "world"]
+
+
+────────────────────────────────────────────────────────────────────────────────
+  29. FORMATTING, RANDOM NUMBERS, AND UUIDS
+────────────────────────────────────────────────────────────────────────────────
+
+import std.fmt
+import std.rand
+import std.uuid
+
+// std.fmt — programmatic formatting; complements {val:.2f} interpolation.
+fn printTable(rows: [(str, float, int)])
+    print("{fmt.padRight("Name", 12)} {fmt.padLeft("Price", 8)} {fmt.padLeft("Qty", 5)}")
+    print(fmt.padRight("", 28, '-'))
+    for (name, price, qty) in rows
+        print("{fmt.padRight(name, 12)} {fmt.padLeft(fmt.float(price, 'f', 2), 8)} {fmt.padLeft(qty.str(), 5)}")
+
+fn main()
+    printTable([("Apple", 1.5, 100), ("Banana", 0.75, 250), ("Cherry", 3.99, 42)])
+    // Name          Price   Qty
+    // ----------------------------
+    // Apple          1.50   100
+    // Banana         0.75   250
+    // Cherry         3.99    42
+
+    print(fmt.bytes(1_572_864))              // "1.50 MiB"
+    print(fmt.duration(3_661_000_000_000))   // "1h01m01s"
+    print(fmt.number(9_876_543.21))          // "9,876,543.21"
+    print(fmt.sprintf("%08.3f", 3.14))       // "0003.140"
+
+    // std.rand — seedable PRNG; use std.crypto for security-sensitive values
+    let rng = Rng(seed: 42)
+    let rolls = [rng.int(1, 7) for _ in [0, 5[]    // reproducible sequence
+    var deck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    rand.shuffle(deck)
+    let winner = rand.choice(["Alice", "Bob", "Carol"])
+
+    // std.uuid — v4 random; v7 time-ordered (sortable, good for DB primary keys)
+    let requestId = UUID.v4()
+    let rowId     = UUID.v7()
+    print(requestId.str())   // "f47ac10b-58cc-4372-a567-0e02b2c3d479" (random)
+    print(rowId.version())   // 7
+
+
+────────────────────────────────────────────────────────────────────────────────
+  30. ITERATOR COMBINATORS
+────────────────────────────────────────────────────────────────────────────────
+
+// std.iter provides combinators on top of Nordvest's lazy Sequence<T>.
+// All return Sequence<T> — call .toList() to materialise, or iterate directly.
+
+import std.iter
+
+fn main()
+    // zip — pair elements from two sequences (stops at the shorter one)
+    let names  = ["Alice", "Bob", "Carol"]
+    let scores = [95, 87, 92]
+    for (name, score) in iter.zip(names, scores)
+        print("{name}: {score}")
+
+    // enumerate — (index, value) pairs
+    for (i, name) in iter.enumerate(names)
+        print("{i}: {name}")     // 0: Alice  1: Bob  2: Carol
+
+    // windows — sliding window of size n
+    let data = [1, 2, 3, 4, 5]
+    let avg3 = iter.windows(data, 3)
+        .map(w → w.map(x → x.toFloat()) |> stats.mean(_))
+        .toList()
+    // → [2.0, 3.0, 4.0]
+
+    // chunks — non-overlapping batches
+    for batch in iter.chunks(data, 2)
+        print(batch)    // [1, 2]  [3, 4]  [5]
+
+    // scan — running accumulation; emits each intermediate result
+    let cumsum = iter.scan(data, 0, (acc, x) → acc + x).toList()
+    // → [1, 3, 6, 10, 15]
+
+    // count + take — infinite counter bounded lazily
+    let evens = iter.count(0, 2).take(5).toList()   // [0, 2, 4, 6, 8]
+
+    // product — Cartesian product of two sequences
+    let suits = ["♠", "♥", "♦", "♣"]
+    let ranks = ["A", "2", "K"]
+    let cards = iter.product(ranks, suits)
+        .map((r, s) → "{r}{s}")
+        .toList()
+    // → ["A♠", "A♥", "A♦", "A♣", "2♠", ...]
+
+    // chain — concatenate multiple sequences
+    let all = iter.chain([[1, 2], [3], [4, 5]]).toList()  // [1, 2, 3, 4, 5]
+
+
+────────────────────────────────────────────────────────────────────────────────
+  31. URL PARSING AND DATA FORMATS
+────────────────────────────────────────────────────────────────────────────────
+
+import std.net.url
+import std.csv
+import std.toml
+import std.xml
+
+fn main()
+    // std.net.url — parse and build URLs
+    let u = Url.parse("https://api.example.com/v2/users?page=1&limit=20")?
+    print(u.host)   // "api.example.com"
+    print(u.path)   // "/v2/users"
+    let page = u.queryParams()["page"]?[0]?.toInt() ?? 1
+    let next = u.withQuery(["page": (page + 1).str(), "limit": "20"])
+    print(next.str())
+    // "https://api.example.com/v2/users?page=2&limit=20"
+
+    // std.csv — tabular data
+    let csvData = "name,score,grade\nAlice,95,A\nBob,82,B\nCarol,78,C"
+    for row in csv.parseMap(csvData)
+        print("{row["name"]}: {row["score"]} ({row["grade"]})")
+
+    // std.toml — config files (also the format for nv.pkg)
+    let config = toml.parse(r"""
+        [server]
+        host = "localhost"
+        port = 8080
+        [database]
+        url  = "postgres://localhost/mydb"
+        pool = 10
+    """)?
+    let host = config["server"]?["host"]?.str() ?? "localhost"
+    let port = config["server"]?["port"]?.int() ?? 8080
+    print("Listening on {host}:{port}")
+
+    // std.xml — DOM parsing
+    let doc = XmlDocument.parse(r"""
+        <catalog>
+          <book id="1"><title>Nordvest Primer</title></book>
+          <book id="2"><title>Advanced Systems</title></book>
+        </catalog>
+    """)?
+    for book in doc.root().find("book")
+        let title = book.child("title")?.text ?? "(untitled)"
+        print("{book.attr("id")}: {title}")
+
+
+────────────────────────────────────────────────────────────────────────────────
+  32. DATABASE ACCESS
+────────────────────────────────────────────────────────────────────────────────
+
+// std.sql — driver-independent SQL; std.sql.sqlite provides a bundled driver.
+// All DB calls are async because I/O is non-blocking.
+
+import std.sql
+import std.sql.sqlite    // registers the "sqlite" driver
+
+record User(id: int, name: str, email: str)
+
+async fn createSchema(db: Connection)
+    db.execute(r"""
+        CREATE TABLE IF NOT EXISTS users (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            name  TEXT    NOT NULL,
+            email TEXT    NOT NULL UNIQUE
+        )
+    """)?
+
+async fn insertUser(db: Connection, name: str, email: str) → int64
+    let result = db.execute("INSERT INTO users (name, email) VALUES (?, ?)",
+                             name, email)?
+    → result.lastInsertId ?? -1
+
+async fn listUsers(db: Connection) → [User]
+    let rows = db.query("SELECT id, name, email FROM users ORDER BY id")?
+    defer rows.close()
+    var users: [User] = []
+    for row in rows
+        let id    = row.int("id")?
+        let name  = row.str("name")?
+        let email = row.str("email")?
+        users.append(User(id, name, email))
+    → users
+
+async fn main()
+    let db = sql.open("sqlite", ":memory:")?
+    defer db.close()
+
+    createSchema(db)?
+    insertUser(db, "Alice", "alice@example.com")?
+    insertUser(db, "Bob",   "bob@example.com")?
+
+    for u in listUsers(db)?
+        print("{u.id}: {u.name} <{u.email}>")
+    // 1: Alice <alice@example.com>
+    // 2: Bob <bob@example.com>
+
+    // Transactions — defer rollback acts as safety net
+    let tx = db.begin()?
+    defer tx.rollback()
+    tx.execute("UPDATE users SET name = ? WHERE id = ?", "Alicia", 1)?
+    tx.commit()?
+
+
+────────────────────────────────────────────────────────────────────────────────
+  33. DERIVE ANNOTATIONS
+────────────────────────────────────────────────────────────────────────────────
+
+// Nordvest provides a small set of built-in @derive annotations that auto-
+// generate well-known interface conformances and patterns for any named type.
+// All are resolved at compile time; no reflection or runtime overhead.
+
+// ─── @derive ─────────────────────────────────────────────────────────────────
+// Generates one or more standard protocol implementations.
+// Individual traits:
+//   Show     — str(x) / print(x) representation: "Point(x: 1.0, y: 2.0)"
+//   Eq       — == and != based on field equality
+//   Compare  — < > ≤ ≥ for lexicographic field ordering (implies Eq)
+//   Hash     — deterministic hash(x) combining all fields (required for map keys)
+//   Copy     — enables x.copy(field: newVal) shallow-copy-with-override
+//   All      — shorthand for Show, Eq, Compare, Hash, Copy
+
+@derive(All)
+struct Point(x: float, y: float)
+
+@derive(Show, Eq, Hash)
+class Color(pub r: int, pub g: int, pub b: int)
+
+fn main()
+    let p1 = Point(1.0, 2.0)
+    let p2 = Point(1.0, 2.0)
+    let p3 = p1.copy(y: 9.0)       // Point(x: 1.0, y: 9.0) — x inherited
+    print(p1 == p2)                // true
+    print(p1)                      // Point(x: 1.0, y: 2.0)
+    print(p1 < p3)                 // true  (lexicographic: x equal, y 2.0 < 9.0)
+
+    let seen: [Point: int] = [:]   // Point is a valid map key because Hash
+    let counts = seen.set(p1, 1)
+
+// record already auto-derives Show, Eq, Hash (equivalent to @derive(Show,Eq,Hash)).
+// @derive(All) on a record additionally gives Compare and Copy.
+// @derive on a sealed class applies to each variant individually.
+
+@derive(All)
+sealed class Shape
+    Circle(radius: float)
+    Rect(w: float, h: float)
+
+fn main()
+    let shapes: [Shape] = [Shape.Circle(1.0), Shape.Rect(2.0, 3.0)]
+    let sorted = shapes.sortedBy { s → s }    // Compare enables sorting
+
+
+// ─── .copy() ─────────────────────────────────────────────────────────────────
+// @derive(Copy) (included in All) generates a .copy() method that returns a
+// new instance with the specified fields overridden, all others preserved.
+// Available on struct, record, and class. Especially useful with immutable types.
+
+@derive(All)
+record Config(
+    host: str = "localhost",
+    port: int = 8080,
+    debug: bool = false,
+    maxConn: int = 100
+)
+
+fn main()
+    let base = Config()
+    let prod = base.copy(host: "prod.example.com", port: 443, debug: false)
+    let dev  = base.copy(debug: true, maxConn: 5)
+    // base is unchanged; prod and dev are independent instances
+
+
+// ─── @builder ────────────────────────────────────────────────────────────────
+// Generates a nested Builder class and a static .build { } DSL block.
+// Best for types with many optional fields or multi-step validation.
+// The generated builder validates required fields at .build() time.
+
+@builder
+class HttpRequest(
+    url: str,                              // required — no default
+    method: str = "GET",
+    headers: [str: str] = [:],
+    body: bytes? = nil,
+    timeout: Duration = Duration.seconds(30)
+)
+
+fn main()
+    // DSL block form — preferred for readability
+    let req = HttpRequest.build
+        url     = "https://api.example.com/data"
+        method  = "POST"
+        headers = ["Content-Type": "application/json"]
+        timeout = Duration.seconds(5)
+
+    // Chained form — useful when building programmatically
+    var b = HttpRequest.builder(url: "https://example.com")
+    if needsAuth
+        b = b.header("Authorization", "Bearer {token}")
+    let req2 = b.build()
+
+// @builder and @derive compose freely:
+@derive(Show, Eq)
+@builder
+record QueryOptions(
+    table: str,
+    limit: int = 100,
+    offset: int = 0,
+    orderBy: str? = nil
+)
+
+
+// ─── @newtype ─────────────────────────────────────────────────────────────────
+// Wraps exactly one field in a distinct nominal type.
+// The compiler erases the wrapper at runtime — zero overhead.
+// Prevents accidentally mixing domain values that share the same primitive type.
+
+@newtype struct UserId(int)
+@newtype struct EmailAddress(str)
+@newtype struct Meters(float)
+@newtype struct Seconds(float)
+
+fn sendInvite(to: EmailAddress, from: EmailAddress)
+    ...
+
+fn main()
+    let alice: EmailAddress = EmailAddress("alice@example.com")
+    let bob:   EmailAddress = EmailAddress("bob@example.com")
+    sendInvite(to: alice, from: bob)
+
+    // Type error — cannot pass UserId where EmailAddress is expected:
+    // sendInvite(to: UserId(42), from: alice)   // ✗ compile error
+
+    // Unwrap with .value:
+    let raw: str = alice.value
+
+// @newtype automatically derives Eq, Hash, Compare, and Show based on the
+// wrapped type. You may add @derive to get additional conformances:
+@derive(All)
+@newtype struct Celsius(float)
+
+
+// ─── @lazy fields ─────────────────────────────────────────────────────────────
+// A @lazy field is computed once on first access and cached.
+// The initializer runs in the context of the enclosing instance (self available).
+// Only valid on class and struct body fields (not constructor params).
+// Thread safety: @lazy is not synchronized; add explicit locking if needed.
+
+class Document(pub path: str)
+    @lazy val text:   str       = readFile(path)!        // read on first access
+    @lazy val lines:  [str]     = text.split("\n")       // depends on text
+    @lazy val words:  int       = lines.sum(l → l.split(" ").count)
+    @lazy val digest: str       = sha256(text)
+
+fn main()
+    let doc = Document("README.md")
+    // Nothing is read yet.
+    print(doc.words)    // triggers text → lines → words in order
+    print(doc.digest)   // text already cached; only digest computed
+
+// @lazy var (mutable) is allowed; the cached value may be invalidated by
+// assigning nil to it, forcing recomputation on next access:
+class Cache(source: DataSource)
+    @lazy var data: [Row]? = source.fetchAll()
+
+    fn invalidate()
+        data = nil    // next access recomputes
+
+
+// ─── by delegation ───────────────────────────────────────────────────────────
+// 'by expr' on an interface in the implements list delegates all methods of
+// that interface to the given expression. The delegating class may override
+// individual methods. Statically dispatched; no virtual overhead.
+// Equivalent to writing a forwarding implementation by hand.
+
+interface Logger
+    fn log(msg: str)
+    fn warn(msg: str) → log("[WARN] {msg}")    // default impl
+
+class TimestampLogger() : Logger
+    fn log(msg: str)
+        print("{now()}: {msg}")
+
+// Delegate all Logger methods to inner, override only log:
+class PrefixLogger(prefix: str, inner: Logger) : Logger by inner
+    fn log(msg: str)
+        inner.log("[{prefix}] {msg}")    // warn() still delegates to inner
+
+// Multiple delegations — each interface delegated to a different field:
+interface Serializable
+    fn serialize() → bytes
+
+class CachedEntity(
+    store: DataStore,
+    codec: Serializable
+) : DataStore by store, Serializable by codec
+
+fn main()
+    let base   = TimestampLogger()
+    let scoped = PrefixLogger("auth", base)
+    scoped.log("user logged in")    // "[auth] 2026-03-30T...: user logged in"
+    scoped.warn("token expiring")   // delegates to base.warn → base.log
+
+
+────────────────────────────────────────────────────────────────────────────────
+  34. CONFIGURATION
+────────────────────────────────────────────────────────────────────────────────
+
+// std.config — type-safe configuration binding backed by TOML files and env vars.
+//
+// Sources are merged in priority order (highest wins):
+//   1. Environment variables
+//   2. CLI overrides  (--config.server.port=9090)
+//   3. config.local.toml   (local overrides, gitignored — scaffolded by nv new)
+//   4. config.{profile}.toml   (e.g. config.prod.toml, config.test.toml)
+//   5. config.toml             (committed project defaults)
+//   6. Struct field defaults   (code-level fallback)
+//
+// Profile activation: NV_ENV=prod env var, or nv run main.nv --env=prod
+
+import std.config
+
+
+// ─── @config — bind a config subtree to a struct ────────────────────────────
+// Applied to a struct, record, or class. Generates a static
+// .load(from: Config) → Result<T> method at compile time (no reflection).
+//
+// Fields with defaults are optional. Fields without defaults and non-nullable
+// are required — .load() returns Err(ConfigError.missingField(...)) if absent.
+
+@config("server")
+struct ServerConfig(
+    host:    str      = "0.0.0.0",
+    port:    int      = 8080,
+    timeout: Duration = Duration.seconds(30),
+    tls:     bool     = false
+)
+
+@config("database")
+struct DatabaseConfig(
+    url:      str,          // required — no default, not nullable
+    maxConns: int  = 20,
+    poolMin:  int  = 2
+)
+
+
+// ─── @env — bind a specific environment variable to a field ──────────────────
+// When absent, the env var name is auto-derived from the @config prefix +
+// field name in UPPER_SNAKE_CASE:
+//   @config("database") + field maxConns  →  DATABASE_MAX_CONNS
+//
+// sensitive: true masks the value in Show output, logs, and debug dumps.
+// It is never emitted by @derive(Show).
+
+@config("database")
+struct DatabaseConfig(
+    @env("DATABASE_URL")
+    url: str,                          // required
+
+    @env("DB_MAX_CONNECTIONS")
+    maxConns: int = 20,
+
+    @env("DB_PASSWORD", sensitive: true)
+    password: str? = nil               // optional; nil if absent
+)
+
+
+// ─── Key-name mapping across sources ─────────────────────────────────────────
+// The binding layer translates automatically:
+//
+//   Source        Format           Example
+//   Env var       UPPER_SNAKE      DATABASE_MAX_CONNS
+//   TOML key      snake_case       [database]  max_conns = 20
+//   Struct field  camelCase        maxConns
+
+
+// ─── Loading configuration ───────────────────────────────────────────────────
+// ConfigLoader.default() covers the standard priority stack automatically.
+// Use the builder API to add or replace sources.
+
+fn main() throws
+    let cfg = ConfigLoader.default().load()?
+
+    let server = cfg.bind<ServerConfig>()?
+    let db     = cfg.bind<DatabaseConfig>()?
+
+    print("Listening on {server.host}:{server.port}")
+    startServer(server, db)
+
+// Manual source composition:
+fn main() throws
+    let cfg = ConfigLoader
+        .fromFile("custom.toml")
+        .fromEnv(prefix: "MYAPP")
+        .fromArgs(args)
+        .withProfile("staging")
+        .load()?
+
+    let server = cfg.bind<ServerConfig>()?
+
+
+// ─── config.toml (committed defaults) ────────────────────────────────────────
+//
+//   [server]
+//   host = "0.0.0.0"
+//   port = 8080
+//
+//   [database]
+//   max_conns = 20
+//   pool_min  = 2
+
+
+// ─── config.prod.toml (profile overrides) ────────────────────────────────────
+//
+//   [server]
+//   port = 443
+//   tls  = true
+//
+//   [database]
+//   max_conns = 100
+
+
+// ─── Custom validation ───────────────────────────────────────────────────────
+// Define a validate() method on the @config struct.
+// Config.bind<T>() calls it automatically after binding.
+
+@config("server")
+struct ServerConfig(
+    host: str  = "0.0.0.0",
+    port: int  = 8080,
+    tls:  bool = false
+)
+    fn validate() → Result<()>
+        if self.tls and self.port == 80
+            → Err(ConfigError.validationFailed("TLS enabled but port is 80"))
+        → Ok(())
+
+
+// ─── Duration values ─────────────────────────────────────────────────────────
+// String values in config files are auto-coerced to Duration when the field
+// type is Duration: "30s", "1m30s", "500ms", "2h".
+
+@config("worker")
+struct WorkerConfig(
+    pollInterval: Duration = Duration.seconds(5),
+    jobTimeout:   Duration = Duration.minutes(10)
+)
+
+// config.toml:
+//   [worker]
+//   poll_interval = "10s"
+//   job_timeout   = "30m"
+
+
+// ─── Hot reload (opt-in, for long-running services) ──────────────────────────
+// reload: true makes .bind<T>() return a live handle that watches source files.
+// The onReload callback fires whenever any source file changes on disk.
+// Requires the receiving variable to be var.
+
+@config("feature-flags", reload: true)
+struct FeatureFlags(
+    newCheckout:   bool = false,
+    betaDashboard: bool = false
+)
+
+fn startServer() throws
+    let cfg = ConfigLoader.default().load()?
+    var flags = cfg.bind<FeatureFlags>()?
+
+    cfg.onReload { updated →
+        if let f = updated.bind<FeatureFlags>()
+            flags = f
+            log.info("feature flags reloaded: {flags}")
+    }
+
+
+// ─── Composing multiple @config structs ──────────────────────────────────────
+
+@config("app")
+struct AppConfig(
+    name:    str  = "myapp",
+    version: str  = "0.0.0",
+    debug:   bool = false
+)
+
+fn main() throws
+    let cfg    = ConfigLoader.default().load()?
+    let app    = cfg.bind<AppConfig>()?
+    let server = cfg.bind<ServerConfig>()?
+    let db     = cfg.bind<DatabaseConfig>()?
+    // Each struct binds independently from the same merged Config tree.
+
+
+================================================================================
+  SYNTAX QUICK REFERENCE
+================================================================================
+
+KEYWORDS
+    let var fn struct class record enum sealed interface extends implements
+    init self super return if then else match for while
+    break continue go spawn select async await try catch finally throws
+    import module pub type guard in is as as? as! nil true false
+    throw extend where defer yield xor weak unowned unsafe from by
+
+OPERATORS
+    Arithmetic:   +  -  *  /  ÷  %  ^      (÷ is the only integer division operator;
+                                             // is always a comment, never an operator)
+    Comparison:   ==  ≠  !=  <  >  ≤  <=  ≥  >=
+    Logical:      ∧  ∨  ¬  &&  ||  !
+    Bitwise:      &  |  ~  ⊕  xor  <<  >>
+    Compound:     +=  -=  *=  /=  &=  |=  ⊕=  <<=  >>=
+    Null:         ?  ?.  ??  !
+    Result:       ?  (propagation — postfix on expression)
+    Pipeline:     |>
+    Cast:         is   as?   as!
+    Math:         ∑  ∏  π  e  ∞
+    Quantifiers:  ∀  ∃
+    Membership:   ∈  (interchangeable with "in")
+
+? DISAMBIGUATION
+    T?          nullable type modifier    (in type position)
+    expr?       Result propagation        (postfix on an expression)
+    No ternary operator — use inline if instead:  if cond then a else b
+
+RETURN ARROW  →  (interchangeable with ->)
+    fn f(x: T) → U     explicit return type annotation
+    fn f(x: T)          return type inferred from → body expression
+    → expr              return statement (replaces "return expr")
+    Both → and -> are accepted everywhere; → is preferred style.
+
+INLINE IF EXPRESSION
+    if cond then a else b           inline conditional expression (no ternary ?:)
+    if cond then a else if c then b else d   chained
+    Valid anywhere an expression is expected; `then` disambiguates from if-statement.
+
+COMMENTS
+    // comment          single-line comment
+    /* comment */       multi-line comment
+    /** doc comment */  doc comment — attached to next declaration; used by `nv doc`
+
+CLASS FORMS
+    struct Foo(x: T, y: T)          value type — stack-allocated, copied on assign
+    class Foo(x: T, y: T)           primary constructor — fields + init generated
+    class Foo(x: T) : Bar           with superclass
+    class Foo(x: T = v)             with default field value
+    class Foo                       no primary constructor — write init explicitly
+        init(x: T)                  explicit constructor (no fn keyword)
+    record Foo(x: T, y: T)         immutable reference type — auto ==, str(), hash()
+
+REFERENCE MANAGEMENT (class fields)
+    var x: Foo              strong reference — keeps Foo alive (default)
+    weak var x: Foo?        weak reference — becomes nil when Foo is freed
+    unowned let x: Foo      non-owning; crashes if accessed after Foo is freed
+
+MAP TYPE & LITERALS
+    [K: V]              map type (e.g. [str: int])
+    ["a": 1, "b": 2]    map literal — colon separates key from value
+    [:]                 empty map literal
+    [T]                 array type (unchanged)
+    []                  empty array literal
+
+UNSAFE CONTEXT
+    unsafe              block prefix; required for ptr<T> operations in Nordvest code
+        stmt            raw pointer reads/writes are allowed inside this block
+    ptr<T>              raw unmanaged pointer; only usable inside unsafe or @c/@cpp
+
+VISIBILITY
+    pub fn f()          exported — visible to all importers
+    pub(pkg) fn f()     package-internal — visible within this package only
+    fn f()              file-private — visible within this file only
+    pub let x: T        exported field (on primary constructor param or body field)
+
+PROPERTIES & SUBSCRIPTS
+    fn name → T         computed property — called as obj.name (no parentheses)
+    fn name → T         with get/set:
+        get → expr
+        set(v) self.field = expr
+    fn [](i: int) → T   subscript getter — called as obj[i]
+    fn []=(i: int, v: T) subscript setter — called as obj[i] = v
+
+LABELED LOOPS & DEFER
+    @label for/while    prefix a loop with a label
+    break @label        exit the labeled loop
+    continue @label     skip to the next iteration of the labeled loop
+    defer stmt          run stmt when the enclosing scope exits (LIFO order)
+
+CLOSURES
+    x → expr            lambda; captures enclosing vars by reference (RC)
+    [name] x → expr     explicit capture list — snapshots 'name' by value
+    go [copy name] { }  value capture for goroutines (avoids data races)
+
+CONCURRENCY
+    go expr             fire-and-forget goroutine (result discarded)
+    spawn expr          goroutine returning Future<T>; use with await
+    await expr          suspend current coroutine until Future<T> resolves
+    select              multiplex channels; first ready branch runs
+        v from ch:          receive v from ch
+        _ from ch:          receive and discard
+        after 100ms:        timeout branch
+        default:            non-blocking poll (runs immediately if no ch ready)
+    await TaskGroup         structured concurrency scope; all tasks join on exit
+
+RAW STRINGS
+    r"..."              raw string — no escape processing, no interpolation
+    r"""                multi-line raw string — indentation stripped to closing """
+        ...
+    """
+
+ENUM & SEALED
+    enum Color                      simple named constants, exhaustive in match
+        Red, Green, Blue
+    enum Status: int                with raw values
+        Ok = 200, NotFound = 404
+    sealed class Shape              discriminated union with associated data
+        Circle(radius: float)       variant — no class keyword inside sealed
+        Rect(w: float, h: float)
+    sealed class Tree<T>            recursive ADT — variants may reference the type
+        Leaf(value: T)
+        Node(left: Tree<T>, right: Tree<T>)
+
+PATTERN FORMS  (inside match arms)
+    0                               literal
+    1, 2, 3                         multi-literal (comma-separated)
+    [a, b]                          range (closed)
+    [a, b[                          range (half-open)
+    _                               wildcard
+    let x                           binding — captures the value as x
+    Dog(name)                       variant destructure — positional
+    Circle(radius: r)               variant destructure — named field
+    (x, y)                          tuple destructure
+    A(_) | B(_)                     or-pattern — matches either variant
+    Ok(let n) if n > 0              nested pattern with guard
+    Patterns compose: Ok(Some(x)):  nested arbitrarily deep
+
+EXTENSION FUNCTIONS
+    extend T                        adds methods to existing type T
+        fn foo() → ...              self refers to the receiver
+    extend [T] where T: Comparable  extend generic types with constraints
+
+PIPELINE OPERATOR  |>
+    a |> f               passes a as first argument to f
+    a |> f(_, b)         _ is the positional hole for the piped value
+    Can chain across lines (indented continuation)
+
+ANNOTATIONS  (GPU)
+    @gpu                compile function as a GPU kernel (CUDA / Metal / Vulkan)
+    @cpu                explicit CPU target (default)
+    @gpu(block)         inline GPU block inside a CPU function
+    @gpu.local          per-thread GPU register / shared memory variable
+
+ANNOTATIONS  (C / C++ interop)
+    @extern("lib")                        C function; Nordvest name == C symbol
+    @extern(fn: "c_symbol", lib: "lib")   C function with a different symbol name
+    @extern(cxx: "Ns::fn", lib: "lib")    C++ symbol with automatic demangling
+    @CLayout            C-compatible field layout; valid on struct (value type)
+                        and class (reference / pointer type)
+    @c                  inline C code block
+    @cpp                inline C++ code block
+    @include("hdr.h")   import a C/C++ header
+
+QUANTIFIER FORMS  (all use : for the body expression)
+    ∀ x ∈ col: pred     boolean — true if pred holds for all elements
+    ∃ x ∈ col: pred     boolean — true if pred holds for some element
+    ∑ x ∈ col: expr     numeric — sum of expr over all elements
+    ∏ x ∈ col: expr     numeric — product of expr over all elements
+    ∑ col               numeric — sum of elements directly (no binding)
+    ∏ col               numeric — product of elements directly
+    ∀ x ∈ col →         loop    — imperative body runs for every element
+    ∃ x ∈ col: pred →   loop    — body runs for first matching element
+
+RANGE NOTATION  (used in for loops, slices, and match)
+    [a, b]   a ≤ i ≤ b   (closed — both inclusive)
+    ]a, b[   a < i < b   (open   — both exclusive)
+    [a, b[   a ≤ i < b   (half-open, typical array range)
+    ]a, b]   a < i ≤ b   (half-open, right inclusive)
+
+ANNOTATIONS  (compile-time)
+    @if(pred)           conditional compilation — pred not compiled if false
+    @else               else branch of @if
+    pred forms:  platform == "linux"|"darwin"|"windows"
+                 arch == "x86_64"|"arm64"|"wasm32"
+                 debug  |  release  |  feature("name")
+
+GENERICS & ASSOCIATED TYPES
+    fn f<T>(x: T) → T              basic generic function
+    fn f<T: Iface>(x: T)           single constraint — inline
+    fn f<T>(x: T) where T: A, T: B multiple constraints — where clause
+    class Foo<T> where T: Comparable  where on a class
+    interface I                    with associated type:
+        type Item
+    class C : I                    binding associated type:
+        type Item = int
+    fn f<C: Container>(c: C) where C.Item: Printable   constrain associated type
+
+LAZY SEQUENCES
+    fn f() → Sequence<T>   generator function — body may use yield
+        yield expr         produce one value; suspend until next pull
+    seq.take(n)            first n elements
+    seq.filter(pred)       lazy filter
+    seq.map(f)             lazy map
+    seq.toList()           force evaluation into [T]
+
+NULL SAFETY
+    T?              nullable type
+    x?.y            safe navigation (nil if x is nil)
+    x ?? default    null-coalescing
+    x!.y            forced unwrap (crashes if nil)
+    if let v = x    enter block only if x is non-nil; v is non-nullable inside
+    guard let v = x else ...  early return if x is nil; v in scope after
+
+DERIVE ANNOTATIONS
+    @derive(traits)           auto-generate interface conformances at compile time
+      Show                    str() / print() representation
+      Eq                      == and !=  based on field equality
+      Compare                 < > ≤ ≥   lexicographic ordering  (implies Eq)
+      Hash                    hash()     for use as map key      (implies Eq)
+      Copy                    .copy(field: val)  shallow-copy-with-override
+      All                     shorthand for Show, Eq, Compare, Hash, Copy
+    .copy(f: v, ...)          requires @derive(Copy) or All; returns new instance
+    @builder                  generates Builder class + .build { } DSL block
+    @newtype struct T(U)      zero-overhead nominal wrapper; .value unwraps
+    @lazy val/var field = e   computed once on first access; @lazy var resets on nil
+    T : I by expr             delegates all methods of interface I to expr
+
+CONFIGURATION ANNOTATIONS
+    @config("prefix")                  bind a config subtree to this struct/record/class;
+                                         generates .load(from: Config) → Result<T>
+    @config("prefix", reload: true)    live-reloading variant; onReload callback fires on change
+    @env("VAR_NAME")                   bind a specific env var to this field
+    @env("VAR_NAME", sensitive: true)  same, but masked in Show/log/debug output
+
+SPECIAL SYNTAX
+    {expr}        string interpolation inside "..."
+    {val:.2f}     formatted interpolation (printf-style spec)
+    x → expr      lambda / anonymous function  (also x -> expr)
+    (a, b) = f()  tuple destructuring
+    _             three context-sensitive uses, resolved by position:
+                    pattern position (match arm, destructuring): wildcard — matches any value
+                    call argument after |>: positional hole — replaced by the piped value
+                    tuple/destructuring LHS: discard — ignores that slot
+    @asm[arch]    inline assembly block
+    @bytes[arch]  raw hex bytecode block
+    x.toGPU()    transfer array/matrix to GPU memory
+    x.toCPU()    transfer GPU memory back to CPU
+
+================================================================================

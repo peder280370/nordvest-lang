@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# nv — Nordvest language toolchain wrapper
+#
+# Invokes the nv fat JAR.  Build it first with:
+#   ./gradlew :tools:fatJar
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JAR="$SCRIPT_DIR/tools/build/libs/nv.jar"
+
+if [[ ! -f "$JAR" ]]; then
+    echo "nv: toolchain JAR not found. Build it first:" >&2
+    echo "    ./gradlew :tools:fatJar" >&2
+    exit 1
+fi
+
+exec java -jar "$JAR" "$@"

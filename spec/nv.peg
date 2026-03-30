@@ -1,0 +1,718 @@
+# Nordvest Language — PEG Grammar
+# Status: SKELETON — Phase 0.4
+#         Productions are complete for all syntactic forms.
+#         Semantic validation (type checking, exhaustiveness, scope) is NOT expressed here.
+#         The Kotlin parser in compiler/ implements this grammar exactly; deviations are bugs.
+#
+# Grammar notation:
+#   /    ordered choice (PEG — first match wins, no ambiguity)
+#   *    zero or more
+#   +    one or more
+#   ?    optional
+#   !    negative lookahead
+#   &    positive lookahead
+#   ~    any character except
+#   ()   grouping
+#   ''   literal string (keyword or punctuation)
+#   []   character class
+#   <Rule>  non-terminal reference
+#
+# Indentation model:
+#   INDENT and DEDENT are injected by the lexer — they cannot be expressed as character-
+#   matching PEG rules. The lexer maintains a stack of indent levels. When the next
+#   non-blank, non-comment line's leading-space count exceeds the top of the stack,
+#   one INDENT token is injected and the new level pushed. When it is less, one DEDENT
+#   is injected per level popped. Tabs count as 4 spaces; mixing tabs and spaces within
+#   a file is a lexer error.
+#   In this grammar, <INDENT> and <DEDENT> are terminal references just like <EOF>.
+#
+# Block shorthand (used in comments, not a formal PEG meta-rule):
+#   Block(rule)  ==  <INDENT> rule+ <DEDENT>
+#
+# Whitespace and comments are consumed by the <_> (skip) rule unless noted.
+# NEWLINE is significant at statement boundaries.
+
+# ────────────────────────────────────────────────────────────────────────────
+# A. TOP-LEVEL STRUCTURE
+# ────────────────────────────────────────────────────────────────────────────
+
+File          <- <_> <ModuleDecl>? <ImportDecl>* <TopLevelDecl>* <EOF>
+
+ModuleDecl    <- 'module' <_> <QualifiedName> <_> <Newline>
+
+ImportDecl    <- 'import' <_> ('pub' <_>)? <QualifiedName> (<_> 'as' <_> <Ident>)? <_> <Newline>
+
+TopLevelDecl  <- <AnnotatedDecl>
+               / <FunctionDecl>
+               / <ClassDecl>
+               / <StructDecl>
+               / <RecordDecl>
+               / <InterfaceDecl>
+               / <SealedClassDecl>
+               / <EnumDecl>
+               / <ExtendDecl>
+               / <TypeAlias>
+               / <LetDecl>
+               / <VarDecl>
+               / <ConditionalCompilationBlock>
+
+# Annotation-prefixed declarations (structural boilerplate annotations)
+AnnotatedDecl <- <Annotation>+ <_>
+                 ( <FunctionDecl>
+                 / <ClassDecl>
+                 / <StructDecl>
+                 / <RecordDecl>
+                 / <InterfaceDecl>
+                 / <EnumDecl>
+                 / <LetDecl>
+                 / <VarDecl>
+                 )
+
+# ────────────────────────────────────────────────────────────────────────────
+# B. DECLARATIONS
+# ────────────────────────────────────────────────────────────────────────────
+
+VisibilityMod <- 'pub' <_> '(' <_> 'pkg' <_> ')' <_>
+               / 'pub' <_>
+
+FunctionDecl  <- <VisibilityMod>? 'fn' <_> <Ident>
+                 (<TypeParams>)?
+                 '(' <_> <ParamList>? <_> ')'
+                 (<_> <ReturnTypeAnnot>)?
+                 (<_> <ThrowsClause>)?
+                 <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+
+# Computed property: parameterless fn — distinguishes property from method
+# fn name → Type (no parens) is a computed property
+ComputedProperty <- <VisibilityMod>? 'fn' <_> <Ident>
+                    <_> ('→' / '->') <_> <Type>
+                    <_> <Newline>
+                    <INDENT> (<GetBlock> <SetBlock>? / <Stmt>+) <DEDENT>
+
+GetBlock <- 'get' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+SetBlock <- 'set' <_> '(' <_> <Ident> <_> ')' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+SubscriptDecl <- <VisibilityMod>? 'fn' <_> '[' <_> <ParamList> <_> ']'
+                 (<_> <ReturnTypeAnnot>)?
+                 <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+              /  <VisibilityMod>? 'fn' <_> '[' <_> <ParamList> <_> ']' <_> '=' <_>
+                 '(' <_> <Ident> <_> ':' <_> <Type> <_> ')'
+                 <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+
+ReturnTypeAnnot <- ('→' / '->') <_> <Type>
+ThrowsClause    <- 'throws' <_> <Type>
+
+TypeParams    <- '<' <_> <TypeParam> (<_> ',' <_> <TypeParam>)* <_> '>'
+TypeParam     <- <Ident> (<_> ':' <_> <Type>)?
+
+WhereClause   <- 'where' <_> <WhereConstraint> (<_> ',' <_> <WhereConstraint>)*
+WhereConstraint <- <QualifiedName> <_> ':' <_> <Type>
+
+ParamList     <- <Param> (<_> ',' <_> <Param>)*
+Param         <- <Ident> <_> ':' <_> <Type> (<_> '=' <_> <Expr>)?    # named param with optional default
+               / <Ident> <_> ':' <_> <Type> '...'                     # variadic
+
+ClassDecl     <- <VisibilityMod>? 'class' <_> <Ident>
+                 (<TypeParams>)?
+                 ('(' <_> <ConstructorParamList>? <_> ')')?
+                 (<_> ':' <_> <TypeList>)?
+                 (<_> <WhereClause>)?
+                 <_> <Newline>
+                 <INDENT> <ClassMember>* <DEDENT>
+
+ConstructorParamList <- <ConstructorParam> (<_> ',' <_> <ConstructorParam>)*
+ConstructorParam     <- <VisibilityMod>? <Ident> <_> ':' <_> <Type> (<_> '=' <_> <Expr>)?
+
+ClassMember   <- <AnnotatedDecl>
+               / <FunctionDecl>
+               / <ComputedProperty>
+               / <SubscriptDecl>
+               / <InitBlock>
+               / <FieldDecl>
+               / <AssocTypeDecl>
+
+InitBlock     <- 'init' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+FieldDecl     <- <VisibilityMod>? ('weak' <_>)? ('unowned' <_>)?
+                 ('let' / 'var') <_> <Ident> <_> ':' <_> <Type>
+                 (<_> '=' <_> <Expr>)?
+                 <_> <Newline>
+
+AssocTypeDecl <- 'type' <_> <Ident> (<_> ':' <_> <Type>)? <_> <Newline>
+
+StructDecl    <- <VisibilityMod>? 'struct' <_> <Ident>
+                 (<TypeParams>)?
+                 ('(' <_> <ConstructorParamList>? <_> ')')?
+                 (<_> ':' <_> <TypeList>)?
+                 (<_> <WhereClause>)?
+                 <_> <Newline>
+                 (<INDENT> <ClassMember>* <DEDENT>)?
+
+RecordDecl    <- <VisibilityMod>? 'record' <_> <Ident>
+                 (<TypeParams>)?
+                 ('(' <_> <ConstructorParamList>? <_> ')')?
+                 (<_> ':' <_> <TypeList>)?
+                 (<_> <WhereClause>)?
+                 <_> <Newline>
+                 (<INDENT> <ClassMember>* <DEDENT>)?
+
+InterfaceDecl <- <VisibilityMod>? 'interface' <_> <Ident>
+                 (<TypeParams>)?
+                 (<_> ':' <_> <TypeList>)?
+                 (<_> <WhereClause>)?
+                 <_> <Newline>
+                 <INDENT> <InterfaceMember>* <DEDENT>
+
+InterfaceMember <- <AssocTypeDecl>
+                 / <FunctionDecl>        # with body = default impl
+                 / <FunctionSignature>   # without body = abstract
+                 / <ComputedProperty>
+
+FunctionSignature <- <VisibilityMod>? 'fn' <_> <Ident>
+                     (<TypeParams>)?
+                     '(' <_> <ParamList>? <_> ')'
+                     (<_> <ReturnTypeAnnot>)?
+                     (<_> <ThrowsClause>)?
+                     <_> <Newline>
+
+SealedClassDecl <- <VisibilityMod>? 'sealed' <_> 'class' <_> <Ident>
+                   (<TypeParams>)?
+                   (<_> ':' <_> <TypeList>)?
+                   <_> <Newline>
+                   <INDENT> <SealedVariant>+ <DEDENT>
+
+SealedVariant <- <Ident> ('(' <_> <ConstructorParamList>? <_> ')')? <_> <Newline>
+
+EnumDecl      <- <VisibilityMod>? 'enum' <_> <Ident>
+                 (<_> ':' <_> <Type>)?    # optional raw value type
+                 <_> <Newline>
+                 <INDENT> <EnumCase>+ <DEDENT>
+
+EnumCase      <- <Ident> (<_> '=' <_> <Expr>)?    # simple or raw-value case
+                 (<_> '(' <_> <ConstructorParamList> <_> ')')?  # associated data
+                 <_> <Newline>
+
+ExtendDecl    <- 'extend' <_> <NamedType>
+                 (<_> ':' <_> <TypeList>)?
+                 (<_> <WhereClause>)?
+                 <_> <Newline>
+                 <INDENT> <ClassMember>+ <DEDENT>
+
+TypeAlias     <- <VisibilityMod>? 'type' <_> <Ident>
+                 (<TypeParams>)?
+                 <_> '=' <_> <Type> <_> <Newline>
+
+LetDecl       <- <VisibilityMod>? ('weak' <_>)? 'let' <_> <Ident>
+                 (<_> ':' <_> <Type>)?
+                 (<_> '=' <_> <Expr>)?
+                 <_> <Newline>
+
+VarDecl       <- <VisibilityMod>? ('weak' <_>)? 'var' <_> <Ident>
+                 (<_> ':' <_> <Type>)?
+                 (<_> '=' <_> <Expr>)?
+                 <_> <Newline>
+
+# Compile-time conditional compilation at declaration scope
+ConditionalCompilationBlock <- '@if' <_> '(' <_> <CCPred> <_> ')' <_> <Newline>
+                               <INDENT> <TopLevelDecl>+ <DEDENT>
+                               ('@else' <_> <Newline> <INDENT> <TopLevelDecl>+ <DEDENT>)?
+
+CCPred <- 'platform' <_> '==' <_> <StrLit>
+        / 'arch' <_> '==' <_> <StrLit>
+        / 'debug'
+        / 'release'
+        / 'feature' <_> '(' <_> <StrLit> <_> ')'
+
+# ────────────────────────────────────────────────────────────────────────────
+# C. TYPES
+# ────────────────────────────────────────────────────────────────────────────
+
+Type          <- <NullableType>
+
+NullableType  <- <BaseType> (<_> '?')*     # T? or T?? (doubly-nullable, rare but valid)
+
+BaseType      <- <FnType>
+               / <TupleType>
+               / <MatrixType>
+               / <ArrayType>
+               / <MapType>
+               / <PtrType>
+               / <NamedType>
+
+ArrayType     <- '[' <_> <Type> <_> ']'
+MatrixType    <- '[[' <_> <Type> <_> ']]'
+MapType       <- '[' <_> <Type> <_> ':' <_> <Type> <_> ']'
+
+TupleType     <- '(' <_> <NamedTupleFields> <_> ')'   # named-field tuple
+               / '(' <_> <Type> (<_> ',' <_> <Type>)+ <_> ')'  # positional tuple (2+ elements)
+
+NamedTupleFields <- <NamedTupleField> (<_> ',' <_> <NamedTupleField>)*
+NamedTupleField  <- <Ident> <_> ':' <_> <Type>
+
+FnType        <- 'fn' <_> '(' <_> (<Type> (<_> ',' <_> <Type>)*)? <_> ')' <_>
+                 ('→' / '->') <_> <Type>
+
+PtrType       <- 'ptr' <_> '<' <_> <Type> <_> '>'    # raw pointer (unsafe only)
+
+# Named type: simple Ident, qualified, or generic (e.g. List<T>, Result<T, E>)
+NamedType     <- <QualifiedName> (<_> '<' <_> <TypeArgList> <_> '>')?
+
+TypeArgList   <- <Type> (<_> ',' <_> <Type>)*
+
+TypeList      <- <NamedType> (<_> ',' <_> <NamedType>)*    # used in supertypes/conformances
+
+# ────────────────────────────────────────────────────────────────────────────
+# D. EXPRESSIONS
+#
+# Precedence tower (low → high, each rule calls the next):
+#   LambdaExpr > PipelineExpr > OrExpr > AndExpr > NotExpr >
+#   CompareExpr > BitOrExpr > BitXorExpr > BitAndExpr > ShiftExpr >
+#   BitNotExpr > AddExpr > MulExpr > PowerExpr > UnaryExpr > PostfixExpr > Primary
+# ────────────────────────────────────────────────────────────────────────────
+
+Expr          <- <LambdaExpr>
+
+# Lambda forms (lowest precedence — body is an Expr, so lambdas nest right)
+# (x, y) → expr  or  x → expr  or  () → expr
+LambdaExpr    <- '(' <_> <LambdaParams> <_> ')' <_> ('→' / '->') <_> <Expr>
+               / <Ident> <_> ('→' / '->') <_> <Expr>     # single-param, no parens
+               / <PipelineExpr>
+
+LambdaParams  <- <LambdaParam> (<_> ',' <_> <LambdaParam>)*
+               /                                           # zero params: ()
+LambdaParam   <- <Ident> (<_> ':' <_> <Type>)?           # type annotation optional
+
+# Pipeline operator |>  — left-associative
+PipelineExpr  <- <OrExpr> (<_> '|>' <_> <OrExpr>)*
+
+# Logical or  ∨ / ||  — left-associative
+OrExpr        <- <AndExpr> (<_> ('∨' / '||') <_> <AndExpr>)*
+
+# Logical and  ∧ / &&  — left-associative
+AndExpr       <- <NotExpr> (<_> ('∧' / '&&') <_> <NotExpr>)*
+
+# Logical not  ¬ / !  — right-associative prefix
+NotExpr       <- ('¬' / '!') <_> <NotExpr>
+               / <CompareExpr>
+
+# Comparison operators  — non-associative (a < b < c is a syntax error)
+CompareExpr   <- <BitOrExpr> (<_> ('==' / '≠' / '!=' / '<' / '>' / '≤' / '<=' / '≥' / '>=') <_> <BitOrExpr>)?
+
+# Bitwise or  |  — left-associative
+# NOTE: the pipeline token |> uses maximal munch in the lexer; | is bitwise-OR
+BitOrExpr     <- <BitXorExpr> (<_> '|' <_> <BitXorExpr>)*
+
+# Bitwise xor  ⊕ / xor  — left-associative
+BitXorExpr    <- <BitAndExpr> (<_> ('⊕' / 'xor') <_> <BitAndExpr>)*
+
+# Bitwise and  &  — left-associative
+BitAndExpr    <- <ShiftExpr> (<_> '&' <_> <ShiftExpr>)*
+
+# Bit shifts  << >>  — left-associative
+ShiftExpr     <- <BitNotExpr> (<_> ('<<' / '>>') <_> <BitNotExpr>)*
+
+# Bitwise not  ~  — right-associative prefix
+BitNotExpr    <- '~' <_> <BitNotExpr>
+               / <AddExpr>
+
+# Addition / subtraction  — left-associative
+AddExpr       <- <MulExpr> (<_> ('+' / '-') <_> <MulExpr>)*
+
+# Multiplication / division / modulo  — left-associative
+# NOTE: // is ALWAYS a line comment. ÷ (U+00F7) is the only integer-division operator.
+MulExpr       <- <PowerExpr> (<_> ('*' / '/' / '÷' / '%') <_> <PowerExpr>)*
+
+# Exponentiation  ^  — RIGHT-associative (a^b^c = a^(b^c))
+# NOTE: ^ is exponentiation, NOT bitwise XOR. XOR is ⊕ or keyword xor.
+PowerExpr     <- <UnaryExpr> (<_> '^' <_> <PowerExpr>)?
+
+# Unary minus  — right-associative
+UnaryExpr     <- '-' <_> <UnaryExpr>
+               / <PostfixExpr>
+
+# Postfix: member access, index, call, trailing lambda, type ops
+PostfixExpr   <- <Primary> <Postfix>*
+
+Postfix       <- <_> '?' <_>                                           # optional unwrap (propagate)
+               / <_> '!' <_>                                           # force unwrap (panic on nil)
+               / <_> '.' <_> <Ident>                                   # member access
+               / <_> '[' <_> <IndexArgs> <_> ']'                      # subscript / slice
+               / <_> '(' <_> <CallArgs>? <_> ')' <TrailingLambda>?   # call with optional trailing lambda
+               / <TrailingLambda>                                       # trailing lambda only (no parens)
+               / <_> 'is' <_> <Type>                                   # type test (smart cast in then-branch)
+               / <_> 'as?' <_> <Type>                                  # safe downcast → T?
+               / <_> 'as!' <_> <Type>                                  # forced downcast (panics if wrong)
+
+IndexArgs     <- <Expr> (<_> ',' <_> ('*' / <Expr>))*    # A[row, col] or M[1, *] for row slice
+
+CallArgs      <- <CallArg> (<_> ',' <_> <CallArg>)*
+CallArg       <- <Ident> <_> ':' <_> <Expr>     # named argument
+               / <Expr>                           # positional argument
+
+# Trailing lambda: { params → body }  — ONLY valid as the last call argument
+# NOTE: { } is used EXCLUSIVELY for trailing lambdas in Nordvest.
+#       It does not delimit blocks anywhere else — blocks are indentation-delimited.
+TrailingLambda <- '{' <_> (<LambdaParams> <_> ('→' / '->') <_>)? <TrailingLambdaBody> <_> '}'
+TrailingLambdaBody <- <Expr>
+                    / <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+# ────────────────────────────────────────────────────────────────────────────
+# Primary expressions
+# ────────────────────────────────────────────────────────────────────────────
+
+Primary       <- <Literal>
+               / <QuantifierExpr>
+               / <MatchExpr>
+               / <IfExpr>
+               / <ListComprehension>
+               / <RangeExpr>
+               / <ArrayOrMapLiteral>
+               / <TupleLiteral>
+               / '(' <_> <Expr> <_> ')'           # parenthesized expression
+               / '_'                               # positional hole for pipeline
+               / <Ident>                           # variable reference
+
+# Array literal: [1, 2, 3]  or  empty []
+# Map literal:   ["a": 1, "b": 2]  or  empty [:]
+# Note: [a, b] in expression context is a 2-element array, NOT a range.
+#       Range disambiguation occurs in for/match/slice contexts (handled by the parser).
+ArrayOrMapLiteral <- '[' <_> ':' <_> ']'                          # empty map [:]
+                   / '[' <_> <MapEntry> (<_> ',' <_> <MapEntry>)* <_> ']'  # map literal
+                   / '[' <_> <Expr> (<_> ',' <_> <Expr>)* <_> ']'         # array literal
+                   / '[' <_> ']'                                            # empty array
+
+MapEntry      <- <Expr> <_> ':' <_> <Expr>
+
+TupleLiteral  <- '(' <_> <Expr> (<_> ',' <_> <Expr>)+ <_> ')'    # 2+ elements
+
+# Range expressions — only valid in for/match/slice contexts; parser enforces
+# [a, b]   closed    [a, b[   half-open left-closed
+# ]a, b[   open      ]a, b]   half-open right-closed
+RangeExpr     <- '[' <_> <Expr> <_> ',' <_> <Expr> <_> ']'   # closed  [a, b]
+               / '[' <_> <Expr> <_> ',' <_> <Expr> <_> '['   # half-open left  [a, b[
+               / ']' <_> <Expr> <_> ',' <_> <Expr> <_> '['   # open  ]a, b[
+               / ']' <_> <Expr> <_> ',' <_> <Expr> <_> ']'   # half-open right  ]a, b]
+
+# List comprehension: [expr for x in collection if pred]
+# Also accepts ∈ in place of 'in'
+ListComprehension <- '[' <_> <Expr>
+                     (<_> 'for' <_> <Binding> (<_> ('in' / '∈') <_>) <Expr>)+
+                     (<_> 'if' <_> <Expr>)?
+                     <_> ']'
+
+Binding       <- '(' <_> <Ident> (<_> ',' <_> <Ident>)+ <_> ')'   # tuple destructuring
+               / <Ident>
+
+# Quantifier expressions:  ∀ x ∈ coll: pred   or   ∑ x ∈ coll: expr
+# Also block form:          ∀ x ∈ coll → block  (imperative)
+QuantifierExpr <- <QuantOp> <_> <Binding> <_> ('∈' / 'in') <_> <Expr>
+                  <_> ':' <_> <Expr>                                    # inline form
+               /  <QuantifierOp> <_> <Binding> <_> ('∈' / 'in') <_> <Expr>
+                  <_> ('→' / '->') <_> <Newline> <INDENT> <Stmt>+ <DEDENT>  # block form
+               /  ('∑' / '∏') <_> <Expr>                               # sum/product of iterable
+
+QuantOp       <- '∀' / '∃' / '∑' / '∏'
+
+# Match expression (exhaustive; used as both expression and statement)
+MatchExpr     <- 'match' <_> <Expr> <_> <Newline>
+                 <INDENT> <MatchArm>+ <DEDENT>
+
+MatchArm      <- <Pattern> (<_> 'if' <_> <Expr>)?             # guard clause optional
+                 <_> (',' / ':') <_> ('→' / '->') <_> <Expr> <_> <Newline>  # single-line arm
+               / <Pattern> (<_> 'if' <_> <Expr>)?
+                 <_> ':' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>            # block arm
+
+# If expression forms:
+#   Statement form: if cond NEWLINE INDENT ... DEDENT [else ...]
+#   Inline form:    if cond then a else b   (the 'then' keyword is the disambiguator)
+IfExpr        <- 'if' <_> <Expr> <_> 'then' <_> <Expr>
+                 (<_> 'else' <_> 'if' <_> <Expr> <_> 'then' <_> <Expr>)*
+                 <_> 'else' <_> <Expr>                         # inline form — always has else
+
+# ────────────────────────────────────────────────────────────────────────────
+# E. PATTERNS (used in match arms and if let / guard let)
+# ────────────────────────────────────────────────────────────────────────────
+
+Pattern       <- <OrPattern>
+
+OrPattern     <- <SinglePattern> (<_> '|' <_> <SinglePattern>)*   # A | B alternative patterns
+
+SinglePattern <- <LiteralPattern>
+               / <RangePattern>
+               / <TypePattern>
+               / <TuplePattern>
+               / <NilPattern>
+               / <WildcardPattern>
+               / <BindingPattern>
+
+LiteralPattern  <- <Literal>
+NilPattern      <- 'nil'
+WildcardPattern <- '_'
+BindingPattern  <- <Ident>    # binds the matched value to a name
+
+# Range pattern: [a, b]  ]a, b[  etc. (same notation as range expressions)
+RangePattern  <- <RangeExpr>
+
+# Type pattern: ClassName(fields)  or  ClassName  or  ClassName { field: pattern }
+TypePattern   <- <QualifiedName> '(' <_> <PatternArgs>? <_> ')'   # positional fields
+               / <QualifiedName> '{' <_> <PatternFields>? <_> '}' # named fields
+               / <QualifiedName>                                    # presence only
+
+PatternArgs   <- <Pattern> (<_> ',' <_> <Pattern>)*
+PatternFields <- <PatternField> (<_> ',' <_> <PatternField>)*
+PatternField  <- <Ident> <_> ':' <_> <Pattern>
+
+TuplePattern  <- '(' <_> <Pattern> (<_> ',' <_> <Pattern>)+ <_> ')'
+
+# ────────────────────────────────────────────────────────────────────────────
+# F. STATEMENTS
+# ────────────────────────────────────────────────────────────────────────────
+
+Stmt          <- <LetStmt>
+               / <VarStmt>
+               / <ReturnStmt>
+               / <IfStmt>
+               / <ForStmt>
+               / <WhileStmt>
+               / <MatchStmt>         # match as statement (result discarded)
+               / <DeferStmt>
+               / <TryCatchStmt>
+               / <ThrowStmt>
+               / <GoStmt>
+               / <SpawnStmt>
+               / <SelectStmt>
+               / <BreakStmt>
+               / <ContinueStmt>
+               / <UnsafeBlock>
+               / <YieldStmt>
+               / <AssignStmt>
+               / <ExprStmt>
+
+LetStmt       <- ('weak' <_>)? 'let' <_> <Binding> (<_> ':' <_> <Type>)?
+                 (<_> '=' <_> <Expr>)? <_> <Newline>
+
+VarStmt       <- ('weak' <_>)? 'var' <_> <Binding> (<_> ':' <_> <Type>)?
+                 (<_> '=' <_> <Expr>)? <_> <Newline>
+
+# Return statement: → expr  or  return expr
+ReturnStmt    <- ('→' / '->') <_> <Expr> <_> <Newline>
+               / 'return' <_> <Expr>? <_> <Newline>
+
+# If statement (multi-line, block-delimited)
+# 'then' keyword is absent — its presence signals IfExpr (inline form)
+IfStmt        <- 'if' <_> <IfLetBinding>? <Expr> <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+                 (<ElseIfClause>)*
+                 (<ElseClause>)?
+               / 'if' <_> <GuardLetBinding> <Newline>    # guard let form
+                 <INDENT> <Stmt>+ <DEDENT>
+
+ElseIfClause  <- 'else' <_> 'if' <_> <IfLetBinding>? <Expr> <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+
+ElseClause    <- 'else' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+# if let x = expr  — unwraps optional or Result
+IfLetBinding  <- 'let' <_> <Ident> (<_> ':' <_> <Type>)? <_> '=' <_>
+
+# guard let x = expr else { ... }  — early return on nil/Err
+GuardLetBinding <- 'guard' <_> 'let' <_> <Ident> (<_> ':' <_> <Type>)? <_> '=' <_> <Expr>
+                   <_> 'else' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+# For loop with optional label
+ForStmt       <- ('@' <Ident> <_>)? 'for' <_> <ForBinding> <_> ('in' / '∈') <_> <Expr>
+                 <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+ForBinding    <- '(' <_> <Ident> (<_> ',' <_> <Ident>)+ <_> ')'   # tuple destructuring
+               / <Ident>
+
+# While loop with optional label
+WhileStmt     <- ('@' <Ident> <_>)? 'while' <_> <Expr> <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+
+# Match statement (same grammar as MatchExpr — context determines expression vs. statement)
+MatchStmt     <- <MatchExpr>
+
+# defer: run statement LIFO on scope exit regardless of return path
+DeferStmt     <- 'defer' <_> (<Stmt> / <Newline> <INDENT> <Stmt>+ <DEDENT>)
+
+# try/catch/finally
+TryCatchStmt  <- 'try' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+                 (<CatchClause>)*
+                 (<FinallyClause>)?
+
+CatchClause   <- 'catch' <_> <Ident> <_> ':' <_> <Type> <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>
+               / 'catch' <_> <Ident> <_> <Newline>    # catch any error
+                 <INDENT> <Stmt>+ <DEDENT>
+
+FinallyClause <- 'finally' <_> <Newline> <INDENT> <Stmt>+ <DEDENT>
+
+ThrowStmt     <- 'throw' <_> <Expr> <_> <Newline>
+
+# go: fire-and-forget goroutine; discards the Future
+# go [copy? x, copy? y] { ... }   or   go callExpr
+GoStmt        <- 'go' <_> ('[' <_> <CaptureList> <_> ']' <_>)?
+                 ( '{' <_> <Newline> <INDENT> <Stmt>+ <DEDENT> <_> '}'
+                 / <ExprStmt>
+                 )
+
+CaptureList   <- <CaptureItem> (<_> ',' <_> <CaptureItem>)*
+CaptureItem   <- ('copy' <_>)? <Ident>
+
+# spawn: goroutine that returns Future<T>
+SpawnStmt     <- 'spawn' <_> <Expr> <_> <Newline>
+
+# select: multiplex over channels and timeouts
+SelectStmt    <- 'select' <_> <Newline> <INDENT> <SelectArm>+ <DEDENT>
+
+SelectArm     <- <Ident> <_> 'from' <_> <Expr> <_> ':' <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>                           # receive → binding
+               / '_' <_> 'from' <_> <Expr> <_> ':' <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>                           # receive → discard
+               / 'after' <_> <Duration> <_> ':' <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>                           # timeout arm
+               / 'default' <_> ':' <_> <Newline>
+                 <INDENT> <Stmt>+ <DEDENT>                           # non-blocking poll
+
+Duration      <- <IntLit> ('ms' / 's' / 'm' / 'h')
+
+BreakStmt     <- 'break' (<_> '@' <Ident>)? <_> <Newline>
+ContinueStmt  <- 'continue' (<_> '@' <Ident>)? <_> <Newline>
+
+# yield: only valid inside a Sequence<T>-returning function (generator)
+YieldStmt     <- 'yield' <_> <Expr> <_> <Newline>
+
+# unsafe block: required for ptr<T> operations
+UnsafeBlock   <- 'unsafe' <_> '{' <_> <Newline> <INDENT> <Stmt>+ <DEDENT> <_> '}'
+
+# Assignment: lvalue = expr  or  lvalue op= expr
+AssignStmt    <- <LValue> <_> <AssignOp> <_> <Expr> <_> <Newline>
+
+LValue        <- <PostfixExpr>    # only valid lvalue positions enforced by semantic analysis
+
+AssignOp      <- '='
+               / '+=' / '-=' / '*=' / '/=' / '÷=' / '%='
+               / '&=' / '|=' / '⊕=' / '<<=' / '>>='
+
+# Expression statement (standalone expression; result discarded unless it is a return)
+ExprStmt      <- <Expr> <_> <Newline>
+
+# ────────────────────────────────────────────────────────────────────────────
+# G. ANNOTATIONS
+# ────────────────────────────────────────────────────────────────────────────
+
+Annotation    <- '@' <AnnotationName> (<_> '(' <_> <AnnotationArgs>? <_> ')')?
+
+AnnotationName <- 'derive' / 'builder' / 'newtype' / 'lazy' / 'config' / 'env'
+               / 'extern' / 'CLayout' / 'c' / 'cpp' / 'asm' / 'bytes'
+               / 'gpu' / 'include' / 'if' / 'else'
+               / <Ident>
+
+AnnotationArgs <- <AnnotationArg> (<_> ',' <_> <AnnotationArg>)*
+AnnotationArg  <- <Ident> <_> ':' <_> <AnnotationArgValue>    # named arg
+               /  <AnnotationArgValue>                          # positional arg
+
+AnnotationArgValue <- <StrLit> / <BoolLit> / <Ident> ('.' <Ident>)* / <IntLit>
+
+# ────────────────────────────────────────────────────────────────────────────
+# H. LITERALS
+# ────────────────────────────────────────────────────────────────────────────
+
+Literal       <- <NilLit>
+               / <BoolLit>
+               / <FloatLit>
+               / <IntLit>
+               / <CharLit>
+               / <StrLit>
+               / <RawStrLit>
+               / 'π'          # CONST_PI (lexer token, included here for expression grammar)
+               / '∞'          # CONST_INF
+               / 'e'          # CONST_E (context-sensitive; see ADR-002)
+
+NilLit        <- 'nil'
+BoolLit       <- 'true' / 'false'
+
+# Integer literals: decimal, hex, binary, octal; underscores as separators
+IntLit        <- '0' 'x' <HexDigit> (<HexDigit> / '_')*      # hex  0xFF_00
+               / '0' 'b' [01] ([01] / '_')*                    # binary  0b1010_1111
+               / '0' 'o' [0-7] ([0-7] / '_')*                 # octal  0o755
+               / [1-9] ([0-9] / '_')* / '0'                   # decimal  1_000_000
+
+HexDigit      <- [0-9a-fA-F]
+
+# Float literals: 1.5  3.14e-3  1.0e+10
+FloatLit      <- [0-9] ([0-9] / '_')* '.' [0-9] ([0-9] / '_')* <FloatExp>?
+               / [0-9] ([0-9] / '_')* <FloatExp>
+
+FloatExp      <- ('e' / 'E') ('+' / '-')? [0-9]+
+
+# Character literal: 'a'  '\n'  '\u0041'
+CharLit       <- '\'' (<CharEscape> / (~'\'' .)) '\''
+CharEscape    <- '\\' ('n' / 't' / 'r' / '\\' / '\'' / '"' / '0' / 'u' <HexDigit> <HexDigit> <HexDigit> <HexDigit>)
+
+# String literals (double-quoted, with interpolation)
+# {expr} and {expr:format_spec} are interpolation regions parsed recursively
+StrLit        <- '"' <StrContent>* '"'
+StrContent    <- <CharEscape>
+               / '{' <Expr> (':' <FormatSpec>)? '}'    # interpolation
+               / (~'"' ~'{' ~'\\' .)                    # literal character
+
+FormatSpec    <- (~'}' .)+    # e.g. ".2f", "08d", ">10s" — passed through to runtime
+
+# Raw strings: no escapes, no interpolation
+RawStrLit     <- 'r"""' <RawMultiContent> '"""'        # multi-line raw (indentation stripped)
+               / 'r"' (~'"' .)* '"'                     # single-line raw
+
+RawMultiContent <- (~'"""' .)*
+
+# ────────────────────────────────────────────────────────────────────────────
+# I. LEXICAL RULES
+# ────────────────────────────────────────────────────────────────────────────
+
+# Keywords (exhaustive — these are reserved and cannot be used as identifiers)
+# fmt: off
+Keyword <- 'module' / 'import' / 'pub' / 'fn' / 'let' / 'var' / 'return'
+         / 'if' / 'else' / 'then' / 'for' / 'while' / 'break' / 'continue'
+         / 'match' / 'class' / 'struct' / 'record' / 'interface' / 'sealed'
+         / 'enum' / 'extend' / 'type' / 'init' / 'self' / 'super'
+         / 'true' / 'false' / 'nil' / 'in' / 'is' / 'as'
+         / 'throws' / 'throw' / 'try' / 'catch' / 'finally'
+         / 'defer' / 'go' / 'spawn' / 'select' / 'from' / 'after' / 'default'
+         / 'async' / 'await' / 'yield'
+         / 'weak' / 'unowned' / 'unsafe'
+         / 'where' / 'get' / 'set'
+         / 'xor'       # keyword alias for ⊕ (bitwise XOR)
+         / 'guard'
+# fmt: on
+
+# Identifiers: Unicode letters and digits; NFC-normalized before interning
+# XID_Start for the first character, XID_Continue for the rest (see ADR-002)
+Ident         <- !<Keyword> (<XIDStart>) (<XIDContinue>)*
+XIDStart      <- [a-zA-Z_\u00C0-\u02AF\u0370-\u03FF\u0400-\u04FF\u4E00-\u9FFF]
+                 # abbreviated — actual implementation uses java.lang.Character.isUnicodeIdentifierStart
+XIDContinue   <- [a-zA-Z0-9_\u00C0-\u02AF\u0370-\u03FF\u0400-\u04FF\u4E00-\u9FFF]
+                 # abbreviated — actual implementation uses java.lang.Character.isUnicodeIdentifierPart
+
+QualifiedName <- <Ident> ('.' <Ident>)*
+
+# Indentation tokens (injected by the lexer — see header)
+INDENT        <- (* lexer-injected: leading whitespace increases *)
+DEDENT        <- (* lexer-injected: leading whitespace decreases *)
+
+Newline       <- '\n' / '\r\n' / '\r'
+
+# Comments — consumed as whitespace (DocComments retained in AST for nv doc)
+LineComment   <- '//' (~'\n')* ('\n' / EOF)
+BlockComment  <- '/*' (~'*/' .)* '*/'
+DocComment    <- '/**' (~'*/' .)* '*/'    # retained in AST; body is Markdown
+
+# Whitespace skip rule (consumes spaces, tabs, newlines, and comments)
+# Does NOT consume NEWLINE tokens that are significant as statement terminators.
+# In practice the lexer tracks statement context; this rule is a simplification.
+_             <- ([ \t] / <LineComment> / <BlockComment>)*
+
+EOF           <- !.
