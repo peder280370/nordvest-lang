@@ -2,7 +2,7 @@
 
 A statically typed, compiled language with clean indentation-based syntax, first-class mathematical notation, and a unified toolchain.
 
-> **Status:** Design phase — bootstrap compiler under active development (Phase 0/1).
+> **Status:** Phase 1 in progress — lexer, parser, name resolver, and type checker complete (396 tests passing). Next: IR lowering (1.5).
 > See [`IMPL.txt`](IMPL.txt) for current progress and [`PLAN.txt`](PLAN.txt) for the full roadmap.
 
 ---
@@ -141,8 +141,8 @@ cd nordvest-lang
 
 | Phase | Goal | Status |
 |---|---|---|
-| **0 — Foundation** | Repo structure, Gradle, grammar skeleton, test harness | In progress |
-| **1 — Bootstrap core** | Lexer, parser, type checker, LLVM IR codegen, `nv run/build` | Planned |
+| **0 — Foundation** | Repo structure, Gradle, grammar skeleton, test harness | Done |
+| **1 — Bootstrap core** | Lexer, parser, type checker, LLVM IR codegen, `nv run/build` | In progress (1.1–1.4 done; 1.5–1.7 todo) |
 | **2 — Systems & concurrency** | async/await, channels, C/C++ interop, GPU, stdlib v1 | Planned |
 | **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Planned |
 | **4 — Self-hosting** | Rewrite the compiler in Nordvest | Planned |

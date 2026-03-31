@@ -4,10 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-This repository is in the **design phase**. There is no compiler or tooling yet — only design documents:
+This repository is in **active development** — Phase 0 is complete and Phase 1 is in progress (through 1.4 type checker). The bootstrap compiler (Kotlin) has 396 passing tests. Next up: Phase 1.5 IR lowering.
 
+Key documents:
 - `EXAMPLE.txt` — language design and feature examples (the authoritative source for syntax and semantics)
 - `PLAN.txt` — phased implementation roadmap, formal syntax specification outline, standard library design, and tooling plan
+- `IMPL.txt` — current implementation progress tracker (authoritative status for each phase item)
 
 ## Language Overview
 
