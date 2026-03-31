@@ -1,0 +1,14 @@
+(SourceFile
+  (FunctionDecl name="square" vis=FILE_PRIVATE
+    (Param name="x" type=(NamedType "float"))
+    returnType=(NamedType "float")
+    body=[(Return (STAR (Ident "x") (Ident "x")))])
+  (FunctionDecl name="add" vis=FILE_PRIVATE
+    (Param name="a" type=(NamedType "int"))
+    (Param name="b" type=(NamedType "int"))
+    returnType=(NamedType "int")
+    body=[(Return (PLUS (Ident "a") (Ident "b")))])
+  (FunctionDecl name="greet" vis=PUBLIC
+    (Param name="name" type=(NamedType "str"))
+    returnType=(NamedType "str")
+    body=[(Return (StrLit parts=[text("Hello, "), interp((Ident "name")), text("!")]))]))

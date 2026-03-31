@@ -359,6 +359,9 @@ class Lexer(source: String) {
         // Raw string: r"..." — 'r' followed immediately by '"'
         // This case is handled in lexNormal() before reaching here, so 'r' alone is an ident.
 
+        // Standalone `_` is the wildcard token, not an identifier
+        if (text == "_") return Token(TokenKind.UNDERSCORE, "_", span(start))
+
         val keyword = KEYWORDS[text]
         return if (keyword != null) {
             Token(keyword, text, span(start))

@@ -1,0 +1,8 @@
+fn square(x: float) → float
+    → x * x
+
+fn add(a: int, b: int) → int
+    → a + b
+
+pub fn greet(name: str) → str
+    → "Hello, {name}!"
