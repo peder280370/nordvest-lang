@@ -16,7 +16,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 
   Phase: PHASE 1 — Bootstrap Core
-  Next item: 1.1  Lexer
+  Next item: 1.2  Parser → AST
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -85,10 +85,24 @@
   PHASE 1 — BOOTSTRAP CORE  (Milestone M1 "Hello World to Modules")
 ────────────────────────────────────────────────────────────────────────────────
 
-  [TODO]  1.1  Lexer
+  [DONE]  1.1  Lexer
                Target: compiler/src/main/kotlin/nv/compiler/lexer/
-               - Tokens: all keywords, Unicode operators, literals, INDENT/DEDENT
-               - Unicode identifier support (XID_Start / XID_Continue, NFC)
+               - SourceLocation.kt — SourceLocation(offset, line, col) + SourceSpan
+               - TokenKind.kt     — exhaustive enum (keywords, operators, literals,
+                                     INDENT/DEDENT/NEWLINE/EOF, string interpolation tokens)
+               - Token.kt         — data class Token(kind, text, span)
+               - LexerError.kt    — sealed error hierarchy with source locations
+               - Lexer.kt         — hand-written lexer:
+                   * NFC-normalises source via java.text.Normalizer before scanning
+                   * All keywords, Unicode operators (∀ ∃ ∑ ∏ ∈ ∧ ∨ ¬ → ≤ ≥ ≠ ÷ ⊕ π ∞)
+                   * INDENT/DEDENT injection (tab=4 spaces; mixing → MixedIndentation error)
+                   * NEWLINE suppression inside open ()[]{}
+                   * String interpolation mode stack:
+                       STR_START / STR_TEXT / INTERP_START / <inner tokens> / INTERP_END / STR_END
+                   * Raw strings: r"..." and r"""..."""
+                   * Maximal munch for |>, ->, ?., ??, <<=, >>=, compound assignments
+                   * // is always a comment (no integer-division // token; ÷ is INT_DIV)
+               - tests/src/test/kotlin/nv/tests/LexerTest.kt — 126 tests, all passing
 
   [TODO]  1.2  Parser → AST
                Target: compiler/src/main/kotlin/nv/compiler/parser/
