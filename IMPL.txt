@@ -16,7 +16,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 
   Phase: PHASE 1 — Bootstrap Core
-  Next item: 1.4  Type checker
+  Next item: 1.5  IR lowering (HIR → MIR → LLVM IR)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -136,9 +136,42 @@
                  built-in availability, resolvedRefs map, module scope contents
                - Total tests: 313 passing (126 lexer + 144 parser + 43 resolver)
 
-  [TODO]  1.4  Type checker
+  [DONE]  1.4  Type checker
                Target: compiler/src/main/kotlin/nv/compiler/typecheck/
-               - Bidirectional type inference, null safety, exhaustiveness
+               - Type.kt extended: TArray, TMatrix, TMap, TTuple, TResult, TNever +
+                 display(), isAssignable(), numericPromotion() helpers (structural
+                 recursive checks for TResult/TArray/TMap/TTuple/TNamed)
+               - TypeCheckError.kt — sealed error hierarchy with span + message:
+                 TypeMismatch, ReturnTypeMismatch, NotNullable, ForceUnwrapNonNullable,
+                 NonExhaustiveMatch, CannotInferType, ArityMismatch, NotCallable,
+                 OperatorTypeMismatch, UnaryTypeMismatch, AssignToImmutable,
+                 ResultPropagateNonResult, ConditionNotBool, DuplicateMatchArm
+               - TypeCheckResult.kt — TypeCheckedModule(typeMap, memberTypeMap, errors)
+                 + Success/Recovered/Failure sealed result
+               - TypeChecker.kt — bidirectional type checker:
+                 * Pass 1: registers named types and member types from all declarations
+                   (class, struct, record, sealed, enum, interface, extend, type alias)
+                 * Pass 2: checks all declaration bodies
+                 * resolveTypeNode: expands type aliases, uses currentTypeParams for TVar
+                 * withTypeParams context for generics in function/class declarations
+                 * synthesize() for all expression forms (literals, operators, calls,
+                   member access, lambdas, arrays, maps, tuples, ranges, comprehensions,
+                   quantifiers, match, type tests/casts, null safety operators)
+                 * checkStmt() for all statement forms (let/var, return, if/guard-let,
+                   for/while, match, try/catch, defer, assign, go/spawn)
+                 * Null safety: if-let and guard-let narrow nullable types in scope
+                 * Safe-call chains: a?.method() returns ReturnType?
+                 * Exhaustiveness checker: Bool, nullable T?, sealed classes, enums
+                 * Operator type rules: numeric promotion, comparison→bool, logic→bool,
+                   bitwise requires int-like, ÷ integer division
+                 * Built-in str member types: properties (TInt) vs methods (TFun)
+               - Compiler.kt updated: TypeChecker wired after Resolver
+               - Parser.kt fix: () (empty parens) now parses as TupleLiteralExpr([])
+                 → unit value; isTupleLiteral() handles empty parens
+               - tests/src/test/kotlin/nv/tests/TypeCheckerTest.kt — 83 tests covering
+                 all error kinds, valid programs, null safety, exhaustiveness, generics,
+                 type aliases, lambdas, collections, quantifiers, struct/class types
+               - Total tests: 396 passing (126 lexer + 144 parser + 43 resolver + 83 type checker)
 
   [TODO]  1.5  IR lowering (HIR → MIR → LLVM IR)
                Target: compiler/src/main/kotlin/nv/compiler/codegen/

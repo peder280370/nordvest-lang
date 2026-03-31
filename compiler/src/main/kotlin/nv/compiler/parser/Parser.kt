@@ -2122,6 +2122,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
     private fun isTupleLiteral(): Boolean {
         val closeIdx = findMatchingParen(pos)
         if (closeIdx == -1) return false
+        // Empty parens () = unit value — also a tuple literal
+        if (closeIdx == pos + 1) return true
         // Check if there's a comma inside at depth 1
         var depth = 0
         var i = pos
@@ -2342,10 +2344,12 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val start = peek().span
         expect(LPAREN)
         val elements = mutableListOf<Expr>()
-        elements += parseExpr()
-        while (match(COMMA) != null) {
-            if (at(RPAREN)) break
+        if (!at(RPAREN)) {
             elements += parseExpr()
+            while (match(COMMA) != null) {
+                if (at(RPAREN)) break
+                elements += parseExpr()
+            }
         }
         expect(RPAREN)
         return TupleLiteralExpr(spanFrom(start), elements)

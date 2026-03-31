@@ -8,6 +8,9 @@ import nv.compiler.parser.toCompileError
 import nv.compiler.resolve.Resolver
 import nv.compiler.resolve.ResolveResult
 import nv.compiler.resolve.toCompileError
+import nv.compiler.typecheck.TypeCheckResult
+import nv.compiler.typecheck.TypeChecker
+import nv.compiler.typecheck.toCompileError
 
 /**
  * Entry point for the Nordvest bootstrap compiler.
@@ -15,8 +18,8 @@ import nv.compiler.resolve.toCompileError
  * Phase 1 implements:
  *   - Lexer (1.1) ✓
  *   - Parser → AST (1.2) ✓
- *   - Name resolution & scope analysis (1.3)
- *   - Type checker (1.4)
+ *   - Name resolution & scope analysis (1.3) ✓
+ *   - Type checker (1.4) ✓
  *   - IR lowering HIR → MIR → LLVM IR (1.5)
  *   - Runtime support library (1.6)
  */
@@ -35,9 +38,24 @@ object Compiler {
             is ParseResult.Success -> {
                 val resolveResult = Resolver(sourcePath).resolve(parseResult.file)
                 when (resolveResult) {
-                    is ResolveResult.Success   -> TODO("Phase 1.4: type checker")
-                    is ResolveResult.Recovered -> TODO("Phase 1.4: type checker (with resolve warnings)")
-                    is ResolveResult.Failure   -> CompileResult.Failure(
+                    is ResolveResult.Success, is ResolveResult.Recovered -> {
+                        val module = when (resolveResult) {
+                            is ResolveResult.Success  -> resolveResult.module
+                            is ResolveResult.Recovered -> resolveResult.module
+                            else -> error("unreachable")
+                        }
+                        val tcResult = TypeChecker(module).check()
+                        when (tcResult) {
+                            is TypeCheckResult.Success   -> TODO("Phase 1.5: IR lowering")
+                            is TypeCheckResult.Recovered -> CompileResult.Failure(
+                                tcResult.module.errors.map { it.toCompileError(sourcePath) }
+                            )
+                            is TypeCheckResult.Failure   -> CompileResult.Failure(
+                                tcResult.errors.map { it.toCompileError(sourcePath) }
+                            )
+                        }
+                    }
+                    is ResolveResult.Failure -> CompileResult.Failure(
                         resolveResult.errors.map { it.toCompileError(sourcePath) }
                     )
                 }
