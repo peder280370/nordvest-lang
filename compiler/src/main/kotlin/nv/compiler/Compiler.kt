@@ -5,6 +5,9 @@ import nv.compiler.lexer.LexerError
 import nv.compiler.parser.ParseResult
 import nv.compiler.parser.Parser
 import nv.compiler.parser.toCompileError
+import nv.compiler.resolve.Resolver
+import nv.compiler.resolve.ResolveResult
+import nv.compiler.resolve.toCompileError
 
 /**
  * Entry point for the Nordvest bootstrap compiler.
@@ -28,10 +31,19 @@ object Compiler {
                 CompileError(e.message ?: "Lexer error", sourcePath, e.location.line, e.location.col)
             ))
         }
-        return when (val result = Parser(tokens, sourcePath).parse()) {
-            is ParseResult.Success   -> TODO("Phase 1.3: name resolution")
-            is ParseResult.Recovered -> CompileResult.Failure(result.errors.map { it.toCompileError(sourcePath) })
-            is ParseResult.Failure   -> CompileResult.Failure(result.errors.map { it.toCompileError(sourcePath) })
+        return when (val parseResult = Parser(tokens, sourcePath).parse()) {
+            is ParseResult.Success -> {
+                val resolveResult = Resolver(sourcePath).resolve(parseResult.file)
+                when (resolveResult) {
+                    is ResolveResult.Success   -> TODO("Phase 1.4: type checker")
+                    is ResolveResult.Recovered -> TODO("Phase 1.4: type checker (with resolve warnings)")
+                    is ResolveResult.Failure   -> CompileResult.Failure(
+                        resolveResult.errors.map { it.toCompileError(sourcePath) }
+                    )
+                }
+            }
+            is ParseResult.Recovered -> CompileResult.Failure(parseResult.errors.map { it.toCompileError(sourcePath) })
+            is ParseResult.Failure   -> CompileResult.Failure(parseResult.errors.map { it.toCompileError(sourcePath) })
         }
     }
 }

@@ -16,7 +16,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 
   Phase: PHASE 1 — Bootstrap Core
-  Next item: 1.3  Name resolution & scope analysis
+  Next item: 1.4  Type checker
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -113,8 +113,28 @@
                - 144 parser tests passing; ParseGoldenTest with basic_fn golden file
                - Files: Ast.kt, ParseError.kt, ParseResult.kt, Parser.kt, AstPrinter.kt
 
-  [TODO]  1.3  Name resolution & scope analysis
+  [DONE]  1.3  Name resolution & scope analysis
                Target: compiler/src/main/kotlin/nv/compiler/resolve/
+               - Symbol.kt        — sealed Symbol hierarchy (FunctionSym, LetSym, VarSym,
+                                     ParamSym, ClassSym, StructSym, RecordSym, InterfaceSym,
+                                     SealedClassSym, EnumSym, TypeAliasSym, ModuleSym, BuiltinSym)
+               - Scope.kt         — Scope with parent chaining; ScopeKind enum;
+                                     define/lookup/lookupLocal; nearestLoop for labeled break/continue
+               - ResolveError.kt  — UndefinedSymbol, DuplicateDefinition, UnresolvedImport;
+                                     toCompileError extension
+               - ResolveResult.kt — ResolvedModule(file, moduleScope, resolvedRefs, imports, errors);
+                                     ResolveResult sealed class (Success/Recovered/Failure)
+               - Resolver.kt      — two-pass walker: pass 1 collects module-level symbols (enables
+                                     forward refs); pass 2 resolves all IdentExpr/TypeNode references;
+                                     pre-populated built-in scope (int str bool float print println
+                                     Ok Err nil true false); unresolved imports are Recovered warnings
+               - Compiler.kt updated: Resolver wired in after ParseResult.Success
+               - compiler/src/main/kotlin/nv/compiler/typecheck/Type.kt — minimal Type sealed class
+                 stub; TUnknown placeholder until Phase 1.4 fills in types
+               - tests/src/test/kotlin/nv/tests/ResolverTest.kt — 43 tests covering forward
+                 references, nested scopes, shadowing, duplicates, undefined symbols, imports,
+                 built-in availability, resolvedRefs map, module scope contents
+               - Total tests: 313 passing (126 lexer + 144 parser + 43 resolver)
 
   [TODO]  1.4  Type checker
                Target: compiler/src/main/kotlin/nv/compiler/typecheck/
