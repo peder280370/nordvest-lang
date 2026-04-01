@@ -348,4 +348,60 @@ class AsmTest {
             assertTrue(result is nv.compiler.CompileResult.IrSuccess)
         }
     }
+
+    // ── Example files ───────────────────────────────────────────────────────
+
+    /**
+     * Verifies that the example and golden source files parse and type-check
+     * without errors.  Codegen for the class-based example requires Phase 2
+     * class emission; the golden test covers end-to-end execution.
+     */
+    @Nested inner class ExampleFileTests {
+
+        /** Read a file relative to the project root (resolved from the test working dir). */
+        private fun readProjectFile(relPath: String): String {
+            val projectDir = java.io.File(System.getProperty("projectDir", ".."))
+            return projectDir.resolve(relPath).readText()
+        }
+
+        @Test fun `examples fast_math parses without errors`() {
+            val src = readProjectFile("examples/fast_math.nv")
+            val tokens = nv.compiler.lexer.Lexer(src).tokenize()
+            val result = Parser(tokens, "examples/fast_math.nv").parse()
+            assertFalse(result is ParseResult.Failure,
+                "Expected parse success but got errors")
+        }
+
+        @Test fun `examples fast_math typechecks without errors`() {
+            val src = readProjectFile("examples/fast_math.nv")
+            val errs = typeErrors(src)
+            assertTrue(errs.isEmpty(),
+                "Expected no type errors but got: ${errs.map { it.message }}")
+        }
+
+        @Test fun `golden asm source parses without errors`() {
+            val src = readProjectFile("tests/golden/asm/asm.nv")
+            val tokens = nv.compiler.lexer.Lexer(src).tokenize()
+            val result = Parser(tokens, "tests/golden/asm/asm.nv").parse()
+            assertFalse(result is ParseResult.Failure,
+                "Expected parse success but got errors")
+        }
+
+        @Test fun `golden asm source typechecks without errors`() {
+            val src = readProjectFile("tests/golden/asm/asm.nv")
+            val errs = typeErrors(src)
+            assertTrue(errs.isEmpty(),
+                "Expected no type errors but got: ${errs.map { it.message }}")
+        }
+
+        @Test fun `golden asm source compiles to IR on host arch`() {
+            val src = readProjectFile("tests/golden/asm/asm.nv")
+            val result = Compiler.compile(src, "tests/golden/asm/asm.nv")
+            assertTrue(result is nv.compiler.CompileResult.IrSuccess,
+                "Expected IrSuccess but got: $result")
+            val ir = (result as nv.compiler.CompileResult.IrSuccess).llvmIr
+            assertTrue(ir.contains("asm sideeffect"),
+                "Expected 'asm sideeffect' in IR for host arch")
+        }
+    }
 }

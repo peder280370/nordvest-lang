@@ -1,0 +1,100 @@
+// fast_math.nv — ARM64-optimised integer utilities using @asm
+//
+// Demonstrates inline assembly blocks with architecture-specific fast paths
+// and pure Nordvest fallbacks for portability.
+//
+// NOTE: class codegen is a Phase 2 feature.  This file compiles through the
+// parser and type-checker today.  Use `nv run` once class emission lands.
+// For a runnable demonstration of @asm right now, see tests/golden/asm/asm.nv.
+
+module examples.fast_math
+
+class FastMath
+
+    // Issue an instruction-synchronisation barrier.
+    // On arm64: isb forces the CPU pipeline to discard any prefetched instructions.
+    // On other platforms: falls through to the empty body (becomes a no-op).
+    fn syncBarrier() → unit
+        @asm[arm64]
+            "isb"
+
+    // Yield the current hardware thread — cooperative scheduler hint.
+    // Useful inside spin-wait loops to reduce power and contention.
+    fn schedulerHint() → unit
+        @asm[arm64]
+            "yield"
+        @asm[x86_64]
+            "pause"
+
+    // Absolute value.
+    // arm64: cneg conditionally negates; x86_64: idiomatic neg+cmovns pattern.
+    // The Nordvest fallback body runs on all other architectures.
+    fn abs(x: int) → int
+        @asm[arm64]
+            "cmp  x0, #0"
+            "cneg x0, x0, mi"
+            "ret"
+        @asm[x86_64]
+            "mov  rax, rdi"
+            "neg  rax"
+            "cmovns rax, rdi"
+            "ret"
+        → if x < 0 then -x else x
+
+    // Count leading zeros — useful for fast log2 and bit-width queries.
+    fn clz(x: int) → int
+        @asm[arm64]
+            "clz x0, x0"
+            "ret"
+        @asm[x86_64]
+            "lzcnt rax, rdi"
+            "ret"
+        // fallback: shift until MSB is consumed
+        var n = 64
+        var v = x
+        while v != 0
+            v = v >> 1
+            n = n - 1
+        → n
+
+    // Bit-reverse a 64-bit word.
+    fn rbit(x: int) → int
+        @asm[arm64]
+            "rbit x0, x0"
+            "ret"
+        // portable fallback
+        var result = 0
+        var v = x
+        for _ in [0, 64[
+            result = (result << 1) | (v & 1)
+            v = v >> 1
+        → result
+
+    // Population count (number of set bits).
+    fn popcount(x: int) → int
+        @asm[arm64]
+            "fmov d0, x0"
+            "cnt  v0.8b, v0.8b"
+            "addv b0, v0.8b"
+            "fmov w0, s0"
+            "ret"
+        @asm[x86_64]
+            "popcnt rax, rdi"
+            "ret"
+        // Kernighan's algorithm
+        var count = 0
+        var v = x
+        while v != 0
+            v = v & (v - 1)
+            count = count + 1
+        → count
+
+fn main()
+    let m = FastMath()
+    m.syncBarrier()
+    m.schedulerHint()
+    println(m.abs(-42))
+    println(m.abs(7))
+    println(m.clz(1))
+    println(m.popcount(255))
+    println(m.rbit(1))

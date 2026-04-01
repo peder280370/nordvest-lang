@@ -1,0 +1,40 @@
+// asm.nv — golden test for inline assembly (@asm) feature
+//
+// Each function has arch-specific @asm blocks followed by a pure Nordvest
+// fallback body.  On the matching architecture the @asm block runs as a
+// side-effect; the fallback always executes and supplies the return value,
+// keeping the output identical on every platform.
+
+// Absolute value — @asm provides a scheduler/pipeline hint on each arch.
+fn abs(x: int) → int
+    @asm[arm64]
+        "nop"
+    @asm[x86_64]
+        "nop"
+    → if x < 0 then -x else x
+
+// Double a value.
+fn double(x: int) → int
+    @asm[arm64]
+        "nop"
+    @asm[x86_64]
+        "nop"
+    → x * 2
+
+// Return 1 if x is positive, 0 otherwise.
+fn isPositive(x: int) → int
+    @asm[arm64]
+        "nop"
+    @asm[x86_64]
+        "nop"
+    → if x > 0 then 1 else 0
+
+fn main()
+    println(abs(-7))
+    println(abs(3))
+    println(abs(0))
+    println(double(5))
+    println(double(-3))
+    println(isPositive(42))
+    println(isPositive(-1))
+    println(isPositive(0))
