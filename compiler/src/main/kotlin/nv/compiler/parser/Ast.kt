@@ -472,6 +472,23 @@ data class ContinueStmt(override val span: SourceSpan, val label: String?) : Stm
 data class YieldStmt(override val span: SourceSpan, val expr: Expr) : Stmt()
 data class UnsafeBlock(override val span: SourceSpan, val stmts: List<Stmt>) : Stmt()
 
+// Inline assembly: @asm[arch] / @asm[arch, feature...]
+// Skipped by codegen if arch doesn't match the compile target.
+data class AsmStmt(
+    override val span: SourceSpan,
+    val arch: String,                // "x86_64", "arm64", etc.
+    val features: List<String>,      // ISA extensions: "avx2", "neon", etc.
+    val instructions: List<String>,  // raw asm instruction strings (joined with \n in IR)
+    val clobbers: List<String>,      // clobbered registers/resources: "x0", "rbx", "memory", "cc"
+) : Stmt()
+
+// Raw byte embedding: @bytes[arch]
+data class BytesStmt(
+    override val span: SourceSpan,
+    val arch: String,
+    val bytes: List<Int>,           // 0x00-0xFF hex/dec byte values
+) : Stmt()
+
 enum class AssignOp {
     ASSIGN,
     PLUS_ASSIGN, MINUS_ASSIGN, STAR_ASSIGN, SLASH_ASSIGN, INT_DIV_ASSIGN, MOD_ASSIGN,

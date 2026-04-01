@@ -2,6 +2,7 @@ package nv.compiler
 
 import nv.compiler.codegen.CodegenResult
 import nv.compiler.codegen.LlvmIrEmitter
+import nv.compiler.codegen.detectHostArch
 import nv.compiler.lexer.Lexer
 import nv.compiler.lexer.LexerError
 import nv.compiler.parser.ParseResult
@@ -28,7 +29,11 @@ import nv.compiler.typecheck.toCompileError
 object Compiler {
     const val VERSION = "0.0.1-SNAPSHOT"
 
-    fun compile(source: String, sourcePath: String): CompileResult {
+    fun compile(
+        source: String,
+        sourcePath: String,
+        targetArch: String = detectHostArch(),
+    ): CompileResult {
         val tokens = try {
             Lexer(source).tokenize()
         } catch (e: LexerError) {
@@ -49,7 +54,7 @@ object Compiler {
                         val tcResult = TypeChecker(module).check()
                         when (tcResult) {
                             is TypeCheckResult.Success   -> {
-                                when (val cgResult = LlvmIrEmitter(tcResult.module).emit()) {
+                                when (val cgResult = LlvmIrEmitter(tcResult.module, targetArch).emit()) {
                                     is CodegenResult.Success -> CompileResult.IrSuccess(cgResult.llvmIr)
                                     is CodegenResult.Failure -> CompileResult.Failure(
                                         cgResult.errors.map {

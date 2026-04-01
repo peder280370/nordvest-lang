@@ -465,6 +465,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 if (stmt is YieldStmt) synthesize(stmt.expr, env)
             }
             is UnsafeBlock -> checkBody(stmt.stmts, env, returnType)
+            is AsmStmt, is BytesStmt -> { /* inline asm blocks have no Nordvest type constraints */ }
             is GoStmt      -> checkGoStmt(stmt, env, returnType)
             is SpawnStmt   -> { synthesize(stmt.expr, env) }
             is SelectStmt  -> stmt.arms.forEach { arm ->

@@ -1145,6 +1145,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             at(CONTINUE) -> parseContinueStmt()
             at(UNSAFE) -> parseUnsafeBlock()
             at(YIELD) -> parseYieldStmt()
+            at(AT) && at(IDENT, 1) && peek(1).text == "asm"   -> parseAsmStmt()
+            at(AT) && at(IDENT, 1) && peek(1).text == "bytes" -> parseBytesStmt()
             at(NEWLINE) -> { advance(); null }
             at(DEDENT) || at(EOF) -> null
             else -> parseAssignOrExprStmt()
@@ -1556,6 +1558,113 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val expr = parseExpr()
         expectNewline()
         return YieldStmt(spanFrom(start), expr)
+    }
+
+    // ── Inline assembly / raw bytes ────────────────────────────────────────
+
+    /**
+     * Parses:
+     *   @asm[arch]
+     *     "instruction1"
+     *     "instruction2"
+     *     clobbers: ["reg1", "reg2"]    // optional
+     *
+     *   @asm[arch, feature1, feature2]
+     *     "instruction"
+     */
+    private fun parseAsmStmt(): Stmt {
+        val start = peek().span
+        expect(AT)
+        expect(IDENT)  // "asm"
+        expect(LBRACKET)
+        val arch = expect(IDENT).text
+        val features = mutableListOf<String>()
+        while (match(COMMA) != null) {
+            if (at(RBRACKET)) break
+            features += expect(IDENT).text
+        }
+        expect(RBRACKET)
+        expectNewline()
+        expectIndent("asm block")
+
+        val instructions = mutableListOf<String>()
+        val clobbers = mutableListOf<String>()
+
+        while (!at(DEDENT) && !at(EOF)) {
+            while (at(NEWLINE)) advance()
+            if (at(DEDENT) || at(EOF)) break
+            when {
+                // clobbers: ["reg1", "reg2"]
+                at(IDENT) && peek().text == "clobbers" -> {
+                    advance() // clobbers
+                    expect(COLON)
+                    expect(LBRACKET)
+                    while (!at(RBRACKET) && !at(EOF)) {
+                        if (at(STR_START)) clobbers += parseStringLiteralText()
+                        else if (!at(COMMA) && !at(RBRACKET)) break
+                        if (match(COMMA) == null) break
+                    }
+                    expect(RBRACKET)
+                    expectNewline()
+                }
+                at(STR_START) -> {
+                    instructions += parseStringLiteralText()
+                    expectNewline()
+                }
+                at(RAW_STRING_LIT) -> {
+                    instructions += advance().text
+                    expectNewline()
+                }
+                else -> {
+                    // unknown token in asm block — skip to next newline
+                    while (!at(NEWLINE) && !at(DEDENT) && !at(EOF)) advance()
+                    if (at(NEWLINE)) advance()
+                }
+            }
+        }
+
+        expectDedent()
+        return AsmStmt(spanFrom(start), arch, features, instructions, clobbers)
+    }
+
+    /**
+     * Parses:
+     *   @bytes[arch]
+     *     0x90, 0x90, 0x90
+     *
+     * Bytes may be on one or multiple lines, comma-separated or space-separated.
+     */
+    private fun parseBytesStmt(): Stmt {
+        val start = peek().span
+        expect(AT)
+        expect(IDENT)  // "bytes"
+        expect(LBRACKET)
+        val arch = expect(IDENT).text
+        expect(RBRACKET)
+        expectNewline()
+        expectIndent("bytes block")
+
+        val bytes = mutableListOf<Int>()
+        while (!at(DEDENT) && !at(EOF)) {
+            while (at(NEWLINE)) advance()
+            if (at(DEDENT) || at(EOF)) break
+            while (!at(NEWLINE) && !at(DEDENT) && !at(EOF)) {
+                when {
+                    at(INT_LIT) -> {
+                        val tok = advance()
+                        val v = tok.text.removePrefix("0x").removePrefix("0X")
+                            .let { if (tok.text.startsWith("0x") || tok.text.startsWith("0X")) it.toInt(16) else it.toInt() }
+                        bytes += v.coerceIn(0, 255)
+                    }
+                    at(COMMA) -> advance()
+                    else -> advance()
+                }
+            }
+            if (at(NEWLINE)) advance()
+        }
+
+        expectDedent()
+        return BytesStmt(spanFrom(start), arch, bytes)
     }
 
     private fun parseAssignOrExprStmt(): Stmt {

@@ -366,6 +366,16 @@ object AstPrinter {
             is ContinueStmt -> append("(Continue${node.label?.let { " @$it" } ?: ""})")
             is YieldStmt -> { append("(Yield "); printNode(node.expr, indent + 1); append(")") }
             is UnsafeBlock -> { append("(Unsafe "); printStmts(node.stmts, indent + 1); append(")") }
+            is AsmStmt -> {
+                val featStr = if (node.features.isEmpty()) "" else " features=[${node.features.joinToString(",")}]"
+                append("(Asm arch=${node.arch}$featStr")
+                for (inst in node.instructions) { append("\n${pad}  "); append(q(inst)) }
+                if (node.clobbers.isNotEmpty()) append("\n${pad}  clobbers=[${node.clobbers.joinToString(",")}]")
+                append(")")
+            }
+            is BytesStmt -> {
+                append("(Bytes arch=${node.arch} [${node.bytes.joinToString(",") { "0x%02x".format(it) }}])")
+            }
             is AssignStmt -> {
                 append("(Assign ${node.op} "); printNode(node.target, indent + 1); append(" "); printNode(node.value, indent + 1); append(")")
             }

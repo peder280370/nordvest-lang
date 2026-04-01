@@ -14,7 +14,11 @@ import nv.compiler.typecheck.isIntLike
  * compatibility. All locals use alloca/load/store. Runtime helpers are emitted inline so
  * the output module only requires libc.
  */
-class LlvmIrEmitter(private val tcModule: TypeCheckedModule) {
+class LlvmIrEmitter(
+    private val tcModule: TypeCheckedModule,
+    /** Target architecture for @asm / @bytes arch-selection. Defaults to host arch. */
+    val targetArch: String = detectHostArch(),
+) {
 
     // ── Output sections ───────────────────────────────────────────────────
 
@@ -515,6 +519,8 @@ entry:
             is ContinueStmt   -> emitContinueStmt(stmt)
             is GuardLetStmt   -> emitGuardLetStmt(stmt)
             is UnsafeBlock    -> stmt.stmts.forEach { emitStmt(it) }
+            is AsmStmt        -> emitAsmStmt(stmt)
+            is BytesStmt      -> emitBytesStmt(stmt)
             is DeferStmt      -> { /* Phase 1.5: defer not fully supported */ }
             is TryCatchStmt   -> emitTryCatchStmt(stmt)
             is ThrowStmt      -> { emitExpr(stmt.expr); Unit }
@@ -956,6 +962,39 @@ entry:
         emit("  $result = call i8* @malloc(i64 8)")
         return result
     }
+
+    // ── Inline assembly / raw bytes emit (Phase 2.2) ─────────────────────
+
+    /**
+     * Emits an @asm[arch] block as LLVM inline assembly.
+     *
+     * The asm string is formed by joining all instruction strings with "\0A\09"
+     * (newline + tab, the canonical LLVM separator). Clobbers are emitted as
+     * "~{reg}" constraints. If the block's arch doesn't match [targetArch] it is
+     * silently skipped — the compiler will fall through to the pure-Nordvest body.
+     */
+    private fun emitAsmStmt(stmt: AsmStmt) {
+        if (stmt.arch != targetArch || isTerminated) return
+
+        val asmStr = stmt.instructions.joinToString("\\0A\\09") { escapeAsmStr(it) }
+        val clobberConstraints = stmt.clobbers.joinToString(",") { "~{$it}" }
+        emit("  call void asm sideeffect \"$asmStr\", \"$clobberConstraints\"()")
+    }
+
+    /**
+     * Emits a @bytes[arch] block via LLVM inline assembly using `.byte` directives.
+     * Skipped if arch doesn't match [targetArch].
+     */
+    private fun emitBytesStmt(stmt: BytesStmt) {
+        if (stmt.arch != targetArch || isTerminated || stmt.bytes.isEmpty()) return
+
+        val byteStr = stmt.bytes.joinToString(", ") { "0x%02x".format(it) }
+        emit("  call void asm sideeffect \".byte $byteStr\", \"\"()")
+    }
+
+    /** Escape a raw asm string for embedding in an LLVM IR quoted string. */
+    private fun escapeAsmStr(s: String): String =
+        s.replace("\\", "\\\\").replace("\"", "\\22").replace("\n", "\\0A").replace("\t", "\\09")
 
     // ─────────────────────────────────────────────────────────────────────
     // Expression emit — returns the LLVM register holding the value
@@ -1918,5 +1957,15 @@ entry:
         is AwaitExpr             -> emitAwaitExpr(expr)
         is SpawnExpr             -> emitSpawnExprValue(expr)
         else                     -> "0"
+    }
+}
+
+/** Detects the host CPU architecture for @asm / @bytes target selection. */
+fun detectHostArch(): String {
+    val osArch = System.getProperty("os.arch") ?: ""
+    return when {
+        osArch == "aarch64" || osArch.contains("arm64") -> "arm64"
+        osArch == "amd64"   || osArch.contains("x86_64") -> "x86_64"
+        else -> osArch
     }
 }

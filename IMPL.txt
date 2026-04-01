@@ -16,7 +16,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 
   Phase: PHASE 2 — Systems & Concurrency  (in progress)
-  Next item: 2.2 — Inline assembly (@asm)
+  Next item: 2.3 — GPU acceleration (@gpu)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -247,7 +247,19 @@
                - nv_runtime.h/c: Channel<T>, Future<T>, nv_go_spawn, nv_future_spawn, nv_future_await (pthreads)
                - ConcurrencyTest.kt: 24 tests covering parser, AstPrinter, type checker, type system
                - Total tests: 449 passing (425 prior + 24 concurrency)
-  [TODO]  2.2  Inline assembly (@asm)
+  [DONE]  2.2  Inline assembly (@asm)
+               - Ast.kt: AsmStmt (arch, features, instructions, clobbers) + BytesStmt (arch, bytes)
+               - Parser.kt: @asm[arch] / @asm[arch, feat...] blocks with indented string literals;
+                   clobbers: ["reg"] optional clause; @bytes[arch] blocks with hex/int literals
+               - AstPrinter.kt: (Asm arch=... features=... "instr") and (Bytes arch=... [...]) output
+               - Resolver.kt: AsmStmt/BytesStmt added to exhaustive when; AsmStmt/BytesStmt imports
+               - TypeChecker.kt: AsmStmt/BytesStmt in checkStmt — no type constraints on asm blocks
+               - LlvmIrEmitter.kt: targetArch parameter (default detectHostArch()); emitAsmStmt emits
+                   `call void asm sideeffect "instr", "~{clobbers}"()` when arch matches, skips otherwise;
+                   emitBytesStmt emits `.byte 0xNN,...` via inline asm sideeffect
+               - Compiler.kt: targetArch param threaded through; detectHostArch() resolves os.arch
+               - AsmTest.kt: 29 tests covering parser, AstPrinter, type checker, codegen arch-selection
+               - Total tests: 478 passing (449 prior + 29 asm)
   [TODO]  2.3  GPU acceleration (@gpu)
   [TODO]  2.4  C/C++ interop (@extern, @c, @cpp)
   [TODO]  2.5  Operator overloading
