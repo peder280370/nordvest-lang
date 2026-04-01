@@ -1714,6 +1714,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             expect(RPAREN)
             return TupleBinding(spanFrom(start), names)
         }
+        if (at(UNDERSCORE)) {
+            advance()
+            return IdentBinding(spanFrom(start), "_")
+        }
         val name = expect(IDENT).text
         return IdentBinding(spanFrom(start), name)
     }
