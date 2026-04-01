@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-This repository is in **active development** — Phase 0 is complete and Phase 1 is in progress (through 1.4 type checker). The bootstrap compiler (Kotlin) has 396 passing tests. Next up: Phase 1.5 IR lowering.
+This repository is in **active development** — Phase 0 and Phase 1 are complete. The bootstrap compiler (Kotlin) has 425 passing tests and produces working native binaries via LLVM IR. Next up: Phase 2 — Systems & Concurrency.
 
 Key documents:
 - `EXAMPLE.txt` — language design and feature examples (the authoritative source for syntax and semantics)

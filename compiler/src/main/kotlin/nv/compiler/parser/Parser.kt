@@ -1615,13 +1615,16 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         // Check for capture list: [copy? name, ...] params -> body
         if (at(LBRACKET)) {
             val savedPos = pos
+            val savedErrorCount = errors.size
             try {
                 val captureList = tryParseCaptureList()
                 if (captureList != null && isLambdaStart()) {
                     return parseLambda(captureList)
                 }
             } catch (_: Exception) {}
+            // Speculative parse failed — restore position and roll back any errors added
             pos = savedPos
+            while (errors.size > savedErrorCount) errors.removeAt(errors.size - 1)
         }
         return parsePipelineExpr()
     }
@@ -1886,7 +1889,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
                     val member = expect(IDENT).text
                     SafeNavExpr(spanFrom(start), expr, member)
                 }
-                at(LBRACKET) -> {
+                at(LBRACKET) && !isRangeClosingBracket() -> {
                     advance()
                     val indices = parseIndexArgs()
                     expect(RBRACKET)
@@ -2119,6 +2122,31 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         return false
     }
 
+    /**
+     * Returns true if the LBRACKET at [pos] is a range-closing bracket (as in `[a, b[`)
+     * rather than an opening bracket for an index access.
+     *
+     * A range-closing `[` has no matching `]` before the next DEDENT or EOF.
+     * An index-access `[` always has a matching `]`.
+     */
+    private fun isRangeClosingBracket(): Boolean {
+        var i = pos + 1
+        var depth = 1
+        while (i < tokens.size) {
+            when (tokens[i].kind) {
+                TokenKind.LBRACKET -> depth++
+                TokenKind.RBRACKET -> {
+                    depth--
+                    if (depth == 0) return false  // found matching ] — index access
+                }
+                TokenKind.DEDENT, TokenKind.EOF -> return true  // no ] before end — range closer
+                else -> {}
+            }
+            i++
+        }
+        return true
+    }
+
     private fun isTupleLiteral(): Boolean {
         val closeIdx = findMatchingParen(pos)
         if (closeIdx == -1) return false
@@ -2331,11 +2359,21 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         }
 
         // Array literal: [expr, expr, ...]
+        // Also handles [a, b[ (HALF_OPEN_RIGHT range) and [a, b] (CLOSED range)
+        // by checking the closing token after the second element.
         val elements = mutableListOf(first)
         while (match(COMMA) != null) {
-            if (at(RBRACKET)) break
+            if (at(RBRACKET) || at(LBRACKET)) break
             elements += parseExpr()
         }
+        // If exactly two elements and the closing token is [ → half-open-right range
+        if (elements.size == 2 && at(LBRACKET)) {
+            advance() // consume closing [
+            return RangeExpr(spanFrom(start), RangeKind.HALF_OPEN_RIGHT, elements[0], elements[1])
+        }
+        // If exactly two elements and closing ] → closed range (only in for/match-like context
+        // where it can't be a 2-element array — detect by lookahead context elsewhere).
+        // For now: treat [a, b] as an array (closed range is ]a, b] or in match patterns).
         expect(RBRACKET)
         return ArrayLiteralExpr(spanFrom(start), elements)
     }

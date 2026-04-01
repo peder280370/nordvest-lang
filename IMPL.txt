@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 1 — Bootstrap Core
-  Next item: 1.5  IR lowering (HIR → MIR → LLVM IR)
+  Phase: PHASE 1 — Bootstrap Core  ✓ COMPLETE
+  Next item: Phase 2 — Systems & Concurrency
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -173,15 +173,63 @@
                  type aliases, lambdas, collections, quantifiers, struct/class types
                - Total tests: 396 passing (126 lexer + 144 parser + 43 resolver + 83 type checker)
 
-  [TODO]  1.5  IR lowering (HIR → MIR → LLVM IR)
+  [DONE]  1.5  IR lowering (HIR → MIR → LLVM IR)
                Target: compiler/src/main/kotlin/nv/compiler/codegen/
+               - CodegenError.kt  — sealed error hierarchy (UnsupportedFeature, InternalError)
+                                    each with message: String and span: SourceSpan?
+               - CodegenResult.kt — Success(llvmIr: String) / Failure(errors) sealed result
+               - LlvmIrEmitter.kt — ~1850-line LLVM IR emitter:
+                   * Typed-pointer IR style (i8*, i8**, $lt*) — compatible with Apple Clang 12+
+                   * Four StringBuilder sections: globals, declares, rtFns, userFns
+                   * Per-function alloca-based locals (alloca/load/store for all vars)
+                   * llvmType(): TInt/TInt64→i64, TFloat/TFloat64→double, TBool→i1,
+                     TStr→i8*, TUnit/TNever→void
+                   * stringConst(): string interning with GEP-based i8* extraction
+                   * Runtime functions inlined per module: @nv_print, @nv_println,
+                     @nv_print_int, @nv_println_int, @nv_print_float, @nv_println_float,
+                     @nv_print_bool, @nv_println_bool, @nv_int_to_str, @nv_float_to_str,
+                     @nv_bool_to_str, @nv_str_concat, @nv_str_eq, @nv_str_len, @nv_panic
+                   * Control flow: if/else, while, for-in (array), match (equality chains),
+                     short-circuit &&/||, inline if expressions (phi nodes)
+                   * String interpolation desugared to @nv_str_concat chains
+                   * Power operator ^ → @pow call; ÷ → sdiv; ^ float → @pow
+                   * main() lowered to define i32 @main(i32 %argc, i8** %argv)
+                   * User functions mangled to @nv_<name>
+                   * isTerminated flag prevents unreachable instructions after ret/br
+                   * loopStack for break/continue (while.end / while.cond targets)
+               - Compiler.kt updated: LlvmIrEmitter wired after TypeChecker;
+                 CompileResult.IrSuccess(llvmIr) added to sealed result class
+               - tests/src/test/kotlin/nv/tests/CodegenTest.kt — 27 tests:
+                   * IrStructure (21): check IR string content (no clang needed)
+                   * Integration (6): compile+run with clang, assumeTrue(clangAvailable())
+               - Total tests: 423 passing (126 lexer + 144 parser + 43 resolver +
+                 83 type checker + 27 codegen)
 
-  [TODO]  1.6  Runtime support library (C)
+  [DONE]  1.6  Runtime support library (C)
                Target: compiler/src/main/c/runtime/
+               - nv_runtime.h — declares all Phase 1 runtime functions:
+                   nv_print, nv_println, nv_print_int/float/bool, nv_println_int/float/bool,
+                   nv_int_to_str, nv_float_to_str, nv_bool_to_str, nv_str_concat,
+                   nv_str_eq, nv_str_len, nv_panic
+               - nv_runtime.c — C implementation; mirrors inline LLVM IR emitted per-module
+                   by LlvmIrEmitter.kt (either can be used independently)
+                   * PRId64 for portable int64 formatting
+                   * nv_panic: __attribute__((noreturn)) + fprintf(stderr) + exit(1)
+               Note: LlvmIrEmitter already emits these functions inline into each module;
+               the C runtime is a reference / alternative for linking against
 
-  [TODO]  1.7  nv CLI Phase 1 commands
-               - nv run, nv build (invoke compiler end-to-end)
-               - nv fmt stub
+  [DONE]  1.7  nv CLI Phase 1 commands
+               Target: tools/src/main/kotlin/nv/tools/Main.kt
+               - nv run <file>: compile → temp .ll → clang → exec (inheritIO)
+               - nv build <file> [-o output] [--emit-llvm]: compile → clang → binary
+               - Compiler fallback: tries clang, cc, gcc in order
+               - 60-second subprocess timeout
+               - --emit-llvm flag writes raw .ll file instead of native binary
+               - Golden file tests: GoldenFileTest.kt discovers tests/golden/**/*.nv,
+                   compiles with nv run, diffs against *.expected
+               - Total tests: 425 passing (126 lexer + 144 parser + 43 resolver +
+                 83 type checker + 27 codegen + 2 golden file integration)
+                 (3 golden files: hello, arithmetic, control_flow)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 2 — SYSTEMS & CONCURRENCY  (Milestone M2)

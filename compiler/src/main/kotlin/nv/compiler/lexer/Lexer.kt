@@ -52,6 +52,13 @@ class Lexer(source: String) {
      */
     private var bracketDepth: Int = 0
 
+    /**
+     * The kind of the last meaningful token emitted (non-whitespace, non-comment).
+     * Used to detect range-closing `[` in `[a, b[` notation, where the final `[`
+     * follows an expression terminator and should NOT inflate [bracketDepth].
+     */
+    private var lastTokenKind: TokenKind? = null
+
     // ── String-interpolation mode stack ──────────────────────────────────────
 
     private enum class LexMode { NORMAL, STRING, INTERP }
@@ -93,11 +100,26 @@ class Lexer(source: String) {
 
     /** Return the next [Token], advancing the internal position. */
     fun nextToken(): Token {
-        if (pending.isNotEmpty()) return pending.removeFirst()
+        if (pending.isNotEmpty()) {
+            val t = pending.removeFirst()
+            updateLastTokenKind(t)
+            return t
+        }
 
-        return when (currentMode) {
+        val t = when (currentMode) {
             LexMode.STRING -> lexStringContent()
             LexMode.NORMAL, LexMode.INTERP -> lexNormal()
+        }
+        updateLastTokenKind(t)
+        return t
+    }
+
+    private fun updateLastTokenKind(t: Token) {
+        // Only track meaningful tokens; ignore whitespace surrogates NEWLINE/INDENT/DEDENT
+        // so that `[\n  0, 3[` still treats the final `[` as a range closer.
+        when (t.kind) {
+            TokenKind.NEWLINE, TokenKind.INDENT, TokenKind.DEDENT -> { /* don't update */ }
+            else -> lastTokenKind = t.kind
         }
     }
 
@@ -595,7 +617,22 @@ class Lexer(source: String) {
         return when (c) {
             '(' -> { bracketDepth++; advance(); Token(TokenKind.LPAREN, "(", span(start)) }
             ')' -> { bracketDepth--; advance(); Token(TokenKind.RPAREN, ")", span(start)) }
-            '[' -> { bracketDepth++; advance(); Token(TokenKind.LBRACKET, "[", span(start)) }
+            '[' -> {
+                // Mathematical range notation: `[a, b[` (half-open right), `[a, b]` (closed).
+                // In these ranges the final `[` or `]` is a closing delimiter, not an opener.
+                // We detect this by requiring bracketDepth > 0 (we're already inside a `[`)
+                // AND the previous meaningful token is a numeric/constant literal (only safe
+                // heuristic that doesn't break `arr[i]` index accesses where the receiver
+                // is an identifier).  When a range-closing `[` is detected, decrement
+                // bracketDepth so the NEWLINE that follows the range is NOT suppressed.
+                val isRangeClose = bracketDepth > 0 && lastTokenKind in setOf(
+                    TokenKind.INT_LIT, TokenKind.FLOAT_LIT,
+                    TokenKind.CONST_PI, TokenKind.CONST_INF,
+                )
+                if (isRangeClose) bracketDepth-- else bracketDepth++
+                advance()
+                Token(TokenKind.LBRACKET, "[", span(start))
+            }
             ']' -> { bracketDepth--; advance(); Token(TokenKind.RBRACKET, "]", span(start)) }
             '{' -> {
                 bracketDepth++

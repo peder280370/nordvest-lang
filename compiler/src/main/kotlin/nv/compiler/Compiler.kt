@@ -1,5 +1,7 @@
 package nv.compiler
 
+import nv.compiler.codegen.CodegenResult
+import nv.compiler.codegen.LlvmIrEmitter
 import nv.compiler.lexer.Lexer
 import nv.compiler.lexer.LexerError
 import nv.compiler.parser.ParseResult
@@ -46,7 +48,16 @@ object Compiler {
                         }
                         val tcResult = TypeChecker(module).check()
                         when (tcResult) {
-                            is TypeCheckResult.Success   -> TODO("Phase 1.5: IR lowering")
+                            is TypeCheckResult.Success   -> {
+                                when (val cgResult = LlvmIrEmitter(tcResult.module).emit()) {
+                                    is CodegenResult.Success -> CompileResult.IrSuccess(cgResult.llvmIr)
+                                    is CodegenResult.Failure -> CompileResult.Failure(
+                                        cgResult.errors.map {
+                                            CompileError(it.message, sourcePath, it.span?.start?.line ?: 0, it.span?.start?.col ?: 0)
+                                        }
+                                    )
+                                }
+                            }
                             is TypeCheckResult.Recovered -> CompileResult.Failure(
                                 tcResult.module.errors.map { it.toCompileError(sourcePath) }
                             )
@@ -67,7 +78,10 @@ object Compiler {
 }
 
 sealed class CompileResult {
+    /** Phase 1.6+: path to compiled native binary. */
     data class Success(val outputPath: String) : CompileResult()
+    /** Phase 1.5: textual LLVM IR emitted successfully. */
+    data class IrSuccess(val llvmIr: String) : CompileResult()
     data class Failure(val errors: List<CompileError>) : CompileResult()
 }
 

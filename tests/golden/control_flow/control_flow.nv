@@ -1,0 +1,18 @@
+// Control flow — golden test
+fn main()
+    // if/else
+    let x = 7
+    if x > 5
+        println("big")
+    else
+        println("small")
+
+    // while loop
+    var i = 0
+    while i < 3
+        println(i)
+        i = i + 1
+
+    // for loop over range
+    for j in [0, 3[
+        println(j * 2)
