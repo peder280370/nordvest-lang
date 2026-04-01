@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 1 — Bootstrap Core  ✓ COMPLETE
-  Next item: Phase 2 — Systems & Concurrency
+  Phase: PHASE 2 — Systems & Concurrency  (in progress)
+  Next item: 2.2 — Inline assembly (@asm)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -235,7 +235,18 @@
   PHASE 2 — SYSTEMS & CONCURRENCY  (Milestone M2)
 ────────────────────────────────────────────────────────────────────────────────
 
-  [TODO]  2.1  Concurrency (async/await, goroutines, channels, select)
+  [DONE]  2.1  Concurrency (async/await, goroutines, channels, select)
+               - Ast.kt: FunctionDecl/FunctionSignatureDecl gain isAsync: Boolean
+               - Ast.kt: new expression nodes AwaitExpr, SpawnExpr
+               - Parser.kt: async fn parsed; await/spawn in expression position; isAsync propagated
+               - AstPrinter.kt: (async) marker on async fns; Await/SpawnExpr nodes printed
+               - Type.kt: TFuture<T>, TChannel<T> added; display() and isAssignable() updated
+               - TypeCheckError.kt: AwaitOutsideAsync error
+               - TypeChecker.kt: currentFunctionIsAsync tracking; AwaitExpr/SpawnExpr synthesised
+               - LlvmIrEmitter.kt: concurrency runtime declares; GoStmt/SelectStmt/AwaitExpr/SpawnExpr codegen stubs
+               - nv_runtime.h/c: Channel<T>, Future<T>, nv_go_spawn, nv_future_spawn, nv_future_await (pthreads)
+               - ConcurrencyTest.kt: 24 tests covering parser, AstPrinter, type checker, type system
+               - Total tests: 449 passing (425 prior + 24 concurrency)
   [TODO]  2.2  Inline assembly (@asm)
   [TODO]  2.3  GPU acceleration (@gpu)
   [TODO]  2.4  C/C++ interop (@extern, @c, @cpp)

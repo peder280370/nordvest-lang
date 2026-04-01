@@ -54,6 +54,7 @@ data class FunctionDecl(
     val docComment: String?,
     val annotations: List<Annotation>,
     val visibility: Visibility,
+    val isAsync: Boolean,
     val name: String,
     val typeParams: List<TypeParam>,
     val params: List<Param>,
@@ -66,6 +67,7 @@ data class FunctionSignatureDecl(
     override val span: SourceSpan,
     val annotations: List<Annotation>,
     val visibility: Visibility,
+    val isAsync: Boolean,
     val name: String,
     val typeParams: List<TypeParam>,
     val params: List<Param>,
@@ -452,6 +454,9 @@ data class GoExprBody(override val span: SourceSpan, val expr: Expr) : GoBody()
 data class GoStmt(override val span: SourceSpan, val captureList: List<CaptureItem>, val body: GoBody) : Stmt()
 
 data class SpawnStmt(override val span: SourceSpan, val expr: Expr) : Stmt()
+
+data class AwaitExpr(override val span: SourceSpan, val operand: Expr) : Expr()
+data class SpawnExpr(override val span: SourceSpan, val expr: Expr) : Expr()
 
 enum class DurationUnit { MS, S, M, H }
 data class DurationLit(val amount: Long, val unit: DurationUnit, val span: SourceSpan)

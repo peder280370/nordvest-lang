@@ -29,6 +29,8 @@ sealed class Type {
     data class TMap(val key: Type, val value: Type) : Type()
     data class TTuple(val fields: List<TupleField>) : Type()
     data class TResult(val okType: Type, val errType: Type) : Type()
+    data class TFuture(val inner: Type) : Type()
+    data class TChannel(val element: Type) : Type()
 
     // ── Sentinels ─────────────────────────────────────────────────────────
     object TUnknown : Type()   // not yet inferred; type checker fills this in
@@ -64,6 +66,8 @@ fun Type.display(): String = when (this) {
     is Type.TMap      -> "[${key.display()}: ${value.display()}]"
     is Type.TTuple    -> "(${fields.joinToString(", ") { f -> if (f.name != null) "${f.name}: ${f.type.display()}" else f.type.display() }})"
     is Type.TResult   -> "Result<${okType.display()}, ${errType.display()}>"
+    is Type.TFuture   -> "Future<${inner.display()}>"
+    is Type.TChannel  -> "Channel<${element.display()}>"
 }
 
 // ── Predicates ────────────────────────────────────────────────────────────
@@ -135,5 +139,7 @@ fun isAssignable(from: Type, to: Type): Boolean {
     if (from is Type.TNamed && to is Type.TNamed && from.qualifiedName == to.qualifiedName)
         return from.typeArgs.size == to.typeArgs.size &&
                from.typeArgs.zip(to.typeArgs).all { (f, t) -> isAssignable(f, t) }
+    if (from is Type.TFuture && to is Type.TFuture) return isAssignable(from.inner, to.inner)
+    if (from is Type.TChannel && to is Type.TChannel) return isAssignable(from.element, to.element)
     return false
 }

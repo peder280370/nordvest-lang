@@ -108,6 +108,14 @@ declare i32   @strcmp(i8*, i8*)
 declare void  @exit(i32) noreturn
 declare double @pow(double, double)
 declare double @fmod(double, double)
+declare i8*   @nv_go_spawn(i8* (i8*)*, i8*)
+declare i8*   @nv_future_spawn(i8* (i8*)*, i8*)
+declare i8*   @nv_future_await(i8*)
+declare i8*   @nv_channel_create(i64)
+declare void  @nv_channel_send(i8*, i8*)
+declare i8*   @nv_channel_receive(i8*)
+declare i32   @nv_channel_try_receive(i8*, i8**)
+declare void  @nv_channel_close(i8*)
 """.trimIndent())
     }
 
@@ -510,6 +518,9 @@ entry:
             is DeferStmt      -> { /* Phase 1.5: defer not fully supported */ }
             is TryCatchStmt   -> emitTryCatchStmt(stmt)
             is ThrowStmt      -> { emitExpr(stmt.expr); Unit }
+            is GoStmt         -> emitGoStmt(stmt)
+            is SpawnStmt      -> { emitExpr(stmt.expr); Unit }
+            is SelectStmt     -> emitSelectStmt(stmt)
             else              -> { /* unsupported */ }
         }
     }
@@ -899,6 +910,51 @@ entry:
         // Phase 1.5: simplified — just emit the try body; catch/finally ignored
         stmt.tryBody.forEach { emitStmt(it) }
         stmt.finallyBody?.forEach { emitStmt(it) }
+    }
+
+    // ── Concurrency statement emit ─────────────────────────────────────────
+
+    private fun emitGoStmt(stmt: GoStmt) {
+        // Phase 2.1 bootstrap: emit the body expression/block as a direct call
+        // Full pthread wrapping requires generating wrapper functions at codegen time,
+        // which is deferred. For now we emit the call directly (fire-and-forget semantics
+        // are approximated by a normal call).
+        when (val body = stmt.body) {
+            is GoExprBody  -> { emitExpr(body.expr); Unit }
+            is GoBlockBody -> body.stmts.forEach { emitStmt(it) }
+        }
+    }
+
+    private fun emitSelectStmt(stmt: SelectStmt) {
+        // Phase 2.1 bootstrap: emit each arm's body sequentially as a stub.
+        // A real select requires non-blocking channel polls; full implementation is
+        // deferred to the runtime-complete phase.
+        val mergeLabel = freshLabel("select.merge")
+        for (arm in stmt.arms) {
+            when (arm) {
+                is ReceiveSelectArm -> arm.body.forEach { emitStmt(it) }
+                is AfterSelectArm   -> arm.body.forEach { emitStmt(it) }
+                is DefaultSelectArm -> arm.body.forEach { emitStmt(it) }
+            }
+        }
+    }
+
+    private fun emitAwaitExpr(expr: AwaitExpr): String {
+        // Phase 2.1 bootstrap: call @nv_future_await on the future pointer.
+        val futureReg = emitExpr(expr.operand)
+        val result = fresh("await")
+        emit("  $result = call i8* @nv_future_await(i8* $futureReg)")
+        return result
+    }
+
+    private fun emitSpawnExprValue(expr: SpawnExpr): String {
+        // Phase 2.1 bootstrap: evaluate the inner expression as a direct call.
+        // Full pthread future wrapping is deferred.
+        val inner = emitExpr(expr.expr)
+        val result = fresh("spawn")
+        // Wrap the raw result in a dummy heap allocation to represent a future pointer
+        emit("  $result = call i8* @malloc(i64 8)")
+        return result
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1859,6 +1915,8 @@ entry:
         is IndexExpr             -> emitIndexExpr(expr)
         is QuantifierExpr        -> "0"
         is ListComprehensionExpr -> "null"
+        is AwaitExpr             -> emitAwaitExpr(expr)
+        is SpawnExpr             -> emitSpawnExprValue(expr)
         else                     -> "0"
     }
 }

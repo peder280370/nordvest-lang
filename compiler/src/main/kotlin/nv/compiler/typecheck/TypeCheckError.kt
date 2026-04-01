@@ -115,6 +115,12 @@ sealed class TypeCheckError {
     ) : TypeCheckError() {
         override val message get() = "duplicate match arm: '$pattern'"
     }
+
+    data class AwaitOutsideAsync(
+        override val span: SourceSpan,
+    ) : TypeCheckError() {
+        override val message get() = "await expression is only valid inside an async fn"
+    }
 }
 
 fun TypeCheckError.toCompileError(sourcePath: String) =

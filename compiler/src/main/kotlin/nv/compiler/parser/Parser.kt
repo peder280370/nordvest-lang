@@ -224,7 +224,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val vis = parseVisibility()
 
         return when {
-            at(FN) -> parseFunctionOrPropertyOrSubscriptDecl(docComment, annotations, vis)
+            at(FN) -> parseFunctionOrPropertyOrSubscriptDecl(docComment, annotations, vis, isAsync = false)
+            at(ASYNC) && at(FN, 1) -> parseFunctionOrPropertyOrSubscriptDecl(docComment, annotations, vis, isAsync = true)
             at(CLASS) -> parseClassDecl(docComment, annotations, vis)
             at(STRUCT) -> parseStructDecl(docComment, annotations, vis)
             at(RECORD) -> parseRecordDecl(docComment, annotations, vis)
@@ -336,8 +337,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         docComment: String?,
         annotations: List<Annotation>,
         vis: Visibility,
+        isAsync: Boolean = false,
     ): Decl {
         val start = peek().span
+        if (isAsync) expect(ASYNC)
         expect(FN)
 
         // Subscript: fn [ ... ]
@@ -352,9 +355,9 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             // Computed property: fn name → Type
             at(ARROW) -> parseComputedPropertyBody(start, docComment, annotations, vis, name)
             // Function: fn name(...)
-            at(LPAREN) -> parseFunctionBody(start, docComment, annotations, vis, name, typeParams)
+            at(LPAREN) -> parseFunctionBody(start, docComment, annotations, vis, isAsync, name, typeParams)
             // No parens and no arrow - treat as function signature with empty params (interface member)
-            else -> parseFunctionBody(start, docComment, annotations, vis, name, typeParams)
+            else -> parseFunctionBody(start, docComment, annotations, vis, isAsync, name, typeParams)
         }
     }
 
@@ -363,6 +366,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         docComment: String?,
         annotations: List<Annotation>,
         vis: Visibility,
+        isAsync: Boolean,
         name: String,
         typeParams: List<TypeParam>,
     ): Decl {
@@ -384,18 +388,18 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         if (at(NEWLINE) || at(SEMICOLON)) expectNewline()
         else if (!at(EOF) && !at(INDENT)) {
             // unexpected token after fn params - treat as signature
-            return FunctionSignatureDecl(spanFrom(start), annotations, vis, name, typeParams, params, returnType, throwsType)
+            return FunctionSignatureDecl(spanFrom(start), annotations, vis, isAsync, name, typeParams, params, returnType, throwsType)
         }
 
         // If INDENT follows, there is a body; otherwise it's a bare signature (e.g. interface member)
         if (!at(INDENT)) {
-            return FunctionSignatureDecl(spanFrom(start), annotations, vis, name, typeParams, params, returnType, throwsType)
+            return FunctionSignatureDecl(spanFrom(start), annotations, vis, isAsync, name, typeParams, params, returnType, throwsType)
         }
         expectIndent("fn $name")
         val body = parseStmtList()
         expectDedent()
 
-        return FunctionDecl(spanFrom(start), docComment, annotations, vis, name, typeParams, params, returnType, throwsType, body)
+        return FunctionDecl(spanFrom(start), docComment, annotations, vis, isAsync, name, typeParams, params, returnType, throwsType, body)
     }
 
     private fun parseComputedPropertyBody(
@@ -511,7 +515,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val vis = parseVisibility()
 
         return when {
-            at(FN) -> parseFunctionOrPropertyOrSubscriptDecl(doc, annotations, vis)
+            at(FN) -> parseFunctionOrPropertyOrSubscriptDecl(doc, annotations, vis, isAsync = false)
+            at(ASYNC) && at(FN, 1) -> parseFunctionOrPropertyOrSubscriptDecl(doc, annotations, vis, isAsync = true)
             at(INIT) -> parseInitBlock()
             at(TYPE) -> parseAssocTypeDecl()
             at(LET) || (at(WEAK) && at(LET, 1)) || (at(UNOWNED) && at(LET, 1)) -> parseFieldDecl(annotations, vis, isMutable = false)
@@ -2093,6 +2098,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
 
             at(SELF) -> { val t = advance(); IdentExpr(spanFrom(start), t.text) }
             at(SUPER) -> { val t = advance(); IdentExpr(spanFrom(start), t.text) }
+
+            // Async / concurrency expressions
+            at(AWAIT) -> { advance(); AwaitExpr(spanFrom(start), parseUnaryExpr()) }
+            at(SPAWN) -> { advance(); SpawnExpr(spanFrom(start), parseUnaryExpr()) }
 
             else -> {
                 errors += ParseError.UnexpectedToken(peek().kind, peek().text, "expression", peek().span)

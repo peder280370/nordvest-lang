@@ -1,6 +1,7 @@
 package nv.compiler.resolve
 
 import nv.compiler.parser.AfterSelectArm
+import nv.compiler.parser.AwaitExpr
 import nv.compiler.parser.ArrayLiteralExpr
 import nv.compiler.parser.ArrayTypeNode
 import nv.compiler.parser.AssignStmt
@@ -94,6 +95,7 @@ import nv.compiler.parser.SealedVariant
 import nv.compiler.parser.SelectStmt
 import nv.compiler.parser.SingleStmtDefer
 import nv.compiler.parser.SourceFile
+import nv.compiler.parser.SpawnExpr
 import nv.compiler.parser.SpawnStmt
 import nv.compiler.parser.Stmt
 import nv.compiler.parser.StringInterpolationPart
@@ -574,6 +576,8 @@ class Resolver(private val sourcePath: String) {
             is TypeTestExpr  -> { resolveExpr(expr.operand, scope); resolveTypeNode(expr.type, scope) }
             is SafeCastExpr  -> { resolveExpr(expr.operand, scope); resolveTypeNode(expr.type, scope) }
             is ForceCastExpr -> { resolveExpr(expr.operand, scope); resolveTypeNode(expr.type, scope) }
+            is AwaitExpr -> resolveExpr(expr.operand, scope)
+            is SpawnExpr -> { val se: SpawnExpr = expr; resolveExpr(se.expr, scope) }
             // Leaf nodes — no sub-expressions to resolve
             is IntLitExpr, is FloatLitExpr, is BoolLitExpr, is NilExpr,
             is CharLitExpr, is RawStringExpr, is ConstPiExpr, is ConstInfExpr,

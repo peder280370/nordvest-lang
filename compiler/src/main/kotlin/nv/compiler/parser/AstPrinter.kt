@@ -22,7 +22,7 @@ object AstPrinter {
             is ImportDecl -> append("(ImportDecl${if (node.isPub) " pub" else ""} name=${q(node.name.text)}${node.alias?.let { " as=$it" } ?: ""})")
 
             is FunctionDecl -> {
-                append("(FunctionDecl name=${q(node.name)} vis=${node.visibility}")
+                append("(FunctionDecl name=${q(node.name)} vis=${node.visibility}${if (node.isAsync) " (async)" else ""}")
                 if (node.typeParams.isNotEmpty()) append(" typeParams=[${node.typeParams.joinToString { it.name }}]")
                 for (p in node.params) { append("\n${pad}  "); printParam(p, indent + 1) }
                 node.returnType?.let { append("\n${pad}  returnType="); printNode(it, indent + 1) }
@@ -32,7 +32,7 @@ object AstPrinter {
             }
 
             is FunctionSignatureDecl -> {
-                append("(FunctionSignature name=${q(node.name)} vis=${node.visibility}")
+                append("(FunctionSignature name=${q(node.name)} vis=${node.visibility}${if (node.isAsync) " (async)" else ""}")
                 for (p in node.params) { append("\n${pad}  "); printParam(p, indent + 1) }
                 node.returnType?.let { append("\n${pad}  returnType="); printNode(it, indent + 1) }
                 append(")")
@@ -360,6 +360,8 @@ object AstPrinter {
             is GoStmt -> append("(Go)")
             is SpawnStmt -> { append("(Spawn "); printNode(node.expr, indent + 1); append(")") }
             is SelectStmt -> append("(Select ${node.arms.size} arms)")
+            is AwaitExpr -> { append("(Await "); printNode(node.operand, indent + 1); append(")") }
+            is SpawnExpr -> { append("(SpawnExpr "); printNode(node.expr, indent + 1); append(")") }
             is BreakStmt -> append("(Break${node.label?.let { " @$it" } ?: ""})")
             is ContinueStmt -> append("(Continue${node.label?.let { " @$it" } ?: ""})")
             is YieldStmt -> { append("(Yield "); printNode(node.expr, indent + 1); append(")") }

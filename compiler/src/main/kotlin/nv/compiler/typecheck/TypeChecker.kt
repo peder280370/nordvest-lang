@@ -34,6 +34,9 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     /** Current function's declared return type (for checking return statements). */
     private var currentReturnType: Type? = null
 
+    /** Whether the current function is declared async (for validating await expressions). */
+    private var currentFunctionIsAsync: Boolean = false
+
     /** Type parameter names in scope (for resolveTypeNode to produce TVar). */
     private var currentTypeParams: Set<String> = emptySet()
 
@@ -361,9 +364,12 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 ?: Type.TUnit
 
             val prevReturn = currentReturnType
+            val prevAsync  = currentFunctionIsAsync
             currentReturnType = retType
+            currentFunctionIsAsync = decl.isAsync
             checkBody(decl.body, fnEnv, retType)
             currentReturnType = prevReturn
+            currentFunctionIsAsync = prevAsync
         }
     }
 
@@ -703,6 +709,25 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
         // ── Lambda ───────────────────────────────────────────────────────
         is LambdaExpr -> synthesizeLambda(expr, env)
+
+        // ── Concurrency ──────────────────────────────────────────────────
+        is AwaitExpr -> {
+            if (!currentFunctionIsAsync) errors += TypeCheckError.AwaitOutsideAsync(expr.span)
+            val futureType = synthesize(expr.operand, env)
+            when (futureType) {
+                is Type.TFuture -> futureType.inner
+                Type.TUnknown   -> Type.TUnknown
+                Type.TError     -> Type.TError
+                else -> {
+                    errors += TypeCheckError.TypeMismatch(Type.TFuture(Type.TUnknown), futureType, expr.span)
+                    Type.TError
+                }
+            }
+        }
+        is SpawnExpr -> {
+            val inner = synthesize(expr.expr, env)
+            Type.TFuture(inner)
+        }
     }
 
     // ── Unary operators ───────────────────────────────────────────────────
