@@ -374,7 +374,7 @@ class Resolver(private val sourcePath: String) {
         val targetName = decl.target.name.parts.first()
         val sym = enclosing.lookup(targetName)
         if (sym == null) {
-            errors += ResolveError.UndefinedSymbol(targetName, decl.target.span)
+            errors += undefinedSymbolError(targetName, decl.target.span, enclosing)
         } else {
             resolvedRefs[decl.target.span.start.offset] = sym
         }
@@ -536,7 +536,7 @@ class Resolver(private val sourcePath: String) {
             is IdentExpr -> {
                 val sym = scope.lookup(expr.name)
                 if (sym == null) {
-                    errors += ResolveError.UndefinedSymbol(expr.name, expr.span)
+                    errors += undefinedSymbolError(expr.name, expr.span, scope)
                 } else {
                     resolvedRefs[expr.span.start.offset] = sym
                 }
@@ -652,7 +652,7 @@ class Resolver(private val sourcePath: String) {
                 val name = pattern.typeName.parts.first()
                 val sym = scope.lookup(name)
                 if (sym == null) {
-                    errors += ResolveError.UndefinedSymbol(name, pattern.typeName.span)
+                    errors += undefinedSymbolError(name, pattern.typeName.span, scope)
                 } else {
                     resolvedRefs[pattern.typeName.span.start.offset] = sym
                 }
@@ -678,7 +678,7 @@ class Resolver(private val sourcePath: String) {
                 val name = type.name.parts.first()
                 val sym = scope.lookup(name)
                 if (sym == null) {
-                    errors += ResolveError.UndefinedSymbol(name, type.span)
+                    errors += undefinedSymbolError(name, type.span, scope)
                 } else {
                     resolvedRefs[type.span.start.offset] = sym
                 }
@@ -698,4 +698,52 @@ class Resolver(private val sourcePath: String) {
 
     private fun syntheticUnknownType(span: SourceSpan): TypeNode =
         NamedTypeNode(span, QualifiedName(span, listOf("_")), emptyList())
+
+    /**
+     * Compute Levenshtein edit distance between two strings.
+     */
+    private fun levenshtein(a: String, b: String): Int {
+        val m = a.length
+        val n = b.length
+        val dp = Array(m + 1) { IntArray(n + 1) }
+        for (i in 0..m) dp[i][0] = i
+        for (j in 0..n) dp[0][j] = j
+        for (i in 1..m) {
+            for (j in 1..n) {
+                dp[i][j] = if (a[i - 1] == b[j - 1]) dp[i - 1][j - 1]
+                else 1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+            }
+        }
+        return dp[m][n]
+    }
+
+    /**
+     * Collect all symbol names visible from [scope] (walks up parent chain).
+     */
+    private fun collectVisibleNames(scope: Scope): List<String> {
+        val names = mutableListOf<String>()
+        var current: Scope? = scope
+        while (current != null) {
+            names += current.localSymbols.map { it.name }
+            current = current.parent
+        }
+        return names
+    }
+
+    /**
+     * Find symbol name suggestions for [name] within [scope] using Levenshtein distance ≤ 2.
+     */
+    private fun suggestNames(name: String, scope: Scope): List<String> {
+        return collectVisibleNames(scope)
+            .filter { candidate ->
+                candidate != name && levenshtein(name, candidate) <= 2
+            }
+            .sortedBy { levenshtein(name, it) }
+            .take(3)
+    }
+
+    private fun undefinedSymbolError(name: String, span: SourceSpan, scope: Scope): ResolveError.UndefinedSymbol {
+        val suggestions = suggestNames(name, scope)
+        return ResolveError.UndefinedSymbol(name, span, suggestions)
+    }
 }

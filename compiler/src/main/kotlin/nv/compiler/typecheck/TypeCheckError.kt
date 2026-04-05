@@ -29,7 +29,9 @@ sealed class TypeCheckError {
         val type: Type,
         override val span: SourceSpan,
     ) : TypeCheckError() {
-        override val message get() = "type '${type.display()}' is not nullable; cannot use '?.', '??', or '!.'"
+        override val message get() =
+            "type '${type.display()}' is not nullable; cannot use '?.', '??', or '!.'" +
+            " — consider using '?.' for safe access or '??' for a default value"
     }
 
     data class ForceUnwrapNonNullable(

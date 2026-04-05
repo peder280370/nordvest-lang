@@ -1,0 +1,111 @@
+module std.archive
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned by archive operations. */
+pub class ArchiveError(pub message: str, pub entry: str = "")
+
+// ── Entry metadata ────────────────────────────────────────────────────────────
+
+/** Metadata for a single file or directory within an archive. */
+pub class ArchiveEntry(
+    pub name: str,
+    pub size: int,
+    pub compressedSize: int,
+    pub isDir: bool,
+    pub modTime: int,
+    pub mode: int
+)
+
+// ── Archive types ─────────────────────────────────────────────────────────────
+
+/** A ZIP archive that can be read or written. */
+pub class ZipArchive
+
+/** A TAR archive (optionally compressed with gzip or bzip2). */
+pub class TarArchive
+
+/** Compression method for tar archives. */
+pub enum TarCompression
+    None
+    Gzip
+    Bzip2
+    Xz
+
+// ── ZIP operations ────────────────────────────────────────────────────────────
+
+/** Open an existing ZIP file for reading. */
+pub fn zipOpen(path: str) → Result<ZipArchive, ArchiveError>
+
+/** Create a new ZIP archive at the given path for writing. */
+pub fn zipCreate(path: str) → Result<ZipArchive, ArchiveError>
+
+/** List all entries in a ZIP archive. */
+pub fn zipEntries(zip: ZipArchive) → Result<[ArchiveEntry], ArchiveError>
+
+/** Read the contents of a named entry from a ZIP archive. */
+pub fn zipRead(zip: ZipArchive, name: str) → Result<[byte], ArchiveError>
+
+/** Add a file to a ZIP archive from bytes. */
+pub fn zipAdd(zip: ZipArchive, name: str, data: [byte]) → Result<(), ArchiveError>
+
+/** Add a file to a ZIP archive from a filesystem path. */
+pub fn zipAddFile(zip: ZipArchive, name: str, sourcePath: str) → Result<(), ArchiveError>
+
+/** Extract all entries from a ZIP archive to a destination directory. */
+pub fn zipExtract(zip: ZipArchive, destDir: str) → Result<(), ArchiveError>
+
+/** Extract a single named entry from a ZIP archive to a destination path. */
+pub fn zipExtractEntry(zip: ZipArchive, name: str, destPath: str) → Result<(), ArchiveError>
+
+/** Close a ZIP archive, flushing any pending writes. */
+pub fn zipClose(zip: ZipArchive) → Result<(), ArchiveError>
+
+// ── TAR operations ────────────────────────────────────────────────────────────
+
+/** Open an existing TAR file for reading (auto-detects compression). */
+pub fn tarOpen(path: str) → Result<TarArchive, ArchiveError>
+
+/** Open an existing TAR file with an explicit compression format. */
+pub fn tarOpenWith(path: str, compression: TarCompression) → Result<TarArchive, ArchiveError>
+
+/** Create a new TAR archive at the given path with the given compression. */
+pub fn tarCreate(path: str, compression: TarCompression = TarCompression.None) → Result<TarArchive, ArchiveError>
+
+/** List all entries in a TAR archive. */
+pub fn tarEntries(tar: TarArchive) → Result<[ArchiveEntry], ArchiveError>
+
+/** Read the contents of a named entry from a TAR archive. */
+pub fn tarRead(tar: TarArchive, name: str) → Result<[byte], ArchiveError>
+
+/** Add a file to a TAR archive from bytes. */
+pub fn tarAdd(tar: TarArchive, name: str, data: [byte], mode: int = 0o644) → Result<(), ArchiveError>
+
+/** Add a file to a TAR archive from a filesystem path. */
+pub fn tarAddFile(tar: TarArchive, name: str, sourcePath: str) → Result<(), ArchiveError>
+
+/** Add a directory entry to a TAR archive. */
+pub fn tarAddDir(tar: TarArchive, name: str) → Result<(), ArchiveError>
+
+/** Extract all entries from a TAR archive to a destination directory. */
+pub fn tarExtract(tar: TarArchive, destDir: str) → Result<(), ArchiveError>
+
+/** Extract a single named entry from a TAR archive to a destination path. */
+pub fn tarExtractEntry(tar: TarArchive, name: str, destPath: str) → Result<(), ArchiveError>
+
+/** Close a TAR archive, flushing any pending writes. */
+pub fn tarClose(tar: TarArchive) → Result<(), ArchiveError>
+
+// ── High-level helpers ────────────────────────────────────────────────────────
+
+/** Create a ZIP archive from a directory tree and write it to path. */
+pub fn zipDir(sourceDir: str, destPath: str) → Result<(), ArchiveError>
+
+/** Extract a ZIP archive at sourcePath to destDir. */
+pub fn unzip(sourcePath: str, destDir: str) → Result<(), ArchiveError>
+
+/** Create a gzipped TAR archive from a directory tree and write it to path. */
+pub fn tarGzDir(sourceDir: str, destPath: str) → Result<(), ArchiveError>
+
+/** Extract a TAR archive at sourcePath to destDir (auto-detects compression). */
+pub fn untar(sourcePath: str, destDir: str) → Result<(), ArchiveError>

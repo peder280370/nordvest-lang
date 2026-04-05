@@ -1,0 +1,109 @@
+module std.stats
+
+// ── Descriptive statistics ────────────────────────────────────────────────────
+
+/** Compute the arithmetic mean (average) of a list of values. */
+pub fn mean(values: [float]) → float?
+
+/** Compute the weighted mean of values with corresponding weights. */
+pub fn weightedMean(values: [float], weights: [float]) → float?
+
+/** Compute the median (middle value) of a list of values. */
+pub fn median(values: [float]) → float?
+
+/** Compute the mode (most frequent value) of a list of values. */
+pub fn mode(values: [float]) → float?
+
+/** Compute the population variance of a list of values. */
+pub fn variance(values: [float]) → float?
+
+/** Compute the sample variance of a list of values (Bessel's correction). */
+pub fn sampleVariance(values: [float]) → float?
+
+/** Compute the population standard deviation of a list of values. */
+pub fn stddev(values: [float]) → float?
+
+/** Compute the sample standard deviation of a list of values. */
+pub fn sampleStddev(values: [float]) → float?
+
+/** Compute the minimum value in a list. */
+pub fn min(values: [float]) → float?
+
+/** Compute the maximum value in a list. */
+pub fn max(values: [float]) → float?
+
+/** Compute the range (max - min) of a list of values. */
+pub fn range(values: [float]) → float?
+
+/** Compute the sum of a list of values. */
+pub fn sum(values: [float]) → float
+
+/** Compute the product of a list of values. */
+pub fn product(values: [float]) → float
+
+// ── Percentiles & quantiles ───────────────────────────────────────────────────
+
+/** Compute the p-th percentile (0–100) of a list of values using linear interpolation. */
+pub fn percentile(values: [float], p: float) → float?
+
+/** Compute the first quartile (25th percentile). */
+pub fn q1(values: [float]) → float?
+
+/** Compute the third quartile (75th percentile). */
+pub fn q3(values: [float]) → float?
+
+/** Compute the interquartile range (Q3 - Q1). */
+pub fn iqr(values: [float]) → float?
+
+// ── Distribution ──────────────────────────────────────────────────────────────
+
+/** A histogram with bucket boundaries and counts. */
+pub struct Histogram(
+    pub buckets: [float],
+    pub counts: [int],
+    pub min: float,
+    pub max: float,
+    pub total: int
+)
+
+/** Compute a histogram of values with the given number of equal-width buckets. */
+pub fn histogram(values: [float], buckets: int = 10) → Histogram?
+
+/** Compute a histogram with explicit bucket boundaries. */
+pub fn histogramWith(values: [float], boundaries: [float]) → Histogram?
+
+/** Compute the skewness of a distribution. */
+pub fn skewness(values: [float]) → float?
+
+/** Compute the excess kurtosis of a distribution. */
+pub fn kurtosis(values: [float]) → float?
+
+// ── Correlation ───────────────────────────────────────────────────────────────
+
+/** Compute the Pearson correlation coefficient between two lists. */
+pub fn pearsonCorr(x: [float], y: [float]) → float?
+
+/** Compute the Spearman rank correlation coefficient between two lists. */
+pub fn spearmanCorr(x: [float], y: [float]) → float?
+
+/** Compute the covariance between two lists of values. */
+pub fn covariance(x: [float], y: [float]) → float?
+
+// ── Normalization ─────────────────────────────────────────────────────────────
+
+/** Normalize values to the range [0, 1] (min-max normalization). */
+pub fn normalize(values: [float]) → [float]
+
+/** Standardize values to zero mean and unit variance (z-score normalization). */
+pub fn standardize(values: [float]) → [float]
+
+// ── Sampling ──────────────────────────────────────────────────────────────────
+
+/** Draw n random samples from values with replacement. */
+pub fn sampleWithReplacement(values: [float], n: int) → [float]
+
+/** Draw n random samples from values without replacement. */
+pub fn sampleWithoutReplacement(values: [float], n: int) → [float]?
+
+/** Shuffle a list of values randomly. */
+pub fn shuffle(values: [float]) → [float]

@@ -1,0 +1,119 @@
+module std.xml
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned by XML operations. */
+pub class XmlError(pub message: str, pub line: int = 0, pub column: int = 0)
+
+// ── DOM types ─────────────────────────────────────────────────────────────────
+
+/** A generic XML node (element, text, comment, processing instruction, or CDATA). */
+pub class XmlNode
+
+/** An XML element node with a tag name, attributes, and child nodes. */
+pub class XmlElement
+
+/** An XML document — the root container holding a declaration and root element. */
+pub class XmlDocument
+
+// ── SAX types ─────────────────────────────────────────────────────────────────
+
+/** A streaming XML reader for SAX-style event-based parsing. */
+pub class XmlReader
+
+/** A streaming XML writer for generating XML output incrementally. */
+pub class XmlWriter
+
+// ── DOM parsing ───────────────────────────────────────────────────────────────
+
+/** Parse an XML string into a DOM document. */
+pub fn parse(s: str) → Result<XmlDocument, XmlError>
+
+/** Parse XML from a file path into a DOM document. */
+pub fn parseFile(path: str) → Result<XmlDocument, XmlError>
+
+/** Serialize an XmlDocument back to an XML string. */
+pub fn serialize(doc: XmlDocument) → str
+
+/** Serialize with pretty-printing using the given indent string. */
+pub fn serializePretty(doc: XmlDocument, indent: str = "  ") → str
+
+// ── Document navigation ───────────────────────────────────────────────────────
+
+/** Get the root element of an XML document. */
+pub fn rootElement(doc: XmlDocument) → XmlElement?
+
+/** Get the tag name of an element. */
+pub fn tagName(el: XmlElement) → str
+
+/** Get an attribute value by name from an element. */
+pub fn attr(el: XmlElement, name: str) → str?
+
+/** Get all attributes of an element as a map. */
+pub fn attrs(el: XmlElement) → [str: str]
+
+/** Get direct child elements of an element. */
+pub fn children(el: XmlElement) → [XmlElement]
+
+/** Get the text content of an element (concatenated text nodes). */
+pub fn textContent(el: XmlElement) → str
+
+/** Find all descendant elements with the given tag name. */
+pub fn getElementsByTag(el: XmlElement, tag: str) → [XmlElement]
+
+/** Find the first descendant element with the given tag name. */
+pub fn firstElementByTag(el: XmlElement, tag: str) → XmlElement?
+
+// ── DOM construction ──────────────────────────────────────────────────────────
+
+/** Create a new empty XML document. */
+pub fn newDocument(version: str = "1.0", encoding: str = "UTF-8") → XmlDocument
+
+/** Create a new element node with the given tag name. */
+pub fn newElement(tag: str) → XmlElement
+
+/** Set an attribute on an element. */
+pub fn setAttribute(el: XmlElement, name: str, value: str) → ()
+
+/** Append a child element to a parent element. */
+pub fn appendChild(parent: XmlElement, child: XmlElement) → ()
+
+/** Set the text content of an element. */
+pub fn setTextContent(el: XmlElement, text: str) → ()
+
+// ── Streaming reader ──────────────────────────────────────────────────────────
+
+/** Create a streaming SAX-style reader over an XML string. */
+pub fn newReader(s: str) → XmlReader
+
+/** Advance the reader to the next event. Returns false when the document ends. */
+pub fn readerNext(r: XmlReader) → bool
+
+/** Get the event type of the current reader position (e.g. "start", "end", "text"). */
+pub fn readerEventType(r: XmlReader) → str
+
+/** Get the local name at the current reader position. */
+pub fn readerName(r: XmlReader) → str
+
+/** Get the text value at the current reader position (for text/CDATA events). */
+pub fn readerValue(r: XmlReader) → str
+
+// ── Streaming writer ──────────────────────────────────────────────────────────
+
+/** Create a new streaming XML writer. */
+pub fn newWriter() → XmlWriter
+
+/** Write an XML declaration to the writer. */
+pub fn writeDeclaration(w: XmlWriter, version: str = "1.0", encoding: str = "UTF-8") → ()
+
+/** Write an opening element tag with optional attributes. */
+pub fn writeStartElement(w: XmlWriter, tag: str, attrs: [str: str] = [:]) → ()
+
+/** Write a closing element tag. */
+pub fn writeEndElement(w: XmlWriter) → ()
+
+/** Write a text node. */
+pub fn writeText(w: XmlWriter, text: str) → ()
+
+/** Flush the writer and return the accumulated XML string. */
+pub fn writerResult(w: XmlWriter) → str

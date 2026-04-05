@@ -1,0 +1,137 @@
+module std.bignum
+
+// ── Rounding mode ─────────────────────────────────────────────────────────────
+
+/** Rounding mode for Decimal arithmetic operations. */
+pub enum RoundMode
+    HalfUp
+    HalfDown
+    HalfEven
+    Up
+    Down
+    Ceiling
+    Floor
+
+// ── BigInt ────────────────────────────────────────────────────────────────────
+
+/** Arbitrary-precision integer. Supports values of any size. */
+pub class BigInt
+
+/** Parse a decimal string into a BigInt. Returns nil on invalid input. */
+pub fn bigIntFromStr(s: str) → BigInt?
+
+/** Parse a string with the given radix (2–36) into a BigInt. */
+pub fn bigIntFromStrRadix(s: str, radix: int) → BigInt?
+
+/** Create a BigInt from a native int value. */
+pub fn bigIntFromInt(n: int) → BigInt
+
+/** Convert a BigInt to its decimal string representation. */
+pub fn bigIntToStr(n: BigInt) → str
+
+/** Convert a BigInt to a string in the given radix (2–36). */
+pub fn bigIntToStrRadix(n: BigInt, radix: int) → str
+
+/** Convert a BigInt to a native int (truncates if out of range). */
+pub fn bigIntToInt(n: BigInt) → int
+
+/** Add two BigInt values. */
+pub fn bigIntAdd(a: BigInt, b: BigInt) → BigInt
+
+/** Subtract b from a. */
+pub fn bigIntSub(a: BigInt, b: BigInt) → BigInt
+
+/** Multiply two BigInt values. */
+pub fn bigIntMul(a: BigInt, b: BigInt) → BigInt
+
+/** Divide a by b (integer division, truncates toward zero). */
+pub fn bigIntDiv(a: BigInt, b: BigInt) → BigInt
+
+/** Compute a modulo b. */
+pub fn bigIntMod(a: BigInt, b: BigInt) → BigInt
+
+/** Raise a BigInt to an integer power. */
+pub fn bigIntPow(base: BigInt, exp: int) → BigInt
+
+/** Compute the greatest common divisor of two BigInt values. */
+pub fn bigIntGcd(a: BigInt, b: BigInt) → BigInt
+
+/** Compute the least common multiple of two BigInt values. */
+pub fn bigIntLcm(a: BigInt, b: BigInt) → BigInt
+
+/** Compare two BigInt values. Returns -1, 0, or 1. */
+pub fn bigIntCmp(a: BigInt, b: BigInt) → int
+
+/** Return the absolute value of a BigInt. */
+pub fn bigIntAbs(n: BigInt) → BigInt
+
+/** Return the negation of a BigInt. */
+pub fn bigIntNeg(n: BigInt) → BigInt
+
+/** Return the sign of a BigInt: -1, 0, or 1. */
+pub fn bigIntSign(n: BigInt) → int
+
+/** Bitwise AND of two BigInt values. */
+pub fn bigIntAnd(a: BigInt, b: BigInt) → BigInt
+
+/** Bitwise OR of two BigInt values. */
+pub fn bigIntOr(a: BigInt, b: BigInt) → BigInt
+
+/** Bitwise XOR of two BigInt values. */
+pub fn bigIntXor(a: BigInt, b: BigInt) → BigInt
+
+/** Left-shift a BigInt by n bits. */
+pub fn bigIntShl(n: BigInt, shift: int) → BigInt
+
+/** Right-shift a BigInt by n bits (arithmetic). */
+pub fn bigIntShr(n: BigInt, shift: int) → BigInt
+
+// ── Decimal ───────────────────────────────────────────────────────────────────
+
+/** Arbitrary-precision decimal number with configurable precision and rounding. */
+pub class Decimal
+
+/** Parse a decimal string into a Decimal value. Returns nil on invalid input. */
+pub fn decimalFromStr(s: str) → Decimal?
+
+/** Create a Decimal from a native float value with the given scale. */
+pub fn decimalFromFloat(f: float, scale: int = 10) → Decimal
+
+/** Create a Decimal from a BigInt numerator and an integer scale (10^-scale). */
+pub fn decimalFromBigInt(n: BigInt, scale: int = 0) → Decimal
+
+/** Convert a Decimal to its string representation. */
+pub fn decimalToStr(d: Decimal) → str
+
+/** Convert a Decimal to a float (may lose precision). */
+pub fn decimalToFloat(d: Decimal) → float
+
+/** Convert a Decimal to a BigInt (truncates fractional part). */
+pub fn decimalToBigInt(d: Decimal) → BigInt
+
+/** Add two Decimal values. */
+pub fn decimalAdd(a: Decimal, b: Decimal) → Decimal
+
+/** Subtract b from a. */
+pub fn decimalSub(a: Decimal, b: Decimal) → Decimal
+
+/** Multiply two Decimal values. */
+pub fn decimalMul(a: Decimal, b: Decimal) → Decimal
+
+/** Divide a by b with the given scale and rounding mode. */
+pub fn decimalDiv(a: Decimal, b: Decimal, scale: int = 10, mode: RoundMode = RoundMode.HalfEven) → Decimal
+
+/** Round a Decimal to the given number of decimal places. */
+pub fn decimalRound(d: Decimal, places: int, mode: RoundMode = RoundMode.HalfEven) → Decimal
+
+/** Return the absolute value of a Decimal. */
+pub fn decimalAbs(d: Decimal) → Decimal
+
+/** Return the negation of a Decimal. */
+pub fn decimalNeg(d: Decimal) → Decimal
+
+/** Compare two Decimal values. Returns -1, 0, or 1. */
+pub fn decimalCmp(a: Decimal, b: Decimal) → int
+
+/** Return the number of fractional digits (scale) of a Decimal. */
+pub fn decimalScale(d: Decimal) → int

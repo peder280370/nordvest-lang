@@ -8,7 +8,19 @@ sealed class ResolveError(message: String, val span: SourceSpan) : Exception(mes
     class UndefinedSymbol(
         val name: String,
         span: SourceSpan,
-    ) : ResolveError("Undefined symbol '$name'", span)
+        val suggestions: List<String> = emptyList(),
+    ) : ResolveError(
+        buildMessage(name, suggestions),
+        span,
+    ) {
+        companion object {
+            private fun buildMessage(name: String, suggestions: List<String>): String {
+                val base = "Undefined symbol '$name'"
+                return if (suggestions.isEmpty()) base
+                else "$base; did you mean: ${suggestions.joinToString(", ") { "'$it'" }}?"
+            }
+        }
+    }
 
     class DuplicateDefinition(
         val name: String,

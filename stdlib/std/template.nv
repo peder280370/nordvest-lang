@@ -1,0 +1,66 @@
+module std.template
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned when compiling or rendering a template. */
+pub class TemplateError(pub message: str, pub line: int = 0, pub column: int = 0)
+
+// ── Template types ────────────────────────────────────────────────────────────
+
+/** A compiled text template. Supports {{var}}, {{#each}}, {{#if}}, and {{> partial}} syntax. */
+pub class Template
+
+/** A compiled HTML template with automatic output escaping for safety. */
+pub class HtmlTemplate
+
+// ── Compilation ───────────────────────────────────────────────────────────────
+
+/** Compile a template string into a Template. */
+pub fn compile(source: str) → Result<Template, TemplateError>
+
+/** Compile a template from a file path. */
+pub fn compileFile(path: str) → Result<Template, TemplateError>
+
+/** Compile an HTML template string (output is HTML-escaped by default). */
+pub fn compileHtml(source: str) → Result<HtmlTemplate, TemplateError>
+
+/** Compile an HTML template from a file path. */
+pub fn compileHtmlFile(path: str) → Result<HtmlTemplate, TemplateError>
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+/** Render a compiled Template with a context map and return the result string. */
+pub fn render(tmpl: Template, ctx: [str: str]) → Result<str, TemplateError>
+
+/** Render a compiled HtmlTemplate with a context map and return the HTML string. */
+pub fn renderHtml(tmpl: HtmlTemplate, ctx: [str: str]) → Result<str, TemplateError>
+
+/** Render a Template to a file, writing the output to the given path. */
+pub fn renderToFile(tmpl: Template, ctx: [str: str], path: str) → Result<(), TemplateError>
+
+// ── Partials ──────────────────────────────────────────────────────────────────
+
+/** Register a named partial template that can be included via {{> name}}. */
+pub fn registerPartial(name: str, source: str) → Result<(), TemplateError>
+
+/** Register a named partial from a compiled Template. */
+pub fn registerPartialTemplate(name: str, tmpl: Template) → ()
+
+/** Unregister a named partial. */
+pub fn unregisterPartial(name: str) → ()
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Register a custom helper function callable from templates via {{helperName args}}. */
+pub fn registerHelper(name: str, fn: ([str]) → str) → ()
+
+/** Unregister a custom helper. */
+pub fn unregisterHelper(name: str) → ()
+
+// ── Convenience ───────────────────────────────────────────────────────────────
+
+/** Compile and render a template string in a single call. */
+pub fn renderStr(source: str, ctx: [str: str]) → Result<str, TemplateError>
+
+/** Compile and render an HTML template string in a single call. */
+pub fn renderHtmlStr(source: str, ctx: [str: str]) → Result<str, TemplateError>

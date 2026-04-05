@@ -1,0 +1,65 @@
+module std.signal
+
+import std.concurrent
+
+// ── Signal enum ───────────────────────────────────────────────────────────────
+
+/** POSIX signal identifiers. */
+pub enum Signal
+    SIGINT
+    SIGTERM
+    SIGHUP
+    SIGUSR1
+    SIGUSR2
+    SIGQUIT
+    SIGPIPE
+    SIGALRM
+    SIGCHLD
+    SIGWINCH
+
+// ── Registration ──────────────────────────────────────────────────────────────
+
+/** Register a handler for the given signal and return a Channel that receives the signal. */
+pub fn register(sig: Signal) → Channel<Signal>
+
+/** Register a handler for multiple signals and return a single Channel for all of them. */
+pub fn registerMany(signals: [Signal]) → Channel<Signal>
+
+/** Unregister the handler for the given signal, closing its channel. */
+pub fn unregister(sig: Signal) → ()
+
+/** Unregister all signal handlers and close their channels. */
+pub fn unregisterAll() → ()
+
+// ── One-shot helpers ──────────────────────────────────────────────────────────
+
+/** Block the current goroutine until the given signal is received, then return it. */
+pub fn await(sig: Signal) → Signal
+
+/** Block until any of the given signals is received, then return the signal. */
+pub fn awaitAny(signals: [Signal]) → Signal
+
+// ── Sending ───────────────────────────────────────────────────────────────────
+
+/** Send a signal to the process with the given PID. */
+pub fn send(pid: int, sig: Signal) → Result<()>
+
+/** Send a signal to the current process. */
+pub fn raise(sig: Signal) → Result<()>
+
+// ── Signal information ────────────────────────────────────────────────────────
+
+/** Return the name of a signal (e.g. "SIGINT"). */
+pub fn name(sig: Signal) → str
+
+/** Return the numeric value of a signal. */
+pub fn number(sig: Signal) → int
+
+/** Look up a signal by its numeric value. Returns nil if unrecognized. */
+pub fn fromNumber(n: int) → Signal?
+
+/** Look up a signal by its name (e.g. "SIGTERM"). Returns nil if unrecognized. */
+pub fn fromName(s: str) → Signal?
+
+/** Return true if the signal can be caught and handled (not SIGKILL/SIGSTOP). */
+pub fn isCatchable(sig: Signal) → bool

@@ -1,0 +1,76 @@
+module std.csv
+
+// ── Configuration ─────────────────────────────────────────────────────────────
+
+/** Options controlling CSV/TSV parsing and formatting. */
+pub struct CsvOptions(
+    delimiter: str = ",",
+    quote: str = "\"",
+    escape: str = "\"",
+    hasHeader: bool = true,
+    trimSpaces: bool = false,
+    comment: str = ""
+)
+
+// ── Reader ────────────────────────────────────────────────────────────────────
+
+/** A streaming CSV reader that yields rows one at a time. */
+pub class CsvReader
+
+/** A CSV writer that serializes rows to a string or file. */
+pub class CsvWriter
+
+// ── Parsing ───────────────────────────────────────────────────────────────────
+
+/** Parse an entire CSV string into a list of rows (each row is a list of strings). */
+pub fn parse(s: str, opts: CsvOptions = CsvOptions()) → Result<[[str]]>
+
+/** Parse a CSV string with a header row and return a list of column-name→value maps. */
+pub fn parseWithHeader(s: str, opts: CsvOptions = CsvOptions()) → Result<[[str: str]]>
+
+/** Parse a CSV string and decode each row into type T (requires @derive(All) on T). */
+pub fn decode<T>(s: str, opts: CsvOptions = CsvOptions()) → Result<[T]>
+
+// ── Formatting ────────────────────────────────────────────────────────────────
+
+/** Serialize a list of rows into a CSV string. */
+pub fn format(rows: [[str]], opts: CsvOptions = CsvOptions()) → str
+
+/** Serialize a list of maps to CSV, using map keys as the header row. */
+pub fn formatWithHeader(rows: [[str: str]], opts: CsvOptions = CsvOptions()) → str
+
+/** Serialize a list of typed values to CSV string. */
+pub fn encode<T>(values: [T], opts: CsvOptions = CsvOptions()) → str
+
+// ── Streaming reader ──────────────────────────────────────────────────────────
+
+/** Open a CsvReader over a raw CSV string. */
+pub fn reader(s: str, opts: CsvOptions = CsvOptions()) → CsvReader
+
+/** Read the next row from a CsvReader. Returns nil when exhausted. */
+pub fn readRow(r: CsvReader) → [str]?
+
+/** Read the header row from a CsvReader (only valid when hasHeader = true). */
+pub fn header(r: CsvReader) → [str]?
+
+/** Close and release the CsvReader. */
+pub fn closeReader(r: CsvReader) → ()
+
+// ── Streaming writer ──────────────────────────────────────────────────────────
+
+/** Create a new CsvWriter targeting a mutable string buffer. */
+pub fn writer(opts: CsvOptions = CsvOptions()) → CsvWriter
+
+/** Append a single row to the CsvWriter buffer. */
+pub fn writeRow(w: CsvWriter, row: [str]) → ()
+
+/** Flush the CsvWriter and return the accumulated CSV string. */
+pub fn writerResult(w: CsvWriter) → str
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+/** Escape a single field value according to the given options. */
+pub fn escapeField(value: str, opts: CsvOptions = CsvOptions()) → str
+
+/** Split a single CSV line into fields (does not handle multi-line fields). */
+pub fn parseLine(line: str, opts: CsvOptions = CsvOptions()) → [str]

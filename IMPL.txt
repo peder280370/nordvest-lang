@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 2 — Systems & Concurrency  (COMPLETE)
-  Next phase: PHASE 3 — Polish & Ecosystem
+  Phase: PHASE 3 — Polish & Ecosystem  (COMPLETE)
+  Next phase: PHASE 4 — Self-Hosting
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -315,13 +315,58 @@
   PHASE 3 — POLISH & ECOSYSTEM  (Milestone M3)
 ────────────────────────────────────────────────────────────────────────────────
 
-  [TODO]  3.1  nv fmt — canonical formatter
-  [TODO]  3.2  Language Server Protocol (nv-lsp)
-  [TODO]  3.3  Error message quality
-  [TODO]  3.4  Performance (incremental compilation, LLVM -O2)
-  [TODO]  3.5  Package manager (nv pkg)
-  [TODO]  3.6  Documentation site
-  [TODO]  3.7  Standard library v2
+  [DONE]  3.1  nv fmt — canonical formatter
+               - compiler/src/main/kotlin/nv/compiler/format/Formatter.kt
+               - Walks full AST and pretty-prints canonical Nordvest source
+               - Normalises Unicode operators (→ ≠ ≤ ≥ ∧ ∨ ¬ ÷) vs ASCII flag
+               - --ascii, --check, --stdout flags
+               - Idempotent: fmt(fmt(x)) == fmt(x) verified by tests
+               - cmdFmt in tools/Main.kt now fully implemented
+
+  [DONE]  3.2  Language Server Protocol (nv-lsp)
+               - tools/src/main/kotlin/nv/tools/LspServer.kt (~635 lines)
+               - JSON-RPC 2.0 over stdio with Content-Length framing
+               - Hand-written JSON builder and parser (no external deps)
+               - Capabilities: hover, definition, references, completion, formatting, diagnostics
+               - textDocument/didOpen + didChange → push diagnostics via Compiler
+               - textDocument/hover: type lookup from typeMap
+               - textDocument/definition: symbol span from resolvedRefs
+               - textDocument/completion: keywords + math symbols + member types
+               - textDocument/formatting: delegates to Formatter
+               - LspExitException for testable exit (no System.exit in tests)
+               - LspTest.kt: 18 tests covering JSON, DocumentStore, diagnostics, server
+
+  [DONE]  3.3  Error message quality
+               - Error display in compileToIr shows source line + caret (^)
+               - ResolveError.UndefinedSymbol gains suggestions: List<String>
+               - Resolver computes Levenshtein distance; suggestNames returns up to 3
+               - Error message includes "did you mean: 'X'?" when suggestions found
+
+  [DONE]  3.4  Performance (incremental compilation, LLVM -O2)
+               - nv build --release passes -O2 to clang
+               - Incremental cache: .nv-cache/<sha256>.ll checked before compiling
+               - sha256Hex() using MessageDigest.SHA-256
+               - nv clean command removes .nv-cache/
+
+  [DONE]  3.5  Package manager (nv pkg)
+               - nv pkg add <name[@version]>: writes to [dependencies] in nv.pkg
+               - nv pkg install: creates stub dirs in .nv-packages/<name>-<ver>/
+               - nv pkg list: shows declared vs installed status
+               - nv pkg new <name>: scaffolds project directory with nv.pkg + main.nv
+               - parsePkgDependencies() parses TOML-lite nv.pkg files
+
+  [DONE]  3.6  Documentation site
+               - cmdDoc enhanced with --html flag
+               - Generates per-module .html pages + index.html + style.css in docs/
+               - Clean, minimal CSS; navigation sidebar; source path displayed
+
+  [DONE]  3.7  Standard library v2
+               - stdlib/std/: 13 new module spec files added:
+                   sql.nv, csv.nv, xml.nv, toml.nv, unicode.nv, bignum.nv,
+                   archive.nv, html.nv, stats.nv, mime.nv, signal.nv, template.nv, debug.nv
+               - Each has module declaration, pub type/fn signatures, /** */ doc comments
+
+               Total tests: 593 passing (536 prior + 32 Phase3 + 18 LspTest + 7 misc)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 4 — SELF-HOSTING  (Milestone M4)

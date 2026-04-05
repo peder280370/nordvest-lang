@@ -1,0 +1,108 @@
+module std.debug
+
+// ── Stack frames ──────────────────────────────────────────────────────────────
+
+/** A single frame in a call stack. */
+pub struct StackFrame(
+    pub function: str,
+    pub file: str,
+    pub line: int,
+    pub column: int,
+    pub module: str
+)
+
+// ── Heap statistics ───────────────────────────────────────────────────────────
+
+/** Snapshot of heap memory usage. */
+pub struct HeapStats(
+    pub allocatedBytes: int,
+    pub usedBytes: int,
+    pub freeBytes: int,
+    pub gcCount: int,
+    pub liveObjects: int
+)
+
+// ── Timing ────────────────────────────────────────────────────────────────────
+
+/** A timing measurement started by startTimer and stopped by stopTimer. */
+pub class Timer
+
+// ── Stack trace ───────────────────────────────────────────────────────────────
+
+/** Return the current call stack as a list of StackFrames (most recent first). */
+pub fn stackTrace() → [StackFrame]
+
+/** Format the current call stack as a human-readable string. */
+pub fn stackTraceStr() → str
+
+/** Return the current call stack starting from the given depth offset. */
+pub fn stackTraceFrom(offset: int) → [StackFrame]
+
+// ── Heap inspection ───────────────────────────────────────────────────────────
+
+/** Return a snapshot of current heap memory usage. */
+pub fn heapStats() → HeapStats
+
+/** Request a garbage collection cycle (best-effort; may be a no-op). */
+pub fn gc() → ()
+
+/** Return the current live object count (approximate). */
+pub fn liveObjectCount() → int
+
+// ── Assertions ────────────────────────────────────────────────────────────────
+
+/** Assert that condition is true; panics with message if false. */
+pub fn assert(condition: bool, message: str = "assertion failed") → ()
+
+/** Assert that two values are equal; panics with a diff message if not. */
+pub fn assertEqual<T>(actual: T, expected: T, message: str = "") → ()
+
+/** Assert that a value is nil; panics if not. */
+pub fn assertNil<T>(value: T?, message: str = "expected nil") → ()
+
+/** Assert that a value is not nil; panics if it is. */
+pub fn assertNotNil<T>(value: T?, message: str = "expected non-nil") → ()
+
+// ── Profiling ─────────────────────────────────────────────────────────────────
+
+/** Start a named timing measurement and return a Timer handle. */
+pub fn startTimer(name: str = "") → Timer
+
+/** Stop a Timer and return the elapsed time in nanoseconds. */
+pub fn stopTimer(t: Timer) → int
+
+/** Measure the execution time of a closure in nanoseconds. */
+pub fn time(fn: () → ()) → int
+
+/** Measure the execution time of a closure and print the result with a label. */
+pub fn timePrint(label: str, fn: () → ()) → ()
+
+// ── Profiling sessions ────────────────────────────────────────────────────────
+
+/** Begin CPU profiling, writing results to the given file path. */
+pub fn startCpuProfile(path: str) → Result<()>
+
+/** Stop CPU profiling. */
+pub fn stopCpuProfile() → ()
+
+/** Write a heap profile snapshot to the given file path. */
+pub fn writeHeapProfile(path: str) → Result<()>
+
+// ── Printing ──────────────────────────────────────────────────────────────────
+
+/** Print a value with its type annotation to stderr (e.g. for quick inspection). */
+pub fn dump<T>(value: T) → ()
+
+/** Print a labeled value to stderr. */
+pub fn dumpLabeled<T>(label: str, value: T) → ()
+
+/** Print the current file, line, and function to stderr. */
+pub fn here() → ()
+
+// ── Breakpoints ───────────────────────────────────────────────────────────────
+
+/** Insert a software breakpoint (pauses execution when a debugger is attached). */
+pub fn breakpoint() → ()
+
+/** Return true if a debugger is currently attached to the process. */
+pub fn isDebuggerAttached() → bool

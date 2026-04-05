@@ -1,0 +1,119 @@
+module std.html
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned by HTML parse or serialization operations. */
+pub class HtmlError(pub message: str, pub line: int = 0, pub column: int = 0)
+
+// ── DOM types ─────────────────────────────────────────────────────────────────
+
+/** A generic HTML node (element, text, comment, doctype). */
+pub class HtmlNode
+
+/** An HTML element node with a tag name, attributes, and child nodes. */
+pub class HtmlElement
+
+/** A parsed HTML5 document, including head, body, and doctype. */
+pub class HtmlDocument
+
+// ── Parsing ───────────────────────────────────────────────────────────────────
+
+/** Parse an HTML5 string into an HtmlDocument (error-tolerant, like browsers). */
+pub fn parse(s: str) → Result<HtmlDocument, HtmlError>
+
+/** Parse an HTML5 file at the given path into an HtmlDocument. */
+pub fn parseFile(path: str) → Result<HtmlDocument, HtmlError>
+
+/** Parse an HTML fragment string into a list of top-level HtmlNodes. */
+pub fn parseFragment(s: str) → Result<[HtmlNode], HtmlError>
+
+// ── Serialization ─────────────────────────────────────────────────────────────
+
+/** Serialize an HtmlDocument back to an HTML string. */
+pub fn serialize(doc: HtmlDocument) → str
+
+/** Serialize an HtmlElement to an HTML string (includes the element's own tag). */
+pub fn serializeElement(el: HtmlElement) → str
+
+/** Serialize the inner HTML of an element (children only, no outer tag). */
+pub fn innerHtml(el: HtmlElement) → str
+
+// ── Querying ──────────────────────────────────────────────────────────────────
+
+/** Find the first element matching a CSS selector. */
+pub fn querySelector(doc: HtmlDocument, selector: str) → HtmlElement?
+
+/** Find all elements matching a CSS selector. */
+pub fn querySelectorAll(doc: HtmlDocument, selector: str) → [HtmlElement]
+
+/** Find the first element within an element subtree matching a CSS selector. */
+pub fn querySelectorIn(el: HtmlElement, selector: str) → HtmlElement?
+
+/** Find all elements within an element subtree matching a CSS selector. */
+pub fn querySelectorAllIn(el: HtmlElement, selector: str) → [HtmlElement]
+
+/** Get the document's head element. */
+pub fn head(doc: HtmlDocument) → HtmlElement?
+
+/** Get the document's body element. */
+pub fn body(doc: HtmlDocument) → HtmlElement?
+
+// ── Element navigation ────────────────────────────────────────────────────────
+
+/** Get the tag name of an element (lowercased, e.g. "div", "span"). */
+pub fn tagName(el: HtmlElement) → str
+
+/** Get an attribute value from an element. */
+pub fn attr(el: HtmlElement, name: str) → str?
+
+/** Get all attributes of an element as a map. */
+pub fn attrs(el: HtmlElement) → [str: str]
+
+/** Get the text content of an element (concatenates all descendant text nodes). */
+pub fn textContent(el: HtmlElement) → str
+
+/** Get direct child elements of an element. */
+pub fn children(el: HtmlElement) → [HtmlElement]
+
+/** Get all direct child nodes (elements, text, comments) of an element. */
+pub fn childNodes(el: HtmlElement) → [HtmlNode]
+
+/** Get the parent element of an element. Returns nil for the root. */
+pub fn parentElement(el: HtmlElement) → HtmlElement?
+
+// ── DOM construction ──────────────────────────────────────────────────────────
+
+/** Create a new, empty HTML document with a standard HTML5 doctype. */
+pub fn newDocument() → HtmlDocument
+
+/** Create a new HTML element with the given tag name. */
+pub fn createElement(tag: str) → HtmlElement
+
+/** Set an attribute on an element. */
+pub fn setAttribute(el: HtmlElement, name: str, value: str) → ()
+
+/** Remove an attribute from an element. */
+pub fn removeAttribute(el: HtmlElement, name: str) → ()
+
+/** Set the text content of an element (replaces all children). */
+pub fn setTextContent(el: HtmlElement, text: str) → ()
+
+/** Set the inner HTML of an element (replaces all children). */
+pub fn setInnerHtml(el: HtmlElement, html: str) → Result<(), HtmlError>
+
+/** Append a child element to a parent element. */
+pub fn appendChild(parent: HtmlElement, child: HtmlElement) → ()
+
+// ── Sanitization ──────────────────────────────────────────────────────────────
+
+/** Sanitize an HTML string, removing disallowed tags and attributes. */
+pub fn sanitize(html: str) → str
+
+/** Sanitize an HTML string using a custom allowlist of tags. */
+pub fn sanitizeWith(html: str, allowedTags: [str], allowedAttrs: [str]) → str
+
+/** Escape special HTML characters in a plain text string (for safe embedding). */
+pub fn escapeHtml(text: str) → str
+
+/** Unescape HTML entities in a string (e.g. "&amp;" → "&"). */
+pub fn unescapeHtml(text: str) → str

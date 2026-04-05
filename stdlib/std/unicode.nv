@@ -1,0 +1,98 @@
+module std.unicode
+
+// ── Normalization ─────────────────────────────────────────────────────────────
+
+/** Unicode normalization form. */
+pub enum NormForm
+    NFC
+    NFD
+    NFKC
+    NFKD
+
+/** Normalize a string to the given Unicode normalization form. */
+pub fn normalize(s: str, form: NormForm) → str
+
+/** Normalize a string to NFC (Canonical Decomposition + Canonical Composition). */
+pub fn toNFC(s: str) → str
+
+/** Normalize a string to NFD (Canonical Decomposition). */
+pub fn toNFD(s: str) → str
+
+/** Normalize a string to NFKC (Compatibility Decomposition + Canonical Composition). */
+pub fn toNFKC(s: str) → str
+
+/** Normalize a string to NFKD (Compatibility Decomposition). */
+pub fn toNFKD(s: str) → str
+
+// ── Grapheme clusters ─────────────────────────────────────────────────────────
+
+/** Split a string into its Unicode grapheme clusters (user-perceived characters). */
+pub fn graphemes(s: str) → [str]
+
+/** Count the number of grapheme clusters in a string. */
+pub fn graphemeCount(s: str) → int
+
+// ── Code points ───────────────────────────────────────────────────────────────
+
+/** Return the Unicode code points (scalar values) of a string. */
+pub fn codepoints(s: str) → [int]
+
+/** Build a string from a list of Unicode code point integers. */
+pub fn fromCodepoints(cps: [int]) → str?
+
+/** Return the Unicode code point of the first character of a string. */
+pub fn codepoint(s: str) → int?
+
+/** Convert a single Unicode code point to its string representation. */
+pub fn codepointToStr(cp: int) → str?
+
+// ── Character classification ──────────────────────────────────────────────────
+
+/** Return true if the string contains only Unicode letter characters. */
+pub fn isLetter(s: str) → bool
+
+/** Return true if the string contains only Unicode decimal digit characters. */
+pub fn isDigit(s: str) → bool
+
+/** Return true if the string contains only Unicode whitespace characters. */
+pub fn isSpace(s: str) → bool
+
+/** Return true if the string contains only Unicode uppercase letters. */
+pub fn isUpper(s: str) → bool
+
+/** Return true if the string contains only Unicode lowercase letters. */
+pub fn isLower(s: str) → bool
+
+/** Return true if the string contains only Unicode alphanumeric characters. */
+pub fn isAlphanumeric(s: str) → bool
+
+/** Return true if the code point is a valid Unicode scalar value. */
+pub fn isValidCodepoint(cp: int) → bool
+
+// ── Case conversion ───────────────────────────────────────────────────────────
+
+/** Convert a string to Unicode uppercase. */
+pub fn toUpper(s: str) → str
+
+/** Convert a string to Unicode lowercase. */
+pub fn toLower(s: str) → str
+
+/** Convert a string to Unicode titlecase (first letter of each word uppercased). */
+pub fn toTitleCase(s: str) → str
+
+/** Apply Unicode case folding for case-insensitive comparison. */
+pub fn caseFold(s: str) → str
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+/** Return the Unicode category name for a code point (e.g. "Ll", "Lu", "Nd"). */
+pub fn category(cp: int) → str
+
+/** Return the Unicode name for a code point (e.g. "LATIN SMALL LETTER A"). */
+pub fn name(cp: int) → str?
+
+/** Return the Unicode block name for a code point (e.g. "Basic Latin"). */
+pub fn block(cp: int) → str?
+
+/** Return the UTF-8 byte length of a string (may differ from grapheme count). */
+pub fn byteLen(s: str) → int

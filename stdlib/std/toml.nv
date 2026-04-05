@@ -1,0 +1,67 @@
+module std.toml
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned by TOML parse or serialize operations. */
+pub class TomlError(pub message: str, pub line: int = 0, pub column: int = 0)
+
+// ── Value types ───────────────────────────────────────────────────────────────
+
+/** A TOML value — one of String, Int, Float, Bool, Array, Table, or DateTime. */
+sealed class TomlValue
+    /** A TOML string value. */
+    String(value: str)
+    /** A TOML integer value. */
+    Int(value: int)
+    /** A TOML floating-point value. */
+    Float(value: float)
+    /** A TOML boolean value. */
+    Bool(value: bool)
+    /** A TOML array of heterogeneous values. */
+    Array(items: [TomlValue])
+    /** A TOML inline or full table (key-value map). */
+    Table(entries: [str: TomlValue])
+    /** A TOML offset date-time, local date-time, local date, or local time (as ISO-8601 string). */
+    DateTime(value: str)
+
+// ── Parsing ───────────────────────────────────────────────────────────────────
+
+/** Parse a TOML v1.0 document string into a TomlValue.Table. */
+pub fn parse(s: str) → Result<TomlValue, TomlError>
+
+/** Parse a TOML file at the given path into a TomlValue.Table. */
+pub fn parseFile(path: str) → Result<TomlValue, TomlError>
+
+/** Parse a TOML string and decode the result into type T (requires @derive(All)). */
+pub fn decode<T>(s: str) → Result<T, TomlError>
+
+// ── Serialization ─────────────────────────────────────────────────────────────
+
+/** Serialize a TomlValue.Table into a TOML document string. */
+pub fn serialize(value: TomlValue) → Result<str, TomlError>
+
+/** Encode a typed value as a TOML string (requires @derive(All) on T). */
+pub fn encode<T>(value: T) → Result<str, TomlError>
+
+// ── Value accessors ───────────────────────────────────────────────────────────
+
+/** Get a value by dotted key path from a TomlValue.Table (e.g. "server.port"). */
+pub fn get(root: TomlValue, keyPath: str) → TomlValue?
+
+/** Get a string by dotted key path. Returns nil if missing or wrong type. */
+pub fn getString(root: TomlValue, keyPath: str) → str?
+
+/** Get an int by dotted key path. Returns nil if missing or wrong type. */
+pub fn getInt(root: TomlValue, keyPath: str) → int?
+
+/** Get a float by dotted key path. Returns nil if missing or wrong type. */
+pub fn getFloat(root: TomlValue, keyPath: str) → float?
+
+/** Get a bool by dotted key path. Returns nil if missing or wrong type. */
+pub fn getBool(root: TomlValue, keyPath: str) → bool?
+
+/** Get an array by dotted key path. Returns nil if missing or wrong type. */
+pub fn getArray(root: TomlValue, keyPath: str) → [TomlValue]?
+
+/** Get a table by dotted key path. Returns nil if missing or wrong type. */
+pub fn getTable(root: TomlValue, keyPath: str) → [str: TomlValue]?

@@ -1,0 +1,120 @@
+module std.sql
+
+// ── Error types ───────────────────────────────────────────────────────────────
+
+/** Error returned by SQL operations. */
+pub class SqlError(pub message: str, pub code: int = 0, pub state: str = "")
+
+// ── Core types ────────────────────────────────────────────────────────────────
+
+/** Represents a single row in a query result. */
+pub class Row
+
+/** Result set returned by a query. */
+pub class ResultSet
+
+/** Compiled, reusable SQL statement. */
+pub class Statement
+
+/** Represents an active database transaction. */
+pub class Transaction
+
+/** An active database connection. */
+pub class Connection
+
+/** Options for opening a database connection. */
+pub struct ConnectionOptions(
+    maxConns: int = 10,
+    minConns: int = 1,
+    connectTimeout: int = 30,
+    queryTimeout: int = 0,
+    readOnly: bool = false
+)
+
+/** Result of a non-query SQL execution (INSERT, UPDATE, DELETE). */
+pub struct QueryResult(rowsAffected: int, lastInsertId: int)
+
+// ── Connection management ─────────────────────────────────────────────────────
+
+/** Open a database connection using a driver URL (e.g. "sqlite:./app.db", "postgres://user:pass@host/db"). */
+pub fn connect(url: str) → Result<Connection, SqlError>
+
+/** Open a database connection with explicit options. */
+pub fn connectWith(url: str, opts: ConnectionOptions) → Result<Connection, SqlError>
+
+/** Close an open connection, releasing all resources. */
+pub fn close(conn: Connection) → Result<(), SqlError>
+
+// ── Querying ──────────────────────────────────────────────────────────────────
+
+/** Execute a SQL query and return a result set. */
+pub fn query(conn: Connection, sql: str, params: [str] = []) → Result<ResultSet, SqlError>
+
+/** Execute a SQL query inside a transaction and return a result set. */
+pub fn queryTx(tx: Transaction, sql: str, params: [str] = []) → Result<ResultSet, SqlError>
+
+/** Execute a non-query SQL statement (INSERT/UPDATE/DELETE) and return affected rows. */
+pub fn exec(conn: Connection, sql: str, params: [str] = []) → Result<QueryResult, SqlError>
+
+/** Execute a non-query SQL statement inside a transaction. */
+pub fn execTx(tx: Transaction, sql: str, params: [str] = []) → Result<QueryResult, SqlError>
+
+// ── Prepared statements ───────────────────────────────────────────────────────
+
+/** Compile a SQL string into a reusable prepared statement. */
+pub fn prepare(conn: Connection, sql: str) → Result<Statement, SqlError>
+
+/** Execute a prepared statement as a query and return a result set. */
+pub fn stmtQuery(stmt: Statement, params: [str] = []) → Result<ResultSet, SqlError>
+
+/** Execute a prepared statement as a non-query and return affected rows. */
+pub fn stmtExec(stmt: Statement, params: [str] = []) → Result<QueryResult, SqlError>
+
+/** Close a prepared statement and free its resources. */
+pub fn stmtClose(stmt: Statement) → Result<(), SqlError>
+
+// ── Transactions ──────────────────────────────────────────────────────────────
+
+/** Begin a new transaction on the connection. */
+pub fn beginTx(conn: Connection) → Result<Transaction, SqlError>
+
+/** Commit the transaction, persisting all changes. */
+pub fn commit(tx: Transaction) → Result<(), SqlError>
+
+/** Roll back the transaction, discarding all changes. */
+pub fn rollback(tx: Transaction) → Result<(), SqlError>
+
+// ── ResultSet navigation ──────────────────────────────────────────────────────
+
+/** Advance the result set cursor to the next row. Returns false when exhausted. */
+pub fn next(rs: ResultSet) → bool
+
+/** Read a column value from the current row by column index. */
+pub fn columnStr(rs: ResultSet, index: int) → str?
+
+/** Read an integer column value from the current row by index. */
+pub fn columnInt(rs: ResultSet, index: int) → int?
+
+/** Read a float column value from the current row by index. */
+pub fn columnFloat(rs: ResultSet, index: int) → float?
+
+/** Read a boolean column value from the current row by index. */
+pub fn columnBool(rs: ResultSet, index: int) → bool?
+
+/** Get the column names of the result set. */
+pub fn columns(rs: ResultSet) → [str]
+
+/** Close a result set and free its resources. */
+pub fn closeResultSet(rs: ResultSet) → Result<(), SqlError>
+
+/** Collect all rows from a result set into a list of Row objects. */
+pub fn rows(rs: ResultSet) → Result<[Row], SqlError>
+
+/** Get a string field value from a Row by column name. */
+pub fn rowStr(row: Row, column: str) → str?
+
+/** Get an integer field value from a Row by column name. */
+pub fn rowInt(row: Row, column: str) → int?
+
+/** Get a float field value from a Row by column name. */
+pub fn rowFloat(row: Row, column: str) → float?
