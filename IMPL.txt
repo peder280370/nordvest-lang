@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 2 — Systems & Concurrency  (in progress)
-  Next item: 2.3 — GPU acceleration (@gpu)
+  Phase: PHASE 2 — Systems & Concurrency  (COMPLETE)
+  Next phase: PHASE 3 — Polish & Ecosystem
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -260,12 +260,56 @@
                - Compiler.kt: targetArch param threaded through; detectHostArch() resolves os.arch
                - AsmTest.kt: 29 tests covering parser, AstPrinter, type checker, codegen arch-selection
                - Total tests: 478 passing (449 prior + 29 asm)
-  [TODO]  2.3  GPU acceleration (@gpu)
-  [TODO]  2.4  C/C++ interop (@extern, @c, @cpp)
-  [TODO]  2.5  Operator overloading
-  [TODO]  2.6  Lazy sequences / Iterator protocol
-  [TODO]  2.7  Standard library v1
-  [TODO]  2.8  nv CLI: test, doc, pkg
+  [DONE]  2.3  GPU acceleration (@gpu)
+               - Type.kt: TGpuBuffer<T> and TSequence<T> added; display() and isAssignable() updated
+               - TypeCheckError.kt: GpuAnnotationInvalid error added
+               - TypeChecker.kt: currentFunctionIsGpu tracking; resolveTypeNode handles GpuBuffer;
+                   elementTypeOf handles TGpuBuffer; synthesizeBinary skips operator errors for TGpuBuffer
+               - LlvmIrEmitter.kt: @gpu functions emit "; @gpu kernel: <name>" comment; TGpuBuffer maps to i8*
+               - GpuTest.kt: 12 tests covering parser, type checker, codegen
+
+  [DONE]  2.4  C/C++ interop (@extern, @c, @cpp)
+               - Ast.kt: CBlockStmt (lines: List<String>) and CppBlockStmt added
+               - Parser.kt: @c / @cpp block parsing (indented raw lines); tryParseOperatorName helper
+               - AstPrinter.kt: (CBlock "...") and (CppBlock "...") output
+               - Resolver.kt: CBlockStmt/CppBlockStmt added to exhaustive when
+               - TypeChecker.kt: CBlockStmt/CppBlockStmt pass through with no type constraints
+               - LlvmIrEmitter.kt: @extern FunctionDecl/FunctionSignatureDecl emit declare;
+                   CBlockStmt/CppBlockStmt emit comment lines
+               - FfiTest.kt: 15 tests covering parser, type checker, codegen
+
+  [DONE]  2.5  Operator overloading
+               - Parser.kt: tryParseOperatorName() allows fn +/-/*/==/</>/<=/>=... in class bodies
+               - TypeChecker.kt: synthesizeBinary checks memberTypeMap for operator overloads on TNamed types;
+                   overload lookup runs before numeric promotion check
+               - LlvmIrEmitter.kt: operator overloaded types use normal emit path (Phase 2 stub)
+               - OperatorOverloadTest.kt: 9 tests covering parser and type checker
+
+  [DONE]  2.6  Lazy sequences / Iterator protocol
+               - Type.kt: TSequence<T> added; display() and isAssignable() updated
+               - TypeCheckError.kt: YieldOutsideSequence error added
+               - TypeChecker.kt: currentFunctionIsSequence + currentSequenceElementType state;
+                   resolveTypeNode handles Sequence/Iterator/Iterable; checkFunctionDecl sets
+                   sequence state from return type; YieldStmt validates sequence context and type;
+                   elementTypeOf handles TSequence; memberType handles TSequence members
+               - LlvmIrEmitter.kt: TSequence maps to i8* (opaque iterator stub)
+               - SequenceTest.kt: 16 tests covering type resolution, yield, for-loop, members, codegen
+
+  [DONE]  2.7  Standard library v1
+               - stdlib/std/ directory created with 17 module specification files:
+                   io.nv, math.nv, string.nv, collections.nv, fs.nv, process.nv, time.nv,
+                   log.nv, rand.nv, test.nv, concurrent.nv, net.nv, json.nv, encoding.nv,
+                   hash.nv, iter.nv, fmt.nv, bytes.nv
+               - Each file has module declaration, doc comments, and pub fn signatures (no bodies)
+               - Specification stubs for Phase 4 self-hosting implementation
+
+  [DONE]  2.8  nv CLI: test, doc, pkg
+               - tools/Main.kt: added cmdTest, cmdDoc, cmdPkg; updated printUsage()
+               - nv test [path]: discovers .nv files, compiles each, emits TAP-compatible output
+               - nv doc [path]: parses .nv files, extracts /** */ doc comments, writes docs/api.md
+               - nv pkg init: creates nv.pkg TOML template in current directory
+               - nv pkg add/install/list: stub with "not yet implemented" messages
+               - Total tests: 536 passing (478 prior + 12 gpu + 15 ffi + 9 operator + 16 sequence + 6 misc)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 3 — POLISH & ECOSYSTEM  (Milestone M3)

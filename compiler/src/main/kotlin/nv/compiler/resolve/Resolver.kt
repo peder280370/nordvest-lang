@@ -3,6 +3,8 @@ package nv.compiler.resolve
 import nv.compiler.parser.AfterSelectArm
 import nv.compiler.parser.AsmStmt
 import nv.compiler.parser.BytesStmt
+import nv.compiler.parser.CBlockStmt
+import nv.compiler.parser.CppBlockStmt
 import nv.compiler.parser.AwaitExpr
 import nv.compiler.parser.ArrayLiteralExpr
 import nv.compiler.parser.ArrayTypeNode
@@ -486,6 +488,7 @@ class Resolver(private val sourcePath: String) {
             is YieldStmt  -> resolveExpr(stmt.expr, scope)
             is UnsafeBlock -> resolveStmts(stmt.stmts, Scope(ScopeKind.BLOCK, parent = scope))
             is AsmStmt, is BytesStmt -> { /* no sub-expressions to resolve in asm/bytes blocks */ }
+            is CBlockStmt, is CppBlockStmt -> { /* no references to resolve in C/C++ blocks */ }
         }
     }
 

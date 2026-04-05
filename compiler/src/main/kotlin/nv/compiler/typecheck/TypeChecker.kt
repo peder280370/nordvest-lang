@@ -37,6 +37,13 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     /** Whether the current function is declared async (for validating await expressions). */
     private var currentFunctionIsAsync: Boolean = false
 
+    /** Whether the current function has a @gpu annotation. */
+    private var currentFunctionIsGpu: Boolean = false
+
+    /** Whether the current function returns Sequence<T> (for yield validation). */
+    private var currentFunctionIsSequence: Boolean = false
+    private var currentSequenceElementType: Type = Type.TUnknown
+
     /** Type parameter names in scope (for resolveTypeNode to produce TVar). */
     private var currentTypeParams: Set<String> = emptySet()
 
@@ -270,6 +277,10 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                     1    -> Type.TResult(args[0], Type.TNamed("Error"))
                     else -> Type.TResult(args[0], args[1])
                 }
+                name == "GpuBuffer" -> Type.TGpuBuffer(args.firstOrNull() ?: Type.TUnknown)
+                name == "Sequence"  -> Type.TSequence(args.firstOrNull() ?: Type.TUnknown)
+                name == "Iterator"  -> Type.TNamed("Iterator", args)
+                name == "Iterable"  -> Type.TNamed("Iterable", args)
                 // Generic type parameter in scope
                 name in currentTypeParams -> Type.TVar(name)
                 else -> {
@@ -365,11 +376,20 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
             val prevReturn = currentReturnType
             val prevAsync  = currentFunctionIsAsync
+            val prevGpu    = currentFunctionIsGpu
+            val prevSeq    = currentFunctionIsSequence
+            val prevSeqElem = currentSequenceElementType
             currentReturnType = retType
             currentFunctionIsAsync = decl.isAsync
+            currentFunctionIsGpu = decl.annotations.any { it.name == "gpu" }
+            currentFunctionIsSequence = retType is Type.TSequence
+            currentSequenceElementType = if (retType is Type.TSequence) retType.element else Type.TUnknown
             checkBody(decl.body, fnEnv, retType)
             currentReturnType = prevReturn
             currentFunctionIsAsync = prevAsync
+            currentFunctionIsGpu = prevGpu
+            currentFunctionIsSequence = prevSeq
+            currentSequenceElementType = prevSeqElem
         }
     }
 
@@ -461,11 +481,20 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             is TryCatchStmt -> checkTryCatch(stmt, env, returnType)
             is ThrowStmt   -> { synthesize(stmt.expr, env) }
             is DeferStmt   -> checkDeferBody(stmt.body, env, returnType)
-            is BreakStmt, is ContinueStmt, is YieldStmt -> {
-                if (stmt is YieldStmt) synthesize(stmt.expr, env)
+            is BreakStmt, is ContinueStmt -> { /* no type checks needed */ }
+            is YieldStmt -> {
+                if (!currentFunctionIsSequence) {
+                    errors += TypeCheckError.YieldOutsideSequence(stmt.span)
+                } else {
+                    val exprType = synthesize(stmt.expr, env)
+                    if (!isAssignable(exprType, currentSequenceElementType)) {
+                        errors += TypeCheckError.TypeMismatch(currentSequenceElementType, exprType, stmt.expr.span)
+                    }
+                }
             }
             is UnsafeBlock -> checkBody(stmt.stmts, env, returnType)
             is AsmStmt, is BytesStmt -> { /* inline asm blocks have no Nordvest type constraints */ }
+            is CBlockStmt, is CppBlockStmt -> { /* no type constraints; pass through */ }
             is GoStmt      -> checkGoStmt(stmt, env, returnType)
             is SpawnStmt   -> { synthesize(stmt.expr, env) }
             is SelectStmt  -> stmt.arms.forEach { arm ->
@@ -759,6 +788,22 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     private fun synthesizeBinary(expr: BinaryExpr, env: TypeEnv): Type {
         val lType = synthesize(expr.left, env)
         val rType = synthesize(expr.right, env)
+
+        // Operator overloading: check if left type defines the operator method
+        if (lType is Type.TNamed) {
+            val opName = expr.op.symbol
+            val overloadKey = "${lType.qualifiedName}.$opName"
+            val overloadType = memberTypeMap[overloadKey]
+            if (overloadType is Type.TFun && overloadType.params.size == 1) {
+                return overloadType.returnType
+            }
+        }
+
+        // Skip operator errors for GpuBuffer types
+        if (lType is Type.TGpuBuffer || rType is Type.TGpuBuffer) {
+            return Type.TUnknown
+        }
+
         return when (expr.op) {
             BinaryOp.PLUS, BinaryOp.MINUS, BinaryOp.STAR, BinaryOp.SLASH -> {
                 val promo = numericPromotion(lType, rType)
@@ -837,6 +882,15 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     /** Look up a member type from the registry; returns TUnknown if not found. */
     private fun memberType(receiverType: Type, member: String, span: SourceSpan): Type {
         val typeName = when (receiverType) {
+            is Type.TSequence -> return when (member) {
+                "map"    -> Type.TFun(listOf(Type.TFun(listOf(receiverType.element), Type.TUnknown)), Type.TSequence(Type.TUnknown))
+                "filter" -> Type.TFun(listOf(Type.TFun(listOf(receiverType.element), Type.TBool)), Type.TSequence(receiverType.element))
+                "take"   -> Type.TFun(listOf(Type.TInt), Type.TSequence(receiverType.element))
+                "drop"   -> Type.TFun(listOf(Type.TInt), Type.TSequence(receiverType.element))
+                "toList" -> Type.TFun(emptyList(), Type.TArray(receiverType.element))
+                "count", "size" -> Type.TInt
+                else -> Type.TUnknown
+            }
             is Type.TNamed -> receiverType.qualifiedName
             is Type.TArray -> when (member) {
                 "length", "size", "count" -> return Type.TInt
@@ -1226,9 +1280,11 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
     /** Given an iterable/array/range type, return the element type. */
     private fun elementTypeOf(type: Type): Type = when (type) {
-        is Type.TArray  -> type.element
-        is Type.TMatrix -> type.element
-        is Type.TStr    -> Type.TChar
+        is Type.TArray     -> type.element
+        is Type.TMatrix    -> type.element
+        is Type.TStr       -> Type.TChar
+        is Type.TGpuBuffer -> type.element
+        is Type.TSequence  -> type.element
         is Type.TNamed  -> when {
             type.qualifiedName == "Range" -> type.typeArgs.firstOrNull() ?: Type.TInt
             else -> type.typeArgs.firstOrNull() ?: Type.TUnknown

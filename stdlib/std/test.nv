@@ -1,0 +1,28 @@
+module std.test
+
+/** Mark a function as a test. Applied as @test annotation. */
+pub fn assert(condition: bool, message: str)
+
+/** Assert that two values are equal. */
+pub fn assertEquals<T>(expected: T, actual: T)
+
+/** Assert that two values are not equal. */
+pub fn assertNotEquals<T>(expected: T, actual: T)
+
+/** Assert that a value is nil. */
+pub fn assertNil<T>(value: T?)
+
+/** Assert that a value is not nil. */
+pub fn assertNotNil<T>(value: T?)
+
+/** Assert that an expression throws an error. */
+pub fn assertThrows(f: () → unit)
+
+/** Assert that a float value is approximately equal (within epsilon). */
+pub fn assertApprox(expected: float, actual: float, eps: float)
+
+/** Fail the current test with a message. */
+pub fn fail(message: str)
+
+/** Skip the current test with a message. */
+pub fn skip(message: str)

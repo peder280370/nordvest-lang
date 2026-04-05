@@ -331,6 +331,35 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         }
     }
 
+    // ── Operator name helper ───────────────────────────────────────────────
+
+    /**
+     * If the current token is a binary operator symbol (+, -, *, /, %, ^, ==, !=, <, >, <=, >=, &, |),
+     * consume it and return the symbol string.  Otherwise return null.
+     * Used to allow operator overloading declarations: fn +(other: T) → T
+     */
+    private fun tryParseOperatorName(): String? {
+        val sym = when {
+            at(PLUS)  -> "+"
+            at(MINUS) -> "-"
+            at(STAR)  -> "*"
+            at(SLASH) -> "/"
+            at(MOD)   -> "%"
+            at(POWER) -> "^"
+            at(EQ)    -> "=="
+            at(NEQ)   -> "!="
+            at(LT)    -> "<"
+            at(GT)    -> ">"
+            at(LEQ)   -> "<="
+            at(GEQ)   -> ">="
+            at(AMP)   -> "&"
+            at(PIPE)  -> "|"
+            else      -> null
+        } ?: return null
+        advance()
+        return sym
+    }
+
     // ── Function / property / subscript dispatch ───────────────────────────
 
     private fun parseFunctionOrPropertyOrSubscriptDecl(
@@ -348,7 +377,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             return parseSubscriptBody(start, annotations, vis)
         }
 
-        val name = expect(IDENT).text
+        // Operator overloading: fn +(other: T) → T  inside class/struct body
+        val name = tryParseOperatorName() ?: expect(IDENT).text
         val typeParams = if (at(LT)) parseTypeParams() else emptyList()
 
         return when {
@@ -1147,6 +1177,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             at(YIELD) -> parseYieldStmt()
             at(AT) && at(IDENT, 1) && peek(1).text == "asm"   -> parseAsmStmt()
             at(AT) && at(IDENT, 1) && peek(1).text == "bytes" -> parseBytesStmt()
+            at(AT) && at(IDENT, 1) && peek(1).text == "c"   && (at(NEWLINE, 2) || at(INDENT, 2)) -> parseCBlockStmt()
+            at(AT) && at(IDENT, 1) && peek(1).text == "cpp" && (at(NEWLINE, 2) || at(INDENT, 2)) -> parseCppBlockStmt()
             at(NEWLINE) -> { advance(); null }
             at(DEDENT) || at(EOF) -> null
             else -> parseAssignOrExprStmt()
@@ -1665,6 +1697,61 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
 
         expectDedent()
         return BytesStmt(spanFrom(start), arch, bytes)
+    }
+
+    /** Parse an @c block: @c followed by indented raw C source lines. */
+    private fun parseCBlockStmt(): Stmt {
+        val start = peek().span
+        expect(AT)
+        expect(IDENT)  // "c"
+        if (!at(INDENT)) {
+            if (at(NEWLINE)) advance()
+        }
+        val lines = mutableListOf<String>()
+        if (at(INDENT)) {
+            advance() // consume INDENT
+            while (!at(DEDENT) && !at(EOF)) {
+                while (at(NEWLINE)) advance()
+                if (at(DEDENT) || at(EOF)) break
+                // Collect a line as tokens until newline
+                val lineBuf = StringBuilder()
+                while (!at(NEWLINE) && !at(DEDENT) && !at(EOF)) {
+                    lineBuf.append(peek().text)
+                    advance()
+                }
+                lines += lineBuf.toString()
+                if (at(NEWLINE)) advance()
+            }
+            if (at(DEDENT)) advance()
+        }
+        return CBlockStmt(spanFrom(start), lines)
+    }
+
+    /** Parse a @cpp block: @cpp followed by indented raw C++ source lines. */
+    private fun parseCppBlockStmt(): Stmt {
+        val start = peek().span
+        expect(AT)
+        expect(IDENT)  // "cpp"
+        if (!at(INDENT)) {
+            if (at(NEWLINE)) advance()
+        }
+        val lines = mutableListOf<String>()
+        if (at(INDENT)) {
+            advance() // consume INDENT
+            while (!at(DEDENT) && !at(EOF)) {
+                while (at(NEWLINE)) advance()
+                if (at(DEDENT) || at(EOF)) break
+                val lineBuf = StringBuilder()
+                while (!at(NEWLINE) && !at(DEDENT) && !at(EOF)) {
+                    lineBuf.append(peek().text)
+                    advance()
+                }
+                lines += lineBuf.toString()
+                if (at(NEWLINE)) advance()
+            }
+            if (at(DEDENT)) advance()
+        }
+        return CppBlockStmt(spanFrom(start), lines)
     }
 
     private fun parseAssignOrExprStmt(): Stmt {

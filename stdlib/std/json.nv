@@ -1,0 +1,25 @@
+module std.json
+
+/** Parse a JSON string into a dynamic value. */
+pub fn parse(s: str) → Result<str>
+
+/** Serialize a value to a JSON string. */
+pub fn stringify(value: str) → str
+
+/** Serialize a value to a pretty-printed JSON string. */
+pub fn prettyStringify(value: str, indent: int) → str
+
+/** Parse a JSON string into a typed struct (requires @derive(All) on target type). */
+pub fn decode<T>(s: str) → Result<T>
+
+/** Serialize a typed value to a JSON string. */
+pub fn encode<T>(value: T) → str
+
+/** Get a field from a JSON object by key. */
+pub fn getField(obj: str, key: str) → str?
+
+/** Get an array element by index from a JSON array. */
+pub fn getIndex(arr: str, index: int) → str?
+
+/** Check if a JSON value is null. */
+pub fn isNull(value: str) → bool

@@ -376,6 +376,12 @@ object AstPrinter {
             is BytesStmt -> {
                 append("(Bytes arch=${node.arch} [${node.bytes.joinToString(",") { "0x%02x".format(it) }}])")
             }
+            is CBlockStmt -> {
+                append("(CBlock ${q(node.lines.joinToString("\\n"))})")
+            }
+            is CppBlockStmt -> {
+                append("(CppBlock ${q(node.lines.joinToString("\\n"))})")
+            }
             is AssignStmt -> {
                 append("(Assign ${node.op} "); printNode(node.target, indent + 1); append(" "); printNode(node.value, indent + 1); append(")")
             }

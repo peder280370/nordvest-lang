@@ -1,0 +1,43 @@
+module std.concurrent
+
+/** Create a channel with the given buffer size (0 = unbuffered). */
+pub fn channel<T>(bufferSize: int) → Channel<T>
+
+/** Send a value on a channel. Blocks if channel is full (buffered) or no receiver yet (unbuffered). */
+pub fn send<T>(ch: Channel<T>, value: T)
+
+/** Receive a value from a channel. Blocks until a value is available. */
+pub fn recv<T>(ch: Channel<T>) → T
+
+/** Try to receive a value from a channel without blocking. Returns nil if none available. */
+pub fn tryRecv<T>(ch: Channel<T>) → T?
+
+/** Close a channel, signalling no more values will be sent. */
+pub fn close<T>(ch: Channel<T>)
+
+/** Create a new mutex. */
+pub fn mutex() → Mutex
+
+/** Acquire a mutex lock. */
+pub fn lock(m: Mutex)
+
+/** Release a mutex lock. */
+pub fn unlock(m: Mutex)
+
+/** Run a function while holding a mutex lock. */
+pub fn withLock(m: Mutex, f: () → unit)
+
+/** Create a wait group with the given initial count. */
+pub fn waitGroup(n: int) → WaitGroup
+
+/** Decrement a wait group counter; signal when it reaches zero. */
+pub fn done(wg: WaitGroup)
+
+/** Wait until a wait group counter reaches zero. */
+pub fn wait(wg: WaitGroup)
+
+/** Create a future that resolves to the result of an async function. */
+pub fn future<T>(f: () → T) → Future<T>
+
+/** Wait for a future to complete and return its value. */
+pub fn await<T>(f: Future<T>) → T

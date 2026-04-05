@@ -1,0 +1,10 @@
+module std.string
+
+pub fn toString(x: int) → str
+pub fn toString(x: float) → str
+pub fn toString(x: bool) → str
+pub fn parseInt(s: str) → Result<int>
+pub fn parseFloat(s: str) → Result<float>
+pub fn repeat(s: str, n: int) → str
+pub fn join(parts: [str], sep: str) → str
+pub fn format(template: str, args: [str]) → str

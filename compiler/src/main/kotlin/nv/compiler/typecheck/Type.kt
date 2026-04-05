@@ -31,6 +31,8 @@ sealed class Type {
     data class TResult(val okType: Type, val errType: Type) : Type()
     data class TFuture(val inner: Type) : Type()
     data class TChannel(val element: Type) : Type()
+    data class TGpuBuffer(val element: Type) : Type()
+    data class TSequence(val element: Type) : Type()
 
     // ── Sentinels ─────────────────────────────────────────────────────────
     object TUnknown : Type()   // not yet inferred; type checker fills this in
@@ -66,8 +68,10 @@ fun Type.display(): String = when (this) {
     is Type.TMap      -> "[${key.display()}: ${value.display()}]"
     is Type.TTuple    -> "(${fields.joinToString(", ") { f -> if (f.name != null) "${f.name}: ${f.type.display()}" else f.type.display() }})"
     is Type.TResult   -> "Result<${okType.display()}, ${errType.display()}>"
-    is Type.TFuture   -> "Future<${inner.display()}>"
-    is Type.TChannel  -> "Channel<${element.display()}>"
+    is Type.TFuture    -> "Future<${inner.display()}>"
+    is Type.TChannel   -> "Channel<${element.display()}>"
+    is Type.TGpuBuffer -> "GpuBuffer<${element.display()}>"
+    is Type.TSequence  -> "Sequence<${element.display()}>"
 }
 
 // ── Predicates ────────────────────────────────────────────────────────────
@@ -141,5 +145,7 @@ fun isAssignable(from: Type, to: Type): Boolean {
                from.typeArgs.zip(to.typeArgs).all { (f, t) -> isAssignable(f, t) }
     if (from is Type.TFuture && to is Type.TFuture) return isAssignable(from.inner, to.inner)
     if (from is Type.TChannel && to is Type.TChannel) return isAssignable(from.element, to.element)
+    if (from is Type.TGpuBuffer && to is Type.TGpuBuffer) return isAssignable(from.element, to.element)
+    if (from is Type.TSequence && to is Type.TSequence) return isAssignable(from.element, to.element)
     return false
 }

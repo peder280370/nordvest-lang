@@ -1,0 +1,25 @@
+module std.encoding
+
+/** Encode bytes as a base64 string. */
+pub fn base64Encode(data: str) → str
+
+/** Decode a base64 string to bytes. */
+pub fn base64Decode(s: str) → Result<str>
+
+/** Encode bytes as a hex string. */
+pub fn hexEncode(data: str) → str
+
+/** Decode a hex string to bytes. */
+pub fn hexDecode(s: str) → Result<str>
+
+/** Encode a string to UTF-8 bytes. */
+pub fn utf8Encode(s: str) → [byte]
+
+/** Decode UTF-8 bytes to a string. */
+pub fn utf8Decode(bytes: [byte]) → Result<str>
+
+/** Encode a string as percent-encoded (URL encoding). */
+pub fn percentEncode(s: str) → str
+
+/** Decode a percent-encoded string. */
+pub fn percentDecode(s: str) → str

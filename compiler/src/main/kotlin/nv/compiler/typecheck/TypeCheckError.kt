@@ -121,6 +121,19 @@ sealed class TypeCheckError {
     ) : TypeCheckError() {
         override val message get() = "await expression is only valid inside an async fn"
     }
+
+    data class GpuAnnotationInvalid(
+        override val span: SourceSpan,
+        val reason: String,
+    ) : TypeCheckError() {
+        override val message get() = "invalid @gpu annotation: $reason"
+    }
+
+    data class YieldOutsideSequence(
+        override val span: SourceSpan,
+    ) : TypeCheckError() {
+        override val message get() = "yield is only valid inside a Sequence<T>-returning function"
+    }
 }
 
 fun TypeCheckError.toCompileError(sourcePath: String) =

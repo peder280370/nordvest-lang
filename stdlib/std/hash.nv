@@ -1,0 +1,28 @@
+module std.hash
+
+/** Compute the FNV-1a hash of a string. */
+pub fn fnv1a(s: str) → int
+
+/** Compute the djb2 hash of a string. */
+pub fn djb2(s: str) → int
+
+/** Compute the MurmurHash3 of a string. */
+pub fn murmur3(s: str, seed: int) → int
+
+/** Compute the SHA-256 hash of a string (returns hex string). */
+pub fn sha256(s: str) → str
+
+/** Compute the SHA-512 hash of a string (returns hex string). */
+pub fn sha512(s: str) → str
+
+/** Compute the MD5 hash of a string (returns hex string). Note: not cryptographically secure. */
+pub fn md5(s: str) → str
+
+/** Compute the BLAKE3 hash of a string (returns hex string). */
+pub fn blake3(s: str) → str
+
+/** Compute the CRC32 of a string. */
+pub fn crc32(s: str) → int
+
+/** Combine two hash values. */
+pub fn hashCombine(h1: int, h2: int) → int

@@ -287,7 +287,8 @@ entry:
         Type.TUnit, Type.TNever                       -> "void"
         is Type.TNullable                             -> llvmType(t.inner)
         is Type.TArray, is Type.TMap, is Type.TResult,
-        is Type.TNamed                                -> "i8*"
+        is Type.TNamed, is Type.TGpuBuffer,
+        is Type.TSequence                             -> "i8*"
         else                                          -> "i64"   // TUnknown, TError, TVar, TTuple, etc.
     }
 
@@ -420,9 +421,60 @@ entry:
 
     private fun emitDecl(decl: Decl) {
         when (decl) {
-            is FunctionDecl -> emitFunctionDecl(decl)
+            is FunctionDecl -> {
+                // @gpu annotation: emit a comment marking the function as a GPU kernel stub
+                if (decl.annotations.any { it.name == "gpu" }) {
+                    userFns.appendLine("; @gpu kernel: ${decl.name}")
+                }
+                // @extern annotation: emit a declare instead of define
+                if (decl.annotations.any { it.name == "extern" }) {
+                    emitExternDecl(decl)
+                } else {
+                    emitFunctionDecl(decl)
+                }
+            }
+            is FunctionSignatureDecl -> {
+                // @extern annotation on a signature: emit declare
+                if (decl.annotations.any { it.name == "extern" }) {
+                    emitExternSigDecl(decl)
+                }
+                // otherwise interface signature — skip
+            }
             else            -> { /* unsupported at top-level in Phase 1.5 */ }
         }
+    }
+
+    private fun emitExternDecl(fn: FunctionDecl) {
+        // Find C symbol name from annotation args, then use fn name
+        val cSymbol = fn.annotations.firstOrNull { it.name == "extern" }
+            ?.args?.firstOrNull { it.name == "fn" || it.name == null }
+            ?.let { arg ->
+                when (val v = arg.value) {
+                    is nv.compiler.parser.AnnotationStrValue -> v.value
+                    is nv.compiler.parser.AnnotationIdentValue -> v.name.text
+                    else -> null
+                }
+            } ?: fn.name
+        val nvRetType = fn.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+        val retLt = llvmType(nvRetType)
+        val paramTypes = fn.params.joinToString(", ") { p -> llvmType(resolveTypeNode(p.type)) }
+        declares.appendLine("declare $retLt @$cSymbol($paramTypes)")
+    }
+
+    private fun emitExternSigDecl(fn: FunctionSignatureDecl) {
+        val cSymbol = fn.annotations.firstOrNull { it.name == "extern" }
+            ?.args?.firstOrNull { it.name == "fn" || it.name == null }
+            ?.let { arg ->
+                when (val v = arg.value) {
+                    is nv.compiler.parser.AnnotationStrValue -> v.value
+                    is nv.compiler.parser.AnnotationIdentValue -> v.name.text
+                    else -> null
+                }
+            } ?: fn.name
+        val nvRetType = fn.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+        val retLt = llvmType(nvRetType)
+        val paramTypes = fn.params.joinToString(", ") { p -> llvmType(resolveTypeNode(p.type)) }
+        declares.appendLine("declare $retLt @$cSymbol($paramTypes)")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -521,6 +573,14 @@ entry:
             is UnsafeBlock    -> stmt.stmts.forEach { emitStmt(it) }
             is AsmStmt        -> emitAsmStmt(stmt)
             is BytesStmt      -> emitBytesStmt(stmt)
+            is CBlockStmt     -> {
+                emit("  ; @c block (passthrough to C compiler)")
+                for (line in stmt.lines) emit("  ; $line")
+            }
+            is CppBlockStmt   -> {
+                emit("  ; @cpp block (passthrough to C++ compiler)")
+                for (line in stmt.lines) emit("  ; $line")
+            }
             is DeferStmt      -> { /* Phase 1.5: defer not fully supported */ }
             is TryCatchStmt   -> emitTryCatchStmt(stmt)
             is ThrowStmt      -> { emitExpr(stmt.expr); Unit }

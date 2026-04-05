@@ -1,0 +1,31 @@
+module std.net
+
+/** Make an HTTP GET request and return the response body. */
+pub fn httpGet(url: str) throws NetworkError → str
+
+/** Make an HTTP POST request with a body and return the response. */
+pub fn httpPost(url: str, body: str, contentType: str) throws NetworkError → str
+
+/** Open a TCP connection to the given host and port. */
+pub fn tcpConnect(host: str, port: int) throws NetworkError → TcpStream
+
+/** Listen for TCP connections on the given address. */
+pub fn tcpListen(addr: str, port: int) throws NetworkError → TcpListener
+
+/** Read bytes from a TCP stream. */
+pub fn tcpRead(stream: TcpStream, bufSize: int) throws NetworkError → str
+
+/** Write bytes to a TCP stream. */
+pub fn tcpWrite(stream: TcpStream, data: str) throws NetworkError
+
+/** Close a TCP stream. */
+pub fn tcpClose(stream: TcpStream)
+
+/** Parse a URL into its components. */
+pub fn parseUrl(url: str) → Result<str>
+
+/** Encode a string for use in a URL. */
+pub fn urlEncode(s: str) → str
+
+/** Decode a URL-encoded string. */
+pub fn urlDecode(s: str) → str

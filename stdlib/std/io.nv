@@ -1,0 +1,16 @@
+module std.io
+
+/** Print to stdout without newline. */
+pub fn print(value: str)
+
+/** Print to stdout with newline. */
+pub fn println(value: str)
+
+/** Print to stderr. */
+pub fn eprintln(value: str)
+
+/** Read a line from stdin. Returns nil on EOF. */
+pub fn readLine() → str?
+
+/** Read all of stdin as a string. */
+pub fn readAll() → str

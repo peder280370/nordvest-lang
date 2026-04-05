@@ -1,0 +1,28 @@
+module std.fmt
+
+/** Format a value using a format string (printf-like). */
+pub fn format(fmt: str, args: [str]) → str
+
+/** Format an integer with optional padding and radix. */
+pub fn formatInt(n: int, width: int, padChar: str, radix: int) → str
+
+/** Format a float with optional precision and notation. */
+pub fn formatFloat(x: float, precision: int, notation: str) → str
+
+/** Pad a string to the left with a character to reach the given width. */
+pub fn padLeft(s: str, width: int, padChar: str) → str
+
+/** Pad a string to the right with a character to reach the given width. */
+pub fn padRight(s: str, width: int, padChar: str) → str
+
+/** Truncate a string to the given width with an optional suffix. */
+pub fn truncate(s: str, width: int, suffix: str) → str
+
+/** Format a file size in human-readable form (e.g. "1.5 MB"). */
+pub fn fileSize(bytes: int) → str
+
+/** Format a duration in human-readable form (e.g. "1h 23m"). */
+pub fn duration(ms: int) → str
+
+/** Format a number with thousands separators. */
+pub fn thousands(n: int, sep: str) → str

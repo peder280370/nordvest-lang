@@ -1,0 +1,58 @@
+module std.fs
+
+/** Read the contents of a file as a string. */
+pub fn readFile(path: str) throws IOError → str
+
+/** Write a string to a file (creates or overwrites). */
+pub fn writeFile(path: str, content: str) throws IOError
+
+/** Append a string to a file. */
+pub fn appendFile(path: str, content: str) throws IOError
+
+/** Check whether a path exists. */
+pub fn exists(path: str) → bool
+
+/** Check whether a path is a file. */
+pub fn isFile(path: str) → bool
+
+/** Check whether a path is a directory. */
+pub fn isDir(path: str) → bool
+
+/** List directory entries. */
+pub fn listDir(path: str) throws IOError → [str]
+
+/** Create a directory (and parents) if it does not exist. */
+pub fn mkdirs(path: str) throws IOError
+
+/** Delete a file or directory. */
+pub fn delete(path: str) throws IOError
+
+/** Copy a file from src to dst. */
+pub fn copy(src: str, dst: str) throws IOError
+
+/** Move/rename a file. */
+pub fn move(src: str, dst: str) throws IOError
+
+/** Get the file size in bytes. */
+pub fn fileSize(path: str) throws IOError → int
+
+/** Get the canonical (absolute) path. */
+pub fn canonicalPath(path: str) → str
+
+/** Join path components. */
+pub fn joinPath(base: str, parts: [str]) → str
+
+/** Get the parent directory of a path. */
+pub fn parentDir(path: str) → str
+
+/** Get the file name component of a path. */
+pub fn fileName(path: str) → str
+
+/** Get the file extension (without dot). */
+pub fn fileExt(path: str) → str
+
+/** Create a temporary file and return its path. */
+pub fn tempFile(prefix: str) throws IOError → str
+
+/** Create a temporary directory and return its path. */
+pub fn tempDir(prefix: str) throws IOError → str

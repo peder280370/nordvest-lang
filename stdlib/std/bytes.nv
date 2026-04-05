@@ -1,0 +1,49 @@
+module std.bytes
+
+/** Create a byte buffer of the given size, initialized to zero. */
+pub fn buffer(size: int) → [byte]
+
+/** Get the byte at the given index. */
+pub fn get(buf: [byte], index: int) → byte
+
+/** Set the byte at the given index. */
+pub fn set(buf: [byte], index: int, value: byte) → [byte]
+
+/** Slice a byte buffer. */
+pub fn slice(buf: [byte], from: int, to: int) → [byte]
+
+/** Concatenate two byte buffers. */
+pub fn concat(a: [byte], b: [byte]) → [byte]
+
+/** Convert a byte buffer to a UTF-8 string. */
+pub fn toString(buf: [byte]) → Result<str>
+
+/** Convert a string to a byte buffer (UTF-8). */
+pub fn fromString(s: str) → [byte]
+
+/** Read a little-endian int32 from a buffer at the given offset. */
+pub fn readInt32LE(buf: [byte], offset: int) → int
+
+/** Write a little-endian int32 to a buffer at the given offset. */
+pub fn writeInt32LE(buf: [byte], offset: int, value: int) → [byte]
+
+/** Read a big-endian int32 from a buffer at the given offset. */
+pub fn readInt32BE(buf: [byte], offset: int) → int
+
+/** Write a big-endian int32 to a buffer at the given offset. */
+pub fn writeInt32BE(buf: [byte], offset: int, value: int) → [byte]
+
+/** Read a little-endian int64 from a buffer at the given offset. */
+pub fn readInt64LE(buf: [byte], offset: int) → int
+
+/** Write a little-endian int64 to a buffer at the given offset. */
+pub fn writeInt64LE(buf: [byte], offset: int, value: int) → [byte]
+
+/** Fill a byte buffer with a single byte value. */
+pub fn fill(buf: [byte], value: byte) → [byte]
+
+/** Compare two byte buffers for equality. */
+pub fn equal(a: [byte], b: [byte]) → bool
+
+/** Find the first occurrence of a pattern in a buffer. Returns -1 if not found. */
+pub fn indexOf(buf: [byte], pattern: [byte]) → int

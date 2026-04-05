@@ -489,6 +489,18 @@ data class BytesStmt(
     val bytes: List<Int>,           // 0x00-0xFF hex/dec byte values
 ) : Stmt()
 
+// Inline C block: @c followed by indented raw C code lines
+data class CBlockStmt(
+    override val span: SourceSpan,
+    val lines: List<String>,
+) : Stmt()
+
+// Inline C++ block: @cpp followed by indented raw C++ code lines
+data class CppBlockStmt(
+    override val span: SourceSpan,
+    val lines: List<String>,
+) : Stmt()
+
 enum class AssignOp {
     ASSIGN,
     PLUS_ASSIGN, MINUS_ASSIGN, STAR_ASSIGN, SLASH_ASSIGN, INT_DIV_ASSIGN, MOD_ASSIGN,
