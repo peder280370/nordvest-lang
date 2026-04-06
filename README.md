@@ -2,7 +2,7 @@
 
 A statically typed, compiled language with clean indentation-based syntax, first-class mathematical notation, and a unified toolchain.
 
-> **Status:** Phase 1 in progress — lexer, parser, name resolver, and type checker complete (396 tests passing). Next: IR lowering (1.5).
+> **Status:** Phases 0–4 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and standard library stubs. 654 tests passing. Next: Phase 5 — Self-Hosting.
 > See [`IMPL.txt`](IMPL.txt) for current progress and [`PLAN.txt`](PLAN.txt) for the full roadmap.
 
 ---
@@ -142,10 +142,11 @@ cd nordvest-lang
 | Phase | Goal | Status |
 |---|---|---|
 | **0 — Foundation** | Repo structure, Gradle, grammar skeleton, test harness | Done |
-| **1 — Bootstrap core** | Lexer, parser, type checker, LLVM IR codegen, `nv run/build` | In progress (1.1–1.4 done; 1.5–1.7 todo) |
-| **2 — Systems & concurrency** | async/await, channels, C/C++ interop, GPU, stdlib v1 | Planned |
-| **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Planned |
-| **4 — Self-hosting** | Rewrite the compiler in Nordvest | Planned |
+| **1 — Bootstrap core** | Lexer, parser, type checker, LLVM IR codegen, `nv run/build` | Done |
+| **2 — Systems & concurrency** | async/await, channels, C/C++ interop, GPU, stdlib v1 | Done |
+| **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Done |
+| **4 — Language completion** | stdlib bodies, codegen hardening, flagship examples, fuzz testing | Done |
+| **5 — Self-hosting** | Rewrite the compiler in Nordvest | Planned |
 
 The bootstrap compiler is written in **Kotlin** and targets **LLVM IR**.
 Self-hosting is the goal of Phase 4.
