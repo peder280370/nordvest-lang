@@ -1,0 +1,164 @@
+// error_handling.nv — Result<T>, error matching, and error pipelines
+//
+// Demonstrates: Result<T> / Result<T, E>, Ok/Err construction, match on
+// Result, typed errors, and building error-safe computation chains.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known codegen constraints:
+//   - Result<float>/<int> don't work — use Result<str> (Ok uses pointers).
+//   - The ? propagation operator emits incorrect IR (Phase 2 fix needed).
+//     Use explicit match instead.
+//   - All match arm binding names in a function must be unique.
+//   - .getOrElse() has a codegen bug — use match as a workaround.
+//   nv run examples/error_handling.nv
+
+module examples.error_handling
+
+// ─── Custom error types ───────────────────────────────────────────────────────
+
+sealed class AppError
+    ParseErr(parseMsg: str)
+    MathErr(mathMsg: str)
+    NotFound(notFoundKey: str)
+
+fn errorMsg(appErr: AppError) → str
+    match appErr
+        ParseErr(pMsg): → "Parse error: {pMsg}"
+        MathErr(mMsg): → "Math error: {mMsg}"
+        NotFound(nKey): → "Not found: '{nKey}'"
+
+// ─── Fallible computations returning Result<str> ──────────────────────────────
+
+fn safeDiv(a: float, b: float) → Result<str>
+    if b == 0.0
+        → Err("division by zero")
+    let r = a / b
+    → Ok("{r}")
+
+fn safePow(base: float, expArg: float) → Result<str>
+    if base < 0.0
+        → Err("power of negative base")
+    let r = base ^ expArg
+    → Ok("{r}")
+
+fn parseInt(s: str) → Result<str>
+    if s == ""
+        → Err("empty input")
+    if s == "bad"
+        → Err("not a valid integer: '{s}'")
+    → Ok(s)
+
+// ─── Error chaining via explicit match (? propagation is Phase 2) ────────────
+
+fn computeTwoInputs(a: str, b: str) → Result<str>
+    match parseInt(a)
+        Ok(xVal):
+            match parseInt(b)
+                Ok(yVal): → Ok("parsed: " + xVal + " and " + yVal)
+                Err(yErr2): → Err(yErr2)
+        Err(xErr): → Err(xErr)
+
+// ─── Typed errors ─────────────────────────────────────────────────────────────
+
+fn lookupUser(id: int) → Result<str, AppError>
+    if id == 1
+        → Ok("Alice")
+    if id == 2
+        → Ok("Bob")
+    → Err(NotFound("{id}"))
+
+fn validateScore(score: int) → Result<str, AppError>
+    if score < 0 || score > 100
+        → Err(MathErr("score {score} not in [0,100]"))
+    → Ok("score {score} valid")
+
+fn gradeUser(id: int, score: int) → Result<str, AppError>
+    match lookupUser(id)
+        Ok(userName):
+            match validateScore(score)
+                Ok(scoreStr): → Ok("{userName}: {scoreStr}")
+                Err(scoreErr): → Err(scoreErr)
+        Err(userErr): → Err(userErr)
+
+// ─── Using Result as a return instead of bool ─────────────────────────────────
+
+fn checkPositive(n: float) → Result<str>
+    if n <= 0.0
+        → Err("{n} is not positive")
+    → Ok("{n} is positive")
+
+fn main()
+    // Basic Result matching
+    match safeDiv(10.0, 3.0)
+        Ok(d1): → println("10/3 = {d1}")
+        Err(de1): → println("error: {de1}")
+
+    match safeDiv(5.0, 0.0)
+        Ok(d2): → println("5/0 = {d2}")
+        Err(de2): → println("error: {de2}")
+
+    match safePow(2.0, 10.0)
+        Ok(p1): → println("2^10 = {p1}")
+        Err(pe1): → println("pow error: {pe1}")
+
+    match safePow(-1.0, 2.0)
+        Ok(p2): → println("(-1)^2 = {p2}")
+        Err(pe2): → println("pow error: {pe2}")
+
+    // Error chaining
+    println("")
+    match computeTwoInputs("hello", "world")
+        Ok(c1): → println("compute = {c1}")
+        Err(ce1): → println("compute error: {ce1}")
+
+    match computeTwoInputs("bad", "world")
+        Ok(c2): → println("compute = {c2}")
+        Err(ce2): → println("compute error: {ce2}")
+
+    match computeTwoInputs("", "world")
+        Ok(c3): → println("compute = {c3}")
+        Err(ce3): → println("compute error: {ce3}")
+
+    // Typed errors
+    println("")
+    match lookupUser(1)
+        Ok(u1): → println("user 1: {u1}")
+        Err(ue1): → println("user 1: {errorMsg(ue1)}")
+
+    match lookupUser(99)
+        Ok(u2): → println("user 99: {u2}")
+        Err(ue2): → println("user 99: {errorMsg(ue2)}")
+
+    match validateScore(85)
+        Ok(vs1): → println("{vs1}")
+        Err(vse1): → println("{errorMsg(vse1)}")
+
+    match validateScore(150)
+        Ok(vs2): → println("{vs2}")
+        Err(vse2): → println("{errorMsg(vse2)}")
+
+    // Chained typed operations
+    println("")
+    match gradeUser(1, 92)
+        Ok(g1): → println("{g1}")
+        Err(ge1): → println("{errorMsg(ge1)}")
+
+    match gradeUser(99, 85)
+        Ok(g2): → println("{g2}")
+        Err(ge2): → println("{errorMsg(ge2)}")
+
+    match gradeUser(1, 110)
+        Ok(g3): → println("{g3}")
+        Err(ge3): → println("{errorMsg(ge3)}")
+
+    // Result as guard
+    println("")
+    match checkPositive(5.0)
+        Ok(cp1): → println("{cp1}")
+        Err(cpe1): → println("{cpe1}")
+
+    match checkPositive(-3.0)
+        Ok(cp2): → println("{cp2}")
+        Err(cpe2): → println("{cpe2}")
+
+    println("Error handling demo complete.")

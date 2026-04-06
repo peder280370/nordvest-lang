@@ -1,0 +1,185 @@
+// nv-todo — In-memory task manager demonstrating idiomatic Nordvest patterns
+//
+// Demonstrates: sealed classes for enums, classes for records, pattern
+// matching on status/priority, Result<T> for validation, and iterative
+// filtering/reporting over task lists.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known Phase 1 constraints:
+//   - Class body fields (var status = ...) cause OOM in parser — tasks are
+//     immutable, created with all fields set at construction time.
+//   - self.field in methods returns wrong values — use free functions.
+//   - enum codegen has type bugs — use sealed class with single-field variants.
+//   - Array mutation (arr.append, task.status = x) is Phase 2.
+//   - .filter()/.map()/.length stdlib is Phase 2.
+//   - top-level `let` constants evaluate as 0 — use literal values.
+//   nv run examples/nv-todo/main.nv
+
+module examples.todo
+
+// ─── Priority sealed class (replaces enum) ───────────────────────────────────
+//
+// NOTE: enum has a type-mismatch codegen bug in Phase 1 — use sealed class.
+
+sealed class Priority
+    Low(dummy: int)
+    Medium(dummy: int)
+    High(dummy: int)
+    Critical(dummy: int)
+
+fn priorityLabel(p: Priority) → str
+    match p
+        Low(pLa):      → "LOW"
+        Medium(pLb):   → "MEDIUM"
+        High(pLc):     → "HIGH"
+        Critical(pLd): → "CRITICAL"
+
+fn priorityRank(p: Priority) → int
+    match p
+        Low(pRa):      → 0
+        Medium(pRb):   → 1
+        High(pRc):     → 2
+        Critical(pRd): → 3
+
+// ─── Status sealed class ─────────────────────────────────────────────────────
+
+sealed class Status
+    Todo(dummy: int)
+    InProgress(dummy: int)
+    Done(dummy: int)
+    Cancelled(dummy: int)
+
+fn statusLabel(s: Status) → str
+    match s
+        Todo(sLa):       → "TODO"
+        InProgress(sLb): → "IN_PROGRESS"
+        Done(sLc):       → "DONE"
+        Cancelled(sLd):  → "CANCELLED"
+
+fn isComplete(s: Status) → bool
+    match s
+        Done(sCa):      → true
+        Cancelled(sCb): → true
+        Todo(sCc):      → false
+        InProgress(sCd): → false
+
+// ─── Task type ───────────────────────────────────────────────────────────────
+//
+// Tasks are immutable in Phase 1 (no body fields, no mutation).
+// "Updating" a task means creating a new one with changed fields.
+
+class Task(id: int, title: str, priority: Priority, status: Status)
+
+fn taskShow(t: Task) → str
+    → "[{t.id}] {t.title} | {priorityLabel(t.priority)} | {statusLabel(t.status)}"
+
+fn taskIsDone(t: Task) → bool
+    → isComplete(t.status)
+
+// ─── Simple task store (fixed array of 8 tasks for Phase 1) ──────────────────
+//
+// Phase 2 will support: class TodoList with var tasks: [Task] = []
+// and methods like addTask, completeTask, filterByPriority, etc.
+
+fn countDone(t1: Task, t2: Task, t3: Task, t4: Task,
+             t5: Task, t6: Task, t7: Task, t8: Task) → int
+    var n = 0
+    if taskIsDone(t1)
+        n = n + 1
+    if taskIsDone(t2)
+        n = n + 1
+    if taskIsDone(t3)
+        n = n + 1
+    if taskIsDone(t4)
+        n = n + 1
+    if taskIsDone(t5)
+        n = n + 1
+    if taskIsDone(t6)
+        n = n + 1
+    if taskIsDone(t7)
+        n = n + 1
+    if taskIsDone(t8)
+        n = n + 1
+    → n
+
+fn printTask(t: Task) → str
+    let s = taskShow(t)
+    println("  {s}")
+    → s
+
+fn printHighPriority(t: Task) → int
+    if priorityRank(t.priority) >= 2
+        let s = taskShow(t)
+        println("  {s}")
+        → 1
+    → 0
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+
+fn validateTitle(title: str) → Result<str>
+    if title == ""
+        → Err("title cannot be empty")
+    → Ok(title)
+
+fn createTask(id: int, title: str, priority: Priority) → Result<str>
+    match validateTitle(title)
+        Ok(validTitle):
+            let s = priorityLabel(priority)
+            → Ok("Task {id}: '{validTitle}' [{s}] created")
+        Err(msg): → Err(msg)
+
+fn main()
+    // Create tasks with various priorities and statuses
+    let t1 = Task(1, "Set up CI/CD pipeline",        Critical(0), InProgress(0))
+    let t2 = Task(2, "Write unit tests",              High(0),     Todo(0))
+    let t3 = Task(3, "Update README",                 Medium(0),   Done(0))
+    let t4 = Task(4, "Fix memory leak in parser",     Critical(0), Todo(0))
+    let t5 = Task(5, "Add dark mode to UI",           Low(0),      Todo(0))
+    let t6 = Task(6, "Deploy to staging",             High(0),     Done(0))
+    let t7 = Task(7, "Code review: PR #42",           Medium(0),   InProgress(0))
+    let t8 = Task(8, "Archive old log files",         Low(0),      Cancelled(0))
+
+    // All tasks
+    println("=== All Tasks ===")
+    printTask(t1)
+    printTask(t2)
+    printTask(t3)
+    printTask(t4)
+    printTask(t5)
+    printTask(t6)
+    printTask(t7)
+    printTask(t8)
+
+    // High/Critical priority
+    println("")
+    println("=== High/Critical Priority ===")
+    printHighPriority(t1)
+    printHighPriority(t2)
+    printHighPriority(t3)
+    printHighPriority(t4)
+    printHighPriority(t5)
+    printHighPriority(t6)
+    printHighPriority(t7)
+    printHighPriority(t8)
+
+    // Statistics
+    println("")
+    let done = countDone(t1, t2, t3, t4, t5, t6, t7, t8)
+    println("=== Summary ===")
+    println("Total tasks: 8")
+    println("Completed:   {done}")
+    println("Remaining:   {8 - done}")
+
+    // Validation demo
+    println("")
+    println("=== Validation ===")
+    match createTask(9, "New feature", High(0))
+        Ok(msg1):  → println("{msg1}")
+        Err(err1): → println("Error: {err1}")
+
+    match createTask(10, "", Medium(0))
+        Ok(msg2):  → println("{msg2}")
+        Err(err2): → println("Error: {err2}")
+
+    println("")
+    println("Todo demo complete.")

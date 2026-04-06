@@ -1,0 +1,150 @@
+// generics.nv — Generic functions and generic classes
+//
+// Demonstrates: generic function syntax, type parameters, constrained
+// generics, associated types, and generic class declarations.
+//
+// STATUS: Parses and type-checks (Phase 1).
+//   Known codegen constraints:
+//   - Generic class codegen (monomorphization) is Phase 2.
+//   - Class body fields (`items: [T] = []`) are Phase 2.
+//   - Tuple returns (→ a, b) are Phase 2.
+//   - `>>` in nested generics (`Comparable<T>`) is parsed as right-shift;
+//     use a workaround or avoid nested type parameters in constraints.
+//   The runnable demo shows equivalent non-generic algorithms.
+//   nv run examples/generics.nv
+
+module examples.generics
+
+// ─── Generic function declarations ───────────────────────────────────────────
+//
+// These parse and type-check correctly. Monomorphic calls work when the
+// type parameter is used only for passing values through.
+
+fn identity<T>(x: T) → T
+    → x
+
+// NOTE: Tuple returns (→ b, a) are Phase 2. Shown for documentation:
+// fn swap<T>(a: T, b: T) → (T, T)
+//     → b, a
+
+// ─── Generic class declarations (Phase 2 codegen) ────────────────────────────
+//
+// These are type-correct declarations. Class body fields and instantiation
+// require Phase 2 monomorphization emit.
+
+// class Stack<T>
+//     items: [T] = []                    // body fields: Phase 2
+//
+//     fn push(item: T)
+//         self.items.append(item)
+//
+//     fn pop() → T?
+//         → self.items.removeLast()
+//
+//     fn size() → int → self.items.length
+
+// class Pair<A, B>(first: A, second: B)
+//     fn swap() → Pair<B, A>
+//         → Pair(self.second, self.first)
+
+// ─── Constrained generics (Phase 2 constraint checking) ──────────────────────
+//
+// fn maxOf<T: Comparable<T>>(a: T, b: T) → T  -- NOTE: <T> parses >> as rshift
+// fn printAll<C: Container>(c: C) where C.Item: Printable
+
+// ─── Runnable: algorithm demos without generics ───────────────────────────────
+
+// Bubble sort for int arrays
+fn bubbleSort(arr: [int], n: int) → int
+    var i = 0
+    while i < n - 1
+        var j = 0
+        while j < n - 1 - i
+            if arr[j] > arr[j + 1]
+                let tmp = arr[j]
+                arr[j] = arr[j + 1]
+                arr[j + 1] = tmp
+            j = j + 1
+        i = i + 1
+    → 0
+
+fn binarySearch(arr: [int], n: int, target: int) → int
+    var lo = 0
+    var hi = n - 1
+    while lo <= hi
+        let mid = (lo + hi) ÷ 2
+        if arr[mid] == target
+            → mid
+        if arr[mid] < target
+            lo = mid + 1
+        else
+            hi = mid - 1
+    → -1
+
+fn min5(a: int, b: int, c: int, d: int, f: int) → int
+    var m = a
+    if b < m
+        m = b
+    if c < m
+        m = c
+    if d < m
+        m = d
+    if f < m
+        m = f
+    → m
+
+fn max5(a: int, b: int, c: int, d: int, f: int) → int
+    var m = a
+    if b > m
+        m = b
+    if c > m
+        m = c
+    if d > m
+        m = d
+    if f > m
+        m = f
+    → m
+
+// Fibonacci using generic-like parametric approach
+fn fibFrom(a: int, b: int, n: int) → int
+    if n == 0
+        → a
+    → fibFrom(b, a + b, n - 1)
+
+fn fib(n: int) → int
+    → fibFrom(0, 1, n)
+
+fn main()
+    // NOTE: identity<T> has a monomorphization codegen bug — calling it with
+    // any type causes type conflicts. Commented out pending Phase 2 fix.
+    // let s = identity("hello")
+    // println("identity(hello)   = {s}")
+
+    // Sorting — NOTE: array element assignment (arr[i] = x) is Phase 2.
+    // bubbleSort is declared above but can't mutate its argument yet.
+    // Binary search on a pre-sorted array (read-only access works today)
+    println("")
+    let sorted = [11, 12, 22, 25, 64]
+    let pos = binarySearch(sorted, 5, 22)
+    let notFound = binarySearch(sorted, 5, 99)
+    println("binarySearch(22) = {pos}")
+    println("binarySearch(99) = {notFound}")
+
+    // Min/max over 5 values
+    println("")
+    println("min(3,1,4,1,5) = {min5(3, 1, 4, 1, 5)}")
+    println("max(3,1,4,1,5) = {max5(3, 1, 4, 1, 5)}")
+
+    // Fibonacci (parametric / generic-like)
+    println("")
+    println("Fibonacci sequence:")
+    for i in [0, 15[
+        println("  fib({i}) = {fib(i)}")
+
+    // NOTE: Phase 2 will unlock:
+    // let stack = Stack<int>()
+    // stack.push(1); stack.push(2); stack.push(3)
+    // println("Stack size = {stack.size()}")
+    // let pair = Pair(42, "hello")
+    // let swapped = pair.swap()
+    // println("Pair({pair.first}, {pair.second})")

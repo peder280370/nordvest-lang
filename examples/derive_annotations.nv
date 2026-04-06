@@ -1,0 +1,140 @@
+// derive_annotations.nv — @derive, @newtype, @builder, @lazy, and by-delegation
+//
+// Demonstrates: @derive(Show, Eq, Compare, Hash, Copy) auto-generation,
+// .copy(field: val) shallow copy, @newtype zero-cost wrappers,
+// @builder DSL, @lazy fields, and `by` delegation.
+//
+// STATUS: Compiles and runs (Phase 1 demo). @derive/@builder/@newtype/@lazy
+//   code generation is a Phase 2 item. Declarations with @derive parse today
+//   but the generated methods (==, show, .copy) are not available yet.
+//   @newtype, @builder, and @lazy codegen are Phase 2.
+//   The runnable demo at the bottom uses equivalent free functions.
+//   nv run examples/derive_annotations.nv
+
+module examples.derive_annotations
+
+// ─── @derive — auto-generate trait implementations ───────────────────────────
+//
+// @derive(All) is shorthand for @derive(Show, Eq, Compare, Hash, Copy).
+// .copy(field: newVal) performs a shallow copy-with-override (requires Copy).
+// NOTE: @derive codegen is Phase 2 — generated methods are not callable yet.
+
+@derive(All)
+struct Point(x: float, y: float)
+
+@derive(Show, Eq, Hash)
+struct Color(r: int, g: int, b: int)
+
+@derive(All)
+struct Interval(lo: float, hi: float)
+
+// ─── @newtype — zero-cost nominal wrapper ─────────────────────────────────────
+//
+// @newtype struct T(value: U) is distinct from U at the type level but has zero
+// runtime overhead. .value unwraps to the inner type. Auto-derives
+// Eq/Hash/Compare/Show from the inner type.
+// NOTE: @newtype codegen is Phase 2.
+//
+// @newtype struct UserId(value: int)
+// @newtype struct Seconds(value: float)
+// @newtype struct Meters(value: float)
+// @newtype struct Email(value: str)
+
+// ─── @builder — DSL block for complex construction ───────────────────────────
+//
+// @builder generates a Builder class and static .build { } DSL.
+// NOTE: @builder codegen is Phase 2.
+//
+// @builder
+// class HttpRequest(
+//     url:     str,
+//     method:  str = "GET",
+//     timeout: int = 30
+// )
+//
+// Usage once Phase 2 ships:
+//   let req = HttpRequest.build
+//       url    = "https://api.example.com"
+//       method = "POST"
+
+// ─── @lazy fields — Phase 2 ──────────────────────────────────────────────────
+//
+// @lazy val field = expr — computed once on first access
+// @lazy var field = expr — recomputed when reset to nil
+// NOTE: @lazy and class body fields are Phase 2.
+//
+// class Parser(source: str)
+//     @lazy val tokens: [str] = tokenize(source)
+//     fn tokenCount() → int → self.tokens.length
+
+// ─── by delegation — Phase 2 ─────────────────────────────────────────────────
+//
+// class C : I by expr  delegates all methods of interface I to expr.
+// NOTE: by-delegation codegen is Phase 2.
+//
+// class LoggingList<T>(inner: MutableList<T>) : MutableList<T> by inner
+//     override fn add(item: T)
+//         println("[log] add {item}")
+//         inner.add(item)
+
+// ─── Runnable equivalents (Phase 1) ──────────────────────────────────────────
+//
+// These free functions show the logic that @derive auto-generates.
+
+fn pointEq(a: Point, b: Point) → bool
+    → a.x == b.x ∧ a.y == b.y
+
+fn pointShow(p: Point) → str
+    → "Point({p.x}, {p.y})"
+
+fn colorEq(a: Color, b: Color) → bool
+    → a.r == b.r ∧ a.g == b.g ∧ a.b == b.b
+
+fn colorShow(c: Color) → str
+    → "Color({c.r},{c.g},{c.b})"
+
+fn intervalShow(iv: Interval) → str
+    → "[{iv.lo}, {iv.hi}]"
+
+fn intervalCopy(iv: Interval, newHi: float) → Interval
+    → Interval(iv.lo, newHi)
+
+// Newtype equivalents using plain struct
+struct UserId(value: int)
+struct Seconds(value: float)
+struct Meters(value: float)
+
+fn main()
+    // @derive(All) struct — direct field access works; == and .copy need Phase 2
+    let p1 = Point(1.0, 2.0)
+    let p2 = Point(1.0, 2.0)
+    let p3 = Point(3.0, 4.0)
+    println("{pointShow(p1)}")
+    println("p1 == p2: {pointEq(p1, p2)}")
+    println("p1 == p3: {pointEq(p1, p3)}")
+
+    println("")
+    let red  = Color(255, 0, 0)
+    let blue = Color(0, 0, 255)
+    println("{colorShow(red)}")
+    println("{colorShow(blue)}")
+    println("red == red:  {colorEq(red, red)}")
+    println("red == blue: {colorEq(red, blue)}")
+
+    println("")
+    let iv = Interval(0.0, 1.0)
+    let iv2 = intervalCopy(iv, 2.0)
+    println("iv  = {intervalShow(iv)}")
+    println("iv2 = {intervalShow(iv2)}")
+
+    println("")
+    // @newtype struct — plain struct equivalent
+    let uid     = UserId(42)
+    let timeout = Seconds(30.0)
+    let dist    = Meters(100.0)
+    println("UserId:   {uid.value}")
+    println("Timeout:  {timeout.value}s")
+    println("Distance: {dist.value}m")
+
+    println("")
+    println("Derive/annotations demo complete (Phase 2 codegen pending).")

@@ -1,0 +1,115 @@
+// functions.nv — Functions, lambdas, and higher-order functions
+//
+// Demonstrates: named functions, → return syntax, explicit return types,
+// recursive functions, inline if, and mathematical constants π, e.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Default parameters, variadic, tuple returns, and pipeline operator
+//   are language-design features not yet wired into codegen.
+//   nv run examples/functions.nv
+
+module examples.functions
+
+// Always specify return types — type inference for return is not yet wired
+fn square(x: float) → float
+    → x * x
+
+fn cube(x: float) → float
+    → x ^ 3
+
+fn abs(x: float) → float
+    → if x < 0.0 then -x else x
+
+// Power operator and built-in constants π, e
+fn circleArea(r: float) → float
+    → π * r ^ 2
+
+fn cylinderVolume(r: float, h: float) → float
+    → π * r ^ 2 * h
+
+// NOTE: normalPDF requires std.math.sqrt — available in Phase 2.
+// fn normalPDF(x: float, mu: float, sigma: float) → float
+//     → (1.0 / (sigma * (2.0 * π).sqrt())) * e ^ (-(x - mu)^2 / (2.0 * sigma^2))
+
+// Inline if expression — Nordvest has no ternary operator
+// Simple two-branch inline if works:
+fn absoluteValue(x: float) → float
+    → if x < 0.0 then -x else x
+
+fn max2(a: float, b: float) → float
+    → if a > b then a else b
+
+fn min2(a: float, b: float) → float
+    → if a < b then a else b
+
+// NOTE: Nested inline if (else if chains) has a codegen limitation.
+// Use regular if/else blocks for multi-branch logic:
+fn signum(x: float) → int
+    if x > 0.0
+        → 1
+    if x < 0.0
+        → -1
+    → 0
+
+fn clamp(x: float, lo: float, hi: float) → float
+    if x < lo
+        → lo
+    if x > hi
+        → hi
+    → x
+
+// NOTE: Higher-order functions (passing fn values) require Phase 2 codegen.
+// fn applyTwice(f: fn(float) → float, x: float) → float
+//     → f(f(x))
+
+// Recursive functions
+fn fibonacci(n: int) → int
+    if n <= 1
+        → n
+    → fibonacci(n - 1) + fibonacci(n - 2)
+
+fn factorial(n: int) → int
+    if n <= 1
+        → 1
+    → n * factorial(n - 1)
+
+// Mutual recursion
+fn isEven(n: int) → bool
+    if n == 0
+        → true
+    → isOdd(n - 1)
+
+fn isOdd(n: int) → bool
+    if n == 0
+        → false
+    → isEven(n - 1)
+
+fn main()
+    // Basic calls
+    println("square(4)      = {square(4.0)}")
+    println("cube(3)        = {cube(3.0)}")
+    println("abs(-5)        = {abs(-5.0)}")
+    println("circleArea(5)  = {circleArea(5.0)}")
+    println("cylVol(3, 10)  = {cylinderVolume(3.0, 10.0)}")
+
+    // Math constants
+    println("pi = {π}")
+    println("e  = {e}")
+
+    // Inline if
+    println("signum(-3) = {signum(-3.0)}")
+    println("signum(0)  = {signum(0.0)}")
+    println("signum(7)  = {signum(7.0)}")
+    println("clamp(15, 0, 10) = {clamp(15.0, 0.0, 10.0)}")
+
+    // Recursion
+    println("fibonacci(10) = {fibonacci(10)}")
+    println("factorial(10) = {factorial(10)}")
+    println("isEven(4) = {isEven(4)}")
+    println("isOdd(7)  = {isOdd(7)}")
+
+    // Fibonacci sequence
+    println("Fibonacci sequence:")
+    for i in [0, 10[
+        let f = fibonacci(i)
+        println("  fib({i}) = {f}")

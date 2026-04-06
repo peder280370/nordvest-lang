@@ -1,0 +1,198 @@
+// math_notation.nv — Mathematical notation as first-class syntax
+//
+// Demonstrates: ∀ ∃ ∑ ∏ ∈ quantifiers, ∧ ∨ ¬ logical operators,
+// range interval notation [a,b] ]a,b[ [a,b[, built-in constants π e ∞,
+// and the power operator ^.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   ∀/∃/∑/∏ with block bodies and list comprehensions are Phase 2 features.
+//   The boolean forms (∀ x ∈ col: pred, ∃ x ∈ col: pred) and
+//   summation/product forms are also Phase 2 (require std.iter).
+//   Range notation and logical operators work today.
+//   nv run examples/math_notation.nv
+
+module examples.math_notation
+
+// ─── Logical operators: ∧ ∨ ¬ ───────────────────────────────────────────────
+
+fn isValidAge(age: int) → bool
+    → age >= 0 ∧ age <= 150
+
+fn isWeekend(day: str) → bool
+    → day == "Saturday" ∨ day == "Sunday"
+
+fn inRange(x: float, lo: float, hi: float) → bool
+    → x >= lo ∧ x <= hi
+
+fn isValidScore(score: int) → bool
+    → score >= 0 ∧ score <= 100
+
+// Classical logic precedence: ¬ > ∧ > ∨
+fn isWorkday(day: str) → bool
+    → ¬(day == "Saturday") ∧ ¬(day == "Sunday")
+
+// ─── Power operator and built-in constants ───────────────────────────────────
+
+fn circleArea(r: float) → float
+    → π * r ^ 2
+
+fn sphereVolume(r: float) → float
+    → (4.0 / 3.0) * π * r ^ 3
+
+fn exponentialGrowth(initial: float, rate: float, years: float) → float
+    → initial * e ^ (rate * years)
+
+// ─── Range notation — integer for loops ──────────────────────────────────────
+//
+//   [a, b]  closed  — a ≤ i ≤ b   (both endpoints included)
+//   ]a, b[  open    — a < i < b   (both excluded)
+//   [a, b[  half-open — a ≤ i < b (most common for array traversal)
+//   ]a, b]  half-open — a < i ≤ b
+
+// NOTE: Range notation [a, b] / [a, b[ / ]a, b[ requires literal integer
+// bounds when one endpoint is next to `[`. With variable bounds, use a
+// while loop. The literals form [1, 5] works as a 5-element range;
+// [1, n] with variable n creates a 2-element array [1, n] instead.
+
+fn sumClosed(lo: int, hi: int) → int
+    // [lo, hi] inclusive — use while loop for variable bounds
+    var total = 0
+    var i = lo
+    while i <= hi
+        total = total + i
+        i = i + 1
+    → total
+
+fn sumHalfOpen(lo: int, hi: int) → int
+    // [lo, hi[ — lo <= i < hi
+    var total = 0
+    var i = lo
+    while i < hi
+        total = total + i
+        i = i + 1
+    → total
+
+fn sumOpen(lo: int, hi: int) → int
+    // ]lo, hi[ — lo < i < hi
+    var total = 0
+    var i = lo + 1
+    while i < hi
+        total = total + i
+        i = i + 1
+    → total
+
+fn sumRightHalfOpen(lo: int, hi: int) → int
+    // ]lo, hi] — lo < i <= hi
+    var total = 0
+    var i = lo + 1
+    while i <= hi
+        total = total + i
+        i = i + 1
+    → total
+
+// ─── Manually implement quantifier-like functions ────────────────────────────
+//
+// NOTE: ∀/∃/∑/∏ quantifier expressions require Phase 2 std.iter.
+// These show the equivalent manual implementations for today.
+
+fn sumOf(xs: [float]) → float
+    var total = 0.0
+    for x in xs
+        total = total + x
+    → total
+
+fn productOf(xs: [float]) → float
+    var result = 1.0
+    for x in xs
+        result = result * x
+    → result
+
+fn allPositive(xs: [float]) → bool
+    for x in xs
+        if x <= 0.0
+            → false
+    → true
+
+fn anyNegative(xs: [float]) → bool
+    for x in xs
+        if x < 0.0
+            → true
+    → false
+
+fn factorial(n: int) → int
+    var result = 1
+    var k = 1
+    while k <= n
+        result = result * k
+        k = k + 1
+    → result
+
+fn sumOfSquares(xs: [float]) → float
+    var total = 0.0
+    for x in xs
+        total = total + x ^ 2
+    → total
+
+// NOTE: xs.length and xs.isEmpty() are Phase 2 stdlib methods.
+// Use manual counting or avoid where possible.
+fn mean8(a: float, b: float, c: float, d: float,
+         e2: float, f: float, g: float, h: float) → float
+    → (a + b + c + d + e2 + f + g + h) / 8.0
+
+// ─── Normal distribution (using only ^ and basic arithmetic) ─────────────────
+
+fn normalPDFapprox(x: float, mu: float, sigma: float) → float
+    // 1/(σ√(2π)) · e^(-(x-μ)²/(2σ²))
+    let twoSigmaSq = 2.0 * sigma ^ 2
+    let expArg = -((x - mu) ^ 2) / twoSigmaSq
+    let normConst = 1.0 / (sigma * 2.5066282746)   // 2.5066... ≈ sqrt(2π)
+    → normConst * e ^ expArg
+
+fn main()
+    // Logical operators
+    println("isValidAge(25)   = {isValidAge(25)}")
+    println("isValidAge(-1)   = {isValidAge(-1)}")
+    println("isValidAge(200)  = {isValidAge(200)}")
+    println("isWeekend(Saturday) = {isWeekend("Saturday")}")
+    println("isWeekend(Monday)   = {isWeekend("Monday")}")
+    println("isWorkday(Monday)   = {isWorkday("Monday")}")
+    println("isWorkday(Sunday)   = {isWorkday("Sunday")}")
+    println("inRange(5, 0, 10)   = {inRange(5.0, 0.0, 10.0)}")
+    println("inRange(15, 0, 10)  = {inRange(15.0, 0.0, 10.0)}")
+
+    // Power and constants
+    println("")
+    println("pi = {π}")
+    println("e  = {e}")
+    println("circleArea(5)      = {circleArea(5.0)}")
+    println("sphereVolume(3)    = {sphereVolume(3.0)}")
+    let invested = exponentialGrowth(1000.0, 0.07, 10.0)
+    println("1000 * e^(0.07*10) = {invested}")   // compound growth
+
+    // Range notation
+    println("")
+    println("sum [1,5]  = {sumClosed(1, 5)}")     // 1+2+3+4+5 = 15
+    println("sum [1,5[  = {sumHalfOpen(1, 5)}")   // 1+2+3+4   = 10
+    println("sum ]1,5[  = {sumOpen(1, 5)}")       // 2+3+4     = 9
+    println("sum ]1,5]  = {sumRightHalfOpen(1, 5)}")   // 2+3+4+5 = 14
+
+    // Quantifier-equivalent functions
+    println("")
+    let data = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0]
+    println("sumOf(data)     = {sumOf(data)}")
+    println("productOf(1..5) = {productOf([1.0, 2.0, 3.0, 4.0, 5.0])}")
+    println("allPositive     = {allPositive(data)}")
+    println("anyNegative     = {anyNegative(data)}")
+    println("sumOfSquares    = {sumOfSquares(data)}")
+
+    // Factorial using range product
+    println("")
+    for n in [0, 8]
+        let f = factorial(n)
+        println("factorial({n}) = {f}")
+
+    // Normal distribution
+    println("")
+    println("N(0;0,1) at x=0: {normalPDFapprox(0.0, 0.0, 1.0)}")
+    println("N(1;0,1) at x=1: {normalPDFapprox(1.0, 0.0, 1.0)}")
+    println("N(2;0,1) at x=2: {normalPDFapprox(2.0, 0.0, 1.0)}")

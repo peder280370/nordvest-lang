@@ -1,0 +1,221 @@
+// nv-stats — Descriptive statistics using mathematical notation
+//
+// Demonstrates: ∑ ∏ ∀ ∃ patterns in real computations, float arithmetic,
+// normal distribution, and statistical measures.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known Phase 1 constraints:
+//   - xs.length / xs.isEmpty() stdlib is Phase 2 — pass n explicitly.
+//   - xs.sorted() / xs.min() / xs.max() stdlib is Phase 2 — compute manually.
+//   - for i in [0, n[ with variable n creates an array — use while loops.
+//   - .sqrt() / .abs() stdlib is Phase 2 — use ^ 0.5 / manual abs.
+//   - Format specifiers are Phase 2 — values print at default precision.
+//   - Map types [K: V] and mode computation are Phase 2.
+//   - Greek variable names (mu, sigma) are used instead of μ, σ.
+//   nv run examples/nv-stats/main.nv
+
+module examples.stats
+
+// ─── Core statistical functions ───────────────────────────────────────────────
+//
+// All functions take an explicit count n as the second parameter since
+// xs.length is not available in Phase 1.
+
+fn sumArr(xs: [float], n: int) → float
+    var total = 0.0
+    var i = 0
+    while i < n
+        total = total + xs[i]
+        i = i + 1
+    → total
+
+fn mean(xs: [float], n: int) → float
+    if n == 0
+        → 0.0
+    → sumArr(xs, n) / n
+
+fn minArr(xs: [float], n: int) → float
+    var best = xs[0]
+    var i = 1
+    while i < n
+        if xs[i] < best
+            best = xs[i]
+        i = i + 1
+    → best
+
+fn maxArr(xs: [float], n: int) → float
+    var best = xs[0]
+    var i = 1
+    while i < n
+        if xs[i] > best
+            best = xs[i]
+        i = i + 1
+    → best
+
+fn variance(xs: [float], n: int) → float
+    if n < 2
+        → 0.0
+    let mu = mean(xs, n)
+    var s = 0.0
+    var i = 0
+    while i < n
+        let diff = xs[i] - mu
+        s = s + diff * diff
+        i = i + 1
+    → s / n
+
+fn sampleVariance(xs: [float], n: int) → float
+    if n < 2
+        → 0.0
+    let mu = mean(xs, n)
+    var s = 0.0
+    var i = 0
+    while i < n
+        let diff = xs[i] - mu
+        s = s + diff * diff
+        i = i + 1
+    → s / (n - 1)
+
+fn stddev(xs: [float], n: int) → float
+    → variance(xs, n) ^ 0.5
+
+fn sampleStddev(xs: [float], n: int) → float
+    → sampleVariance(xs, n) ^ 0.5
+
+fn absFloat(x: float) → float
+    if x < 0.0
+        → -x
+    → x
+
+fn skewness(xs: [float], n: int) → float
+    if n < 3
+        → 0.0
+    let mu = mean(xs, n)
+    let sigma = stddev(xs, n)
+    if sigma == 0.0
+        → 0.0
+    var s = 0.0
+    var i = 0
+    while i < n
+        let z = (xs[i] - mu) / sigma
+        s = s + z * z * z
+        i = i + 1
+    → s / n
+
+fn kurtosis(xs: [float], n: int) → float
+    // Excess kurtosis (normal distribution = 0)
+    if n < 4
+        → 0.0
+    let mu = mean(xs, n)
+    let sigma = stddev(xs, n)
+    if sigma == 0.0
+        → 0.0
+    var s = 0.0
+    var i = 0
+    while i < n
+        let z = (xs[i] - mu) / sigma
+        s = s + z * z * z * z
+        i = i + 1
+    → s / n - 3.0
+
+// ─── Covariance and correlation ──────────────────────────────────────────────
+
+fn covariance(xs: [float], ys: [float], n: int) → float
+    if n < 2
+        → 0.0
+    let mux = mean(xs, n)
+    let muy = mean(ys, n)
+    var s = 0.0
+    var i = 0
+    while i < n
+        s = s + (xs[i] - mux) * (ys[i] - muy)
+        i = i + 1
+    → s / (n - 1)
+
+fn pearsonR(xs: [float], ys: [float], n: int) → float
+    let cov = covariance(xs, ys, n)
+    let sx = sampleStddev(xs, n)
+    let sy = sampleStddev(ys, n)
+    if sx == 0.0 ∨ sy == 0.0
+        → 0.0
+    → cov / (sx * sy)
+
+// ─── Normal distribution ─────────────────────────────────────────────────────
+
+fn normalPDF(x: float, mu: float, sigma: float) → float
+    // 1/(sigma * sqrt(2pi)) * e^(-(x-mu)^2 / (2*sigma^2))
+    let twoSigSq = 2.0 * sigma * sigma
+    let expArg = -((x - mu) * (x - mu)) / twoSigSq
+    let normConst = 1.0 / (sigma * (2.0 * π) ^ 0.5)
+    → normConst * e ^ expArg
+
+fn normalCDF(x: float, mu: float, sigma: float) → float
+    // Abramowitz & Stegun approximation (max error < 7.5e-8)
+    let z = (x - mu) / (sigma * 2.0 ^ 0.5)
+    let absZ = absFloat(z)
+    let t = 1.0 / (1.0 + 0.3275911 * absZ)
+    let poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+    let erfApprox = 1.0 - poly * e ^ (-(absZ * absZ))
+    let signedErf = if z >= 0.0 then erfApprox else -erfApprox
+    → 0.5 * (1.0 + signedErf)
+
+// ─── Print helpers ───────────────────────────────────────────────────────────
+
+fn printStats(label: str, xs: [float], n: int) → int
+    let mu = mean(xs, n)
+    let sd = stddev(xs, n)
+    let sdS = sampleStddev(xs, n)
+    let sk = skewness(xs, n)
+    let ku = kurtosis(xs, n)
+    let mn = minArr(xs, n)
+    let mx = maxArr(xs, n)
+    println("--- {label} ---")
+    println("  n        = {n}")
+    println("  min      = {mn}")
+    println("  max      = {mx}")
+    println("  mean     = {mu}")
+    println("  stddev   = {sd} (pop)")
+    println("  stddev   = {sdS} (sample)")
+    println("  skewness = {sk}")
+    println("  kurtosis = {ku} (excess)")
+    → 0
+
+fn main()
+    // Symmetric unimodal data (heights in cm)
+    let heights = [165.0, 170.0, 172.0, 175.0, 175.0, 178.0, 180.0, 182.0, 185.0, 190.0]
+    printStats("Heights (cm)", heights, 10)
+
+    println("")
+    // Right-skewed data (incomes)
+    let incomes = [20.0, 25.0, 30.0, 35.0, 40.0, 50.0, 60.0, 80.0, 120.0, 300.0]
+    printStats("Incomes (k)", incomes, 10)
+
+    println("")
+    // Correlation
+    let xs = [1.0, 2.0, 3.0, 4.0, 5.0]
+    let ys = [2.1, 4.0, 5.9, 8.2, 9.8]
+    println("--- Correlation ---")
+    println("  cov(x,y) = {covariance(xs, ys, 5)}")
+    println("  r(x,y)   = {pearsonR(xs, ys, 5)}")
+
+    println("")
+    // Normal distribution PDF/CDF
+    println("--- Normal N(0,1) ---")
+    println("  x=-2  pdf={normalPDF(-2.0, 0.0, 1.0)}  cdf={normalCDF(-2.0, 0.0, 1.0)}")
+    println("  x=-1  pdf={normalPDF(-1.0, 0.0, 1.0)}  cdf={normalCDF(-1.0, 0.0, 1.0)}")
+    println("  x=0   pdf={normalPDF(0.0, 0.0, 1.0)}  cdf={normalCDF(0.0, 0.0, 1.0)}")
+    println("  x=1   pdf={normalPDF(1.0, 0.0, 1.0)}  cdf={normalCDF(1.0, 0.0, 1.0)}")
+    println("  x=2   pdf={normalPDF(2.0, 0.0, 1.0)}  cdf={normalCDF(2.0, 0.0, 1.0)}")
+
+    println("")
+    // 68-95-99.7 rule
+    let within1s = normalCDF(1.0, 0.0, 1.0) - normalCDF(-1.0, 0.0, 1.0)
+    let within2s = normalCDF(2.0, 0.0, 1.0) - normalCDF(-2.0, 0.0, 1.0)
+    let within3s = normalCDF(3.0, 0.0, 1.0) - normalCDF(-3.0, 0.0, 1.0)
+    println("--- 68-95-99.7 rule ---")
+    println("  P(|X| <= 1s) = {within1s * 100.0}  (expect 68.27)")
+    println("  P(|X| <= 2s) = {within2s * 100.0}  (expect 95.45)")
+    println("  P(|X| <= 3s) = {within3s * 100.0}  (expect 99.73)")
+
+    println("")
+    println("Statistics demo complete.")

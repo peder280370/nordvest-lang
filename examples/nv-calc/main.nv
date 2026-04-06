@@ -1,0 +1,214 @@
+// nv-calc — Expression evaluator using a recursive sealed-class AST
+//
+// Demonstrates: sealed classes, recursive ADTs, pattern matching,
+// Result<T> for error handling, and recursive evaluation.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known Phase 1 constraints:
+//   - Multi-field sealed class variants have a codegen bug.
+//     Binary ops use a single ExprPair class field as a workaround.
+//   - Result<float> has a codegen bug — the eval result is float directly;
+//     errors use a sentinel (-1e30) and a separate Result<str> for messages.
+//   - Class Env (variable bindings via map) is Phase 2 (body fields + map type).
+//     Variables x, y, pi are hard-coded instead.
+//   - .sqrt() stdlib is Phase 2 — use ^ 0.5 as approximation.
+//   - Format specifiers are Phase 2 — values print with default precision.
+//   - 'e' and 'e2' are reserved (math constant) — avoid as var names.
+//   nv run examples/nv-calc/main.nv
+
+module examples.calc
+
+// ─── Binary operation tags ───────────────────────────────────────────────────
+// NOTE: top-level `let` constants evaluate as 0 in Phase 1 — use literal ints.
+// 0=add, 1=sub, 2=mul, 3=div, 4=pow
+
+// ─── Abstract syntax tree ────────────────────────────────────────────────────
+//
+// Binary ops use a single ExprPair class field to work around the multi-field
+// sealed variant codegen bug. Each variant has exactly one field.
+
+class ExprPair(left: Expr, right: Expr)
+class BinOpNode(tag: int, pair: ExprPair)
+
+sealed class Expr
+    Num(value: float)
+    Var(name: str)
+    Neg(child: Expr)
+    BinOp(op: BinOpNode)
+
+// ─── Expression builder helpers ──────────────────────────────────────────────
+
+fn num(v: float) → Expr
+    → Num(v)
+
+fn varX() → Expr
+    → Var("x")
+fn varY() → Expr
+    → Var("y")
+fn varPi() → Expr
+    → Var("pi")
+
+fn neg(child: Expr) → Expr
+    → Neg(child)
+
+fn add(left: Expr, right: Expr) → Expr
+    → BinOp(BinOpNode(0, ExprPair(left, right)))
+
+fn sub(left: Expr, right: Expr) → Expr
+    → BinOp(BinOpNode(1, ExprPair(left, right)))
+
+fn mul(left: Expr, right: Expr) → Expr
+    → BinOp(BinOpNode(2, ExprPair(left, right)))
+
+fn divExpr(left: Expr, right: Expr) → Expr
+    → BinOp(BinOpNode(3, ExprPair(left, right)))
+
+fn powExpr(base: Expr, exp: Expr) → Expr
+    → BinOp(BinOpNode(4, ExprPair(base, exp)))
+
+// ─── Pretty-printer ──────────────────────────────────────────────────────────
+
+fn pretty(expr: Expr) → str
+    match expr
+        Num(v): → "{v}"
+        Var(nm): → nm
+        Neg(child): → "-{pretty(child)}"
+        BinOp(op):
+            let ls = pretty(op.pair.left)
+            let rs = pretty(op.pair.right)
+            if op.tag == 0
+                → "({ls} + {rs})"
+            if op.tag == 1
+                → "({ls} - {rs})"
+            if op.tag == 2
+                → "({ls} * {rs})"
+            if op.tag == 3
+                → "({ls} / {rs})"
+            → "({ls} ^ {rs})"
+
+// ─── Variable lookup (hard-coded env for Phase 1) ────────────────────────────
+//
+// Phase 2 will replace this with a proper map-based Env class.
+
+fn lookupVar(nm: str) → Result<str>
+    if nm == "x"
+        → Ok("3")
+    if nm == "y"
+        → Ok("4")
+    if nm == "pi"
+        → Ok("3.141592653589793")
+    → Err("undefined variable '{nm}'")
+
+fn strToFloat(s: str) → float
+    if s == "3"
+        → 3.0
+    if s == "4"
+        → 4.0
+    if s == "3.141592653589793"
+        → π
+    → 0.0
+
+// ─── Evaluator ───────────────────────────────────────────────────────────────
+//
+// Returns the result as a Result<str> (since Result<float> has a codegen bug).
+// On success, the string encodes a float; use evalFloat for direct float result.
+
+fn evalFloat(expr: Expr) → float
+    match expr
+        Num(v): → v
+        Var(nm):
+            match lookupVar(nm)
+                Ok(vs): → strToFloat(vs)
+                Err(errMsg): → 0.0
+        Neg(child): → -(evalFloat(child))
+        BinOp(op):
+            let a = evalFloat(op.pair.left)
+            let b = evalFloat(op.pair.right)
+            if op.tag == 0
+                → a + b
+            if op.tag == 1
+                → a - b
+            if op.tag == 2
+                → a * b
+            if op.tag == 3
+                → a / b
+            → a ^ b
+
+fn evalSafe(expr: Expr) → Result<str>
+    match expr
+        Num(v): → Ok("{v}")
+        Var(nm): → lookupVar(nm)
+        Neg(child):
+            match evalSafe(child)
+                Ok(cv):
+                    let fv = evalFloat(child)
+                    → Ok("{-(fv)}")
+                Err(ce): → Err(ce)
+        BinOp(op):
+            match evalSafe(op.pair.left)
+                Ok(lv):
+                    match evalSafe(op.pair.right)
+                        Ok(rv):
+                            let a = evalFloat(op.pair.left)
+                            let b = evalFloat(op.pair.right)
+                            if op.tag == 3 ∧ b == 0.0
+                                → Err("division by zero")
+                            if op.tag == 0
+                                → Ok("{a + b}")
+                            if op.tag == 1
+                                → Ok("{a - b}")
+                            if op.tag == 2
+                                → Ok("{a * b}")
+                            if op.tag == 3
+                                → Ok("{a / b}")
+                            → Ok("{a ^ b}")
+                        Err(re): → Err(re)
+                Err(le): → Err(le)
+
+// ─── Run and print ───────────────────────────────────────────────────────────
+
+fn runExpr(label: str, expr: Expr) → int
+    let exprStr = pretty(expr)
+    match evalSafe(expr)
+        Ok(vs): → println("{label}: {exprStr} = {vs}")
+        Err(msg): → println("{label}: {exprStr} -> ERROR: {msg}")
+
+fn main()
+    // Basic arithmetic
+    runExpr("add",   add(num(2.0), num(3.0)))
+    runExpr("sub",   sub(num(10.0), num(4.0)))
+    runExpr("mul",   mul(num(3.0), num(7.0)))
+    runExpr("div",   divExpr(num(22.0), num(7.0)))
+    runExpr("pow",   powExpr(num(2.0), num(10.0)))
+    runExpr("neg",   neg(num(5.0)))
+
+    println("")
+    // Variables (x=3, y=4, pi=π)
+    runExpr("x",     varX())
+    runExpr("y",     varY())
+    runExpr("pi",    varPi())
+    runExpr("x+y",   add(varX(), varY()))
+
+    println("")
+    // Nested expressions
+    let x2 = powExpr(varX(), num(2.0))
+    let y2 = powExpr(varY(), num(2.0))
+    runExpr("x^2",   x2)
+    runExpr("y^2",   y2)
+    // x^2 + y^2 = 25; sqrt via ^ 0.5 (stdlib sqrt is Phase 2)
+    let hyp2 = add(x2, y2)
+    runExpr("x^2+y^2", hyp2)
+    runExpr("hyp = (x^2+y^2)^0.5", powExpr(hyp2, num(0.5)))
+
+    println("")
+    // Circle area: pi * x^2
+    runExpr("pi*x^2", mul(varPi(), powExpr(varX(), num(2.0))))
+
+    println("")
+    // Error cases
+    runExpr("divZero",  divExpr(num(5.0), num(0.0)))
+    runExpr("unknown",  Var("z"))
+    runExpr("neg unknown", neg(Var("w")))
+
+    println("")
+    println("Calculator demo complete.")

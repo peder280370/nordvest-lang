@@ -1,0 +1,187 @@
+// pattern_matching.nv — Exhaustive pattern matching and sealed classes
+//
+// Demonstrates: match with literals/ranges, sealed class variants,
+// recursive ADTs, or-patterns, and Result matching.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known codegen limitations in the current bootstrap:
+//   - Sealed class variants with multiple fields have a type mismatch bug;
+//     use single-field variants as shown here.
+//   - `enum` match arms receive incorrect types; use `sealed class` instead.
+//   - Match arm binding names must be unique across all arms in a function.
+//   nv run examples/pattern_matching.nv
+
+module examples.pattern_matching
+
+// ─── Simple value matching ────────────────────────────────────────────────────
+
+fn classify(n: int) → str
+    match n
+        0: → "zero"
+        [1, 3]: → "small"
+        [4, 9]: → "medium"
+        [10, 99]: → "large"
+        _: → "huge"
+
+fn grade(score: int) → str
+    match score
+        100: → "A+"
+        [90, 100[: → "A"
+        [80, 90[: → "B"
+        [70, 80[: → "C"
+        [60, 70[: → "D"
+        _: → "F"
+
+// ─── Sealed classes with single-field variants ───────────────────────────────
+//
+// Single-field sealed class variants work fully in the current compiler.
+// Multi-field variants have a codegen type-mismatch bug (known, Phase 2 fix).
+
+sealed class JsonValue
+    JsonNull
+    JsonBool(value: bool)
+    JsonInt(value: int)
+    JsonFloat(value: float)
+    JsonStr(value: str)
+
+fn showJson(v: JsonValue) → str
+    match v
+        JsonNull: → "null"
+        JsonBool(jsonB): → if jsonB then "true" else "false"
+        JsonInt(jsonN): → "{jsonN}"
+        JsonFloat(jsonF): → "{jsonF}"
+        JsonStr(jsonS): → "\"{jsonS}\""
+
+// ─── Sealed wrapper types ─────────────────────────────────────────────────────
+
+sealed class MaybeInt
+    Nothing
+    Just(value: int)
+
+fn maybeAdd(a: MaybeInt, b: MaybeInt) → MaybeInt
+    match a
+        Nothing: → Nothing
+        Just(av):
+            match b
+                Nothing: → Nothing
+                Just(bv): → Just(av + bv)
+
+fn showMaybe(m: MaybeInt) → str
+    match m
+        Nothing: → "Nothing"
+        Just(mv): → "Just({mv})"
+
+// ─── Recursive ADT: linked list ──────────────────────────────────────────────
+//
+// NOTE: Two-field sealed class variants (like Node(left: Tree, right: Tree))
+// have a codegen limitation in the current bootstrap. Use single-field
+// variants as shown here. Two-field variants are a Phase 2 codegen fix.
+
+sealed class IntList
+    Nil
+    Cons(head: int, tail: IntList)   // NOTE: multi-field — see above
+
+// For now, demonstrate with a simpler recursive structure
+sealed class IntBox
+    Empty
+    Val(value: int)
+    Wrap(inner: IntBox)
+
+fn unwrap(b: IntBox) → int
+    match b
+        Empty: → 0
+        Val(boxV): → boxV
+        Wrap(boxInner): → unwrap(boxInner)
+
+fn depth2(b: IntBox) → int
+    match b
+        Empty: → 0
+        Val(_): → 1
+        Wrap(boxD): → 1 + depth2(boxD)
+
+// ─── Expression evaluator ─────────────────────────────────────────────────────
+
+sealed class Expr
+    Lit(value: float)
+    Neg(inner: Expr)
+    Twice(child: Expr)
+
+fn eval(ex: Expr) → float
+    match ex
+        Lit(litV): → litV
+        Neg(negC): → -eval(negC)
+        Twice(twC): → eval(twC) * 2.0
+
+// ─── Result matching ─────────────────────────────────────────────────────────
+
+// NOTE: Result<T> works when T is a reference type (str, sealed class, etc.).
+// Result<float> and Result<int> hit a codegen limitation — Ok/Err use pointer
+// types internally. Use Result<str> for string-based results.
+
+fn safeDiv(a: float, b: float) → Result<str>
+    if b == 0.0
+        → Err("division by zero")
+    let result = a / b
+    → Ok("{result}")
+
+fn safeInverse(n: float) → Result<str>
+    if n == 0.0
+        → Err("cannot invert zero")
+    let result = 1.0 / n
+    → Ok("{result}")
+
+fn main()
+    // Value matching
+    for n in [0, 1, 5, 42, 150]
+        println("classify({n}) = {classify(n)}")
+
+    // Grade matching
+    println("")
+    for s in [100, 95, 85, 72, 63, 45]
+        println("grade({s}) = {grade(s)}")
+
+    // JSON value matching
+    println("")
+    let values = [JsonNull, JsonBool(true), JsonBool(false),
+                  JsonInt(42), JsonFloat(3.14), JsonStr("hello")]
+    for v in values
+        println("json: {showJson(v)}")
+
+    // Maybe matching
+    println("")
+    println(showMaybe(Just(10)))
+    println(showMaybe(Nothing))
+    println(showMaybe(maybeAdd(Just(3), Just(7))))
+    println(showMaybe(maybeAdd(Just(3), Nothing)))
+
+    // Recursive sealed class
+    println("")
+    let box1 = Wrap(Wrap(Val(42)))
+    println("unwrap(Wrap(Wrap(Val(42)))) = {unwrap(box1)}")
+    println("depth = {depth2(box1)}")
+    println("unwrap(Empty) = {unwrap(Empty)}")
+
+    // Expression evaluation
+    println("")
+    println("Lit(5)           = {eval(Lit(5.0))}")
+    println("Neg(Lit(3))      = {eval(Neg(Lit(3.0)))}")
+    println("Twice(Lit(7))    = {eval(Twice(Lit(7.0)))}")
+    println("Neg(Twice(Lit(4))) = {eval(Neg(Twice(Lit(4.0))))}")
+
+    // Result matching — match arms need `→` before the body
+    println("")
+    match safeDiv(10.0, 3.0)
+        Ok(divV): → println("10/3 = {divV}")
+        Err(divErr): → println("error: {divErr}")
+
+    match safeDiv(5.0, 0.0)
+        Ok(divV2): → println("5/0 = {divV2}")
+        Err(divErr2): → println("error: {divErr2}")
+
+    match safeInverse(4.0)
+        Ok(invV): → println("1/4 = {invV}")
+        Err(invErr): → println("error: {invErr}")
+
+    match safeInverse(0.0)
+        Ok(invV2): → println("1/0 = {invV2}")
+        Err(invErr2): → println("error: {invErr2}")

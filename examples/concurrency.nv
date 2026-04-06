@@ -1,0 +1,134 @@
+// concurrency.nv — async/await, channels, goroutines, structured concurrency
+//
+// Demonstrates: async fn, await, spawn, go (goroutines), Channel<T>,
+// select, WaitGroup, Mutex, and common concurrent patterns.
+//
+// STATUS: Compiles and runs (Phase 1 sync portion only).
+//   async/await codegen and the channel runtime are Phase 2.
+//   All async declarations are commented out below.
+//   The runnable demo at the bottom shows sync patterns that work today.
+//   nv run examples/concurrency.nv
+
+module examples.concurrency
+
+// ─── async/await — Phase 2 ────────────────────────────────────────────────────
+//
+// async fn fetchData(url: str) → str
+//     → "{ status: 200, url: " + url + " }"
+//
+// async fn processData(raw: str) → int
+//     → raw.length
+//
+// async fn pipeline(url: str) → Result<int>
+//     let raw  = await fetchData(url)
+//     let size = await processData(raw)
+//     → Ok(size)
+
+// ─── Goroutines with go — Phase 2 ────────────────────────────────────────────
+//
+// go launches a coroutine. Closure captures by reference by default;
+// use [copy name] to snapshot at launch time.
+//
+// async fn launchWorkers()
+//     let ch = Channel<int>(capacity: 10)
+//     go
+//         for i in [0, 5[
+//             await ch.send(i * i)
+//         ch.close()
+//     for val in ch
+//         println("received: {val}")
+
+// ─── select — wait on multiple channels — Phase 2 ────────────────────────────
+//
+// async fn fanIn<T>(left: Channel<T>, right: Channel<T>) → Channel<T>
+//     let out = Channel<T>()
+//     go
+//         var done = false
+//         while ¬done
+//             select
+//                 let v = await left.receive():
+//                     await out.send(v!)
+//                 let v = await right.receive():
+//                     await out.send(v!)
+//                 else:
+//                     done = true
+//         out.close()
+//     → out
+
+// ─── WaitGroup and Mutex — Phase 2 ───────────────────────────────────────────
+//
+// class SafeCounter(mu: Mutex, count: int)
+//     async fn increment()
+//         await self.mu.lock()
+//         defer self.mu.unlock()
+//         self.count = self.count + 1
+//     fn value() → int → self.count
+
+// ─── Timeout pattern — Phase 2 ───────────────────────────────────────────────
+//
+// async fn withTimeout<T>(ms: int, op: async fn() → T) → T?
+//     let resultCh  = Channel<T>(capacity: 1)
+//     let timeoutCh = Channel<unit>(capacity: 1)
+//     go
+//         let v = await op()
+//         await resultCh.send(v)
+//     go
+//         await sleep(ms)
+//         await timeoutCh.send(())
+//     select
+//         let v = await resultCh.receive(): → v
+//         await timeoutCh.receive():         → nil
+
+// ─── Sync demos that run today ────────────────────────────────────────────────
+//
+// These show the pattern of work distribution that async/await will replace:
+// sequential versions of fan-out/fan-in, accumulation, and error propagation.
+
+fn sumRange(lo: int, hi: int) → int
+    var total = 0
+    var i = lo
+    while i <= hi
+        total = total + i
+        i = i + 1
+    → total
+
+fn workerResult(id: int, n: int) → int
+    // Simulates "worker id computes n^2"
+    → n * n
+
+fn fanOutSum(n: int) → int
+    // Simulates collecting results from n workers
+    var total = 0
+    var i = 0
+    while i < n
+        total = total + workerResult(i, i)
+        i = i + 1
+    → total
+
+fn retryCompute(x: int, maxTries: int) → Result<str>
+    // Simulates retry logic — succeeds when x > 0
+    var tries = 0
+    while tries < maxTries
+        if x > 0
+            → Ok("result: {x * x}")
+        tries = tries + 1
+    → Err("failed after {maxTries} tries")
+
+fn main()
+    println("sum 1..100     = {sumRange(1, 100)}")
+    println("sum 1..10      = {sumRange(1, 10)}")
+
+    println("")
+    println("fanOutSum(5) = {fanOutSum(5)}")   // 0+1+4+9+16 = 30
+
+    println("")
+    match retryCompute(7, 3)
+        Ok(res1): → println("compute(7)  = {res1}")
+        Err(e1):  → println("compute(7)  failed: {e1}")
+
+    match retryCompute(-1, 3)
+        Ok(res2): → println("compute(-1) = {res2}")
+        Err(e2):  → println("compute(-1) failed: {e2}")
+
+    println("")
+    println("Concurrency demo complete (async features pending Phase 2).")

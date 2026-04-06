@@ -1,0 +1,243 @@
+// nv-matrix — Dense matrix library using mathematical notation
+//
+// Demonstrates: struct-based matrix representation, matrix arithmetic,
+// dot product, determinant, trace, transpose, and scalar operations.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known Phase 1 constraints:
+//   - Class body fields (data: [float] = [...]) cause OOM — matrices use
+//     flat struct fields (9 fields for 3x3, 4 for 2x2) as a workaround.
+//   - Subscript operators fn[]/fn[]= are Phase 2 — use .aIJ fields instead.
+//   - Operator overloading (fn +, fn *, fn -) is Phase 2 — use free functions.
+//   - self.field in methods returns wrong values — use free functions.
+//   - for i in [0, n[ with variable n creates an array — use while loops.
+//   - .sqrt() is Phase 2 — use ^ 0.5.
+//   Phase 2 will support a proper Matrix class with dynamic size.
+//   nv run examples/nv-matrix/main.nv
+
+module examples.matrix
+
+// ─── 2×2 matrix ──────────────────────────────────────────────────────────────
+//
+// Row-major: a00 a01 / a10 a11
+
+struct Mat2(a00: float, a01: float,
+            a10: float, a11: float)
+
+fn mat2Add(a: Mat2, b: Mat2) → Mat2
+    → Mat2(a.a00 + b.a00, a.a01 + b.a01,
+           a.a10 + b.a10, a.a11 + b.a11)
+
+fn mat2Sub(a: Mat2, b: Mat2) → Mat2
+    → Mat2(a.a00 - b.a00, a.a01 - b.a01,
+           a.a10 - b.a10, a.a11 - b.a11)
+
+fn mat2Scale(m: Mat2, s: float) → Mat2
+    → Mat2(m.a00 * s, m.a01 * s,
+           m.a10 * s, m.a11 * s)
+
+fn mat2Mul(a: Mat2, b: Mat2) → Mat2
+    → Mat2(a.a00 * b.a00 + a.a01 * b.a10,
+           a.a00 * b.a01 + a.a01 * b.a11,
+           a.a10 * b.a00 + a.a11 * b.a10,
+           a.a10 * b.a01 + a.a11 * b.a11)
+
+fn mat2Transpose(m: Mat2) → Mat2
+    → Mat2(m.a00, m.a10,
+           m.a01, m.a11)
+
+fn mat2Det(m: Mat2) → float
+    → m.a00 * m.a11 - m.a01 * m.a10
+
+fn mat2Trace(m: Mat2) → float
+    → m.a00 + m.a11
+
+fn mat2Row0(m: Mat2) → str
+    → "[{m.a00}  {m.a01}]"
+fn mat2Row1(m: Mat2) → str
+    → "[{m.a10}  {m.a11}]"
+
+// ─── 3×3 matrix ──────────────────────────────────────────────────────────────
+
+struct Mat3(a00: float, a01: float, a02: float,
+            a10: float, a11: float, a12: float,
+            a20: float, a21: float, a22: float)
+
+fn mat3Add(a: Mat3, b: Mat3) → Mat3
+    → Mat3(a.a00 + b.a00, a.a01 + b.a01, a.a02 + b.a02,
+           a.a10 + b.a10, a.a11 + b.a11, a.a12 + b.a12,
+           a.a20 + b.a20, a.a21 + b.a21, a.a22 + b.a22)
+
+fn mat3Scale(m: Mat3, s: float) → Mat3
+    → Mat3(m.a00 * s, m.a01 * s, m.a02 * s,
+           m.a10 * s, m.a11 * s, m.a12 * s,
+           m.a20 * s, m.a21 * s, m.a22 * s)
+
+fn mat3Mul(a: Mat3, b: Mat3) → Mat3
+    → Mat3(
+        a.a00*b.a00 + a.a01*b.a10 + a.a02*b.a20,
+        a.a00*b.a01 + a.a01*b.a11 + a.a02*b.a21,
+        a.a00*b.a02 + a.a01*b.a12 + a.a02*b.a22,
+        a.a10*b.a00 + a.a11*b.a10 + a.a12*b.a20,
+        a.a10*b.a01 + a.a11*b.a11 + a.a12*b.a21,
+        a.a10*b.a02 + a.a11*b.a12 + a.a12*b.a22,
+        a.a20*b.a00 + a.a21*b.a10 + a.a22*b.a20,
+        a.a20*b.a01 + a.a21*b.a11 + a.a22*b.a21,
+        a.a20*b.a02 + a.a21*b.a12 + a.a22*b.a22
+    )
+
+fn mat3Transpose(m: Mat3) → Mat3
+    → Mat3(m.a00, m.a10, m.a20,
+           m.a01, m.a11, m.a21,
+           m.a02, m.a12, m.a22)
+
+fn mat3Trace(m: Mat3) → float
+    → m.a00 + m.a11 + m.a22
+
+fn mat3Det(m: Mat3) → float
+    // Sarrus' rule
+    let co00 = m.a11 * m.a22 - m.a12 * m.a21
+    let co01 = m.a10 * m.a22 - m.a12 * m.a20
+    let co02 = m.a10 * m.a21 - m.a11 * m.a20
+    → m.a00 * co00 - m.a01 * co01 + m.a02 * co02
+
+fn mat3Sum(m: Mat3) → float
+    let row0 = m.a00 + m.a01 + m.a02
+    let row1 = m.a10 + m.a11 + m.a12
+    let row2 = m.a20 + m.a21 + m.a22
+    → row0 + row1 + row2
+
+fn mat3FrobeniusSq(m: Mat3) → float
+    // ||M||_F^2 = sum of squares (use ^ 0.5 to get the actual norm)
+    let row0sq = m.a00*m.a00 + m.a01*m.a01 + m.a02*m.a02
+    let row1sq = m.a10*m.a10 + m.a11*m.a11 + m.a12*m.a12
+    let row2sq = m.a20*m.a20 + m.a21*m.a21 + m.a22*m.a22
+    → row0sq + row1sq + row2sq
+
+fn mat3Row0(m: Mat3) → str
+    → "[{m.a00}  {m.a01}  {m.a02}]"
+fn mat3Row1(m: Mat3) → str
+    → "[{m.a10}  {m.a11}  {m.a12}]"
+fn mat3Row2(m: Mat3) → str
+    → "[{m.a20}  {m.a21}  {m.a22}]"
+
+// ─── Identity matrices ───────────────────────────────────────────────────────
+
+fn mat2Identity() → Mat2
+    → Mat2(1.0, 0.0, 0.0, 1.0)
+
+fn mat3Identity() → Mat3
+    → Mat3(1.0, 0.0, 0.0,
+           0.0, 1.0, 0.0,
+           0.0, 0.0, 1.0)
+
+// ─── 2D rotation matrix ──────────────────────────────────────────────────────
+//
+// NOTE: cos/sin stdlib are Phase 2 — approximate cos(π/4) = sin(π/4) = √2/2
+// for the demo. Full implementation will use std.math.
+
+fn approxCos(theta: float) → float
+    // Degree-9 Taylor: cos(x) ≈ 1 - x²/2 + x⁴/24 - x⁶/720 + x⁸/40320
+    let x2 = theta * theta
+    let x4 = x2 * x2
+    let x6 = x4 * x2
+    let x8 = x6 * x2
+    → 1.0 - x2/2.0 + x4/24.0 - x6/720.0 + x8/40320.0
+
+fn approxSin(theta: float) → float
+    // Degree-9 Taylor: sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040 + x⁹/362880
+    let x2 = theta * theta
+    let x3 = x2 * theta
+    let x5 = x3 * x2
+    let x7 = x5 * x2
+    let x9 = x7 * x2
+    → theta - x3/6.0 + x5/120.0 - x7/5040.0 + x9/362880.0
+
+fn mat2Rotation(theta: float) → Mat2
+    let c = approxCos(theta)
+    let s = approxSin(theta)
+    → Mat2(c, -s, s, c)
+
+fn printMat2(label: str, m: Mat2) → int
+    println("{label} =")
+    println(mat2Row0(m))
+    println(mat2Row1(m))
+    → 0
+
+fn printMat3(label: str, m: Mat3) → int
+    println("{label} =")
+    println(mat3Row0(m))
+    println(mat3Row1(m))
+    println(mat3Row2(m))
+    → 0
+
+fn main()
+    // ── 2x2 demo ─────────────────────────────────────────────────────────────
+    let I2 = mat2Identity()
+    printMat2("I2", I2)
+    println("trace(I2) = {mat2Trace(I2)}")
+    println("det(I2)   = {mat2Det(I2)}")
+
+    println("")
+    let A = Mat2(1.0, 2.0, 3.0, 4.0)
+    let B = Mat2(5.0, 6.0, 7.0, 8.0)
+    printMat2("A", A)
+    println("det(A)   = {mat2Det(A)}")
+    println("trace(A) = {mat2Trace(A)}")
+
+    println("")
+    let AB = mat2Mul(A, B)
+    printMat2("A * B", AB)
+
+    let At = mat2Transpose(A)
+    printMat2("A_T (transpose)", At)
+
+    println("")
+    // Rotation by 45 deg (pi/4)
+    let theta45 = π / 4.0
+    let R45 = mat2Rotation(theta45)
+    printMat2("R(45deg)", R45)
+
+    // R * R^T should be I (orthogonal)
+    let RRt = mat2Mul(R45, mat2Transpose(R45))
+    printMat2("R * R^T ~= I2", RRt)
+
+    // ── 3x3 demo ─────────────────────────────────────────────────────────────
+    println("")
+    let I3 = mat3Identity()
+    printMat3("I3", I3)
+    println("trace(I3) = {mat3Trace(I3)}")
+    println("det(I3)   = {mat3Det(I3)}")
+
+    println("")
+    let M = Mat3(1.0, 2.0, 3.0,
+                 4.0, 5.0, 6.0,
+                 7.0, 8.0, 9.0)
+    printMat3("M", M)
+    println("trace(M)   = {mat3Trace(M)}")
+    println("det(M)     = {mat3Det(M)}")
+    println("sum(M)     = {mat3Sum(M)}")
+    println("||M||_F^2  = {mat3FrobeniusSq(M)}")
+    println("||M||_F    = {mat3FrobeniusSq(M) ^ 0.5}")
+
+    println("")
+    let twoM = mat3Scale(M, 2.0)
+    printMat3("2M", twoM)
+
+    let Mt = mat3Transpose(M)
+    printMat3("M_T (transpose)", Mt)
+
+    // I * M = M
+    let IM = mat3Mul(I3, M)
+    printMat3("I3 * M", IM)
+
+    // Invertible 3x3 example
+    println("")
+    let C = Mat3(2.0, 1.0, 0.0,
+                 1.0, 3.0, 1.0,
+                 0.0, 1.0, 2.0)
+    printMat3("C", C)
+    println("det(C) = {mat3Det(C)}")
+
+    println("")
+    println("Matrix demo complete.")

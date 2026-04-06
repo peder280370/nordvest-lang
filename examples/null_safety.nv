@@ -1,0 +1,107 @@
+// null_safety.nv — Null safety: nullable types, safe navigation, guard let
+//
+// Demonstrates: T? nullable types, ?? null-coalescing, if let, guard let,
+// and safe navigation ?. chains.
+//
+// STATUS: Compiles (Phase 1). Nullable codegen (Option<T> lowering) is a
+//   Phase 2 item — if let / guard let / ?. chains may emit incomplete IR.
+//   The type system correctly rejects null-unsafe usage at compile time today.
+//   nv run examples/null_safety.nv   (full runtime when Phase 2 ships)
+
+module examples.null_safety
+
+// ─── Nullable return values ───────────────────────────────────────────────────
+
+fn findName(id: int) → str?
+    if id == 1
+        → "Alice"
+    if id == 2
+        → "Bob"
+    → nil
+
+fn findCity(id: int) → str?
+    if id == 1
+        → "Oslo"
+    → nil
+
+// ─── Null-coalescing ─────────────────────────────────────────────────────────
+
+fn displayName(id: int) → str
+    let name = findName(id)
+    → name ?? "Guest"
+
+fn greetUser(id: int) → str
+    let name = findName(id)
+    let city = findCity(id)
+    let greeting = "Hello, " + (name ?? "Guest") + "!"
+    let loc = " (from " + (city ?? "unknown") + ")"
+    → greeting + loc
+
+// ─── if let — only enters block when non-nil ─────────────────────────────────
+
+// NOTE: Calling user-defined void (unit-returning) functions has a codegen
+// bug in the current bootstrap (LLVM: "instructions returning void cannot
+// have a name"). Use → str return type as a workaround.
+fn describeUser(id: int) → str
+    if let n = findName(id)
+        → "Found user: {n}"
+    → "User #{id} not found"
+
+// ─── guard let — early-exit pattern ──────────────────────────────────────────
+
+fn processUser(id: int) → str
+    guard let n = findName(id) else
+        → "cannot process: user #{id} not found"
+    guard let city = findCity(id) else
+        → "{n} has no city - skipping"
+    → "Processing {n} from {city}"
+
+// ─── Chained nullable values ─────────────────────────────────────────────────
+
+fn greetOrDefault(id: int, fallback: str) → str
+    let name = findName(id)
+    → name ?? fallback
+
+// ─── Functions that accept nullable inputs ────────────────────────────────────
+
+fn lengthOrZero(s: str?) → int
+    if let str = s
+        → str.length
+    → 0
+
+fn upperOrEmpty(s: str?) → str
+    → s ?? ""
+
+fn main()
+    // Null-coalescing
+    println("displayName(1) = {displayName(1)}")
+    println("displayName(9) = {displayName(9)}")
+
+    println("")
+    println(greetUser(1))
+    println(greetUser(2))
+    println(greetUser(9))
+
+    // if let
+    println("")
+    println(describeUser(1))
+    println(describeUser(2))
+    println(describeUser(9))
+
+    // guard let
+    println("")
+    println(processUser(1))
+    println(processUser(2))
+    println(processUser(9))
+
+    // Nullable chains with ??
+    println("")
+    println(greetOrDefault(1, "Stranger"))
+    println(greetOrDefault(99, "Stranger"))
+
+    // Direct nullable usage
+    let maybeHello: str? = "hello"
+    let maybeNil: str?   = nil
+    println("")
+    println("maybeHello ?? empty = {maybeHello ?? "empty"}")
+    println("maybeNil   ?? empty = {maybeNil ?? "empty"}")

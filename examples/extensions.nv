@@ -1,0 +1,166 @@
+// extensions.nv — Extension functions on built-in and user types
+//
+// Demonstrates: the extend syntax for adding methods to any type,
+// including built-in types (int, float, str) and user-defined types.
+//
+// STATUS: PARSES AND TYPE-CHECKS (Phase 1). Extension method codegen
+//   (emitting the definition body) is a Phase 2 item. The declarations
+//   here are syntactically and type-correct; they will run once Phase 2
+//   extension emit lands.
+//   The fn main() below demonstrates equivalent free-function logic that
+//   runs today.
+//   nv run examples/extensions.nv
+
+module examples.extensions
+
+// ─── Extending built-in int ──────────────────────────────────────────────────
+//
+// NOTE: These declarations are correct and will run in Phase 2.
+// Calls like 17.isPrime() will work once extension codegen is wired.
+
+extend int
+    fn isPrime() → bool
+        if self < 2
+            → false
+        var i = 2
+        while i * i <= self
+            if self % i == 0
+                → false
+            i = i + 1
+        → true
+
+    fn clamp(lo: int, hi: int) → int
+        if self < lo
+            → lo
+        if self > hi
+            → hi
+        → self
+
+    fn factorial() → int
+        if self <= 1
+            → 1
+        var result = 1
+        var k = 2
+        while k <= self
+            result = result * k
+            k = k + 1
+        → result
+
+// ─── Extending float ─────────────────────────────────────────────────────────
+
+extend float
+    fn lerp(other: float, t: float) → float
+        → self + (other - self) * t
+
+    fn toDegrees() → float
+        → self * (180.0 / π)
+
+    fn toRadians() → float
+        → self * (π / 180.0)
+
+// ─── Extending str ───────────────────────────────────────────────────────────
+
+extend str
+    fn repeated(times: int) → str
+        var result = ""
+        var i = 0
+        while i < times
+            result = result + self
+            i = i + 1
+        → result
+
+    fn indented(spaces: int) → str
+        var pad = ""
+        var i = 0
+        while i < spaces
+            pad = pad + " "
+            i = i + 1
+        → pad + self
+
+// ─── Free-function equivalents (run today) ───────────────────────────────────
+//
+// These implement the same logic as the extension methods above and
+// will be replaced by method calls once Phase 2 extension codegen lands.
+
+fn isPrime(n: int) → bool
+    if n < 2
+        → false
+    var i = 2
+    while i * i <= n
+        if n % i == 0
+            → false
+        i = i + 1
+    → true
+
+fn clampInt(n: int, lo: int, hi: int) → int
+    if n < lo
+        → lo
+    if n > hi
+        → hi
+    → n
+
+fn factorial(n: int) → int
+    if n <= 1
+        → 1
+    var result = 1
+    var k = 2
+    while k <= n
+        result = result * k
+        k = k + 1
+    → result
+
+fn lerp(a: float, b: float, t: float) → float
+    → a + (b - a) * t
+
+fn toDegrees(radians: float) → float
+    → radians * (180.0 / π)
+
+fn toRadians(degrees: float) → float
+    → degrees * (π / 180.0)
+
+fn repeated(s: str, times: int) → str
+    var result = ""
+    var i = 0
+    while i < times
+        result = result + s
+        i = i + 1
+    → result
+
+fn main()
+    // int operations (free functions — Phase 1)
+    println("isPrime(17) = {isPrime(17)}")
+    println("isPrime(15) = {isPrime(15)}")
+    println("isPrime(2)  = {isPrime(2)}")
+    println("factorial(5)  = {factorial(5)}")
+    println("factorial(10) = {factorial(10)}")
+    println("clamp(42, 0, 10) = {clampInt(42, 0, 10)}")
+    println("clamp(-5, 0, 10) = {clampInt(-5, 0, 10)}")
+
+    println("")
+    // float operations (free functions — Phase 1)
+    let halfPi = π / 2.0
+    println("pi/2 -> degrees = {toDegrees(halfPi)}")
+    println("90 -> radians   = {toRadians(90.0)}")
+    println("lerp(0, 1, 0.25) = {lerp(0.0, 1.0, 0.25)}")
+    println("lerp(10, 20, 0.5) = {lerp(10.0, 20.0, 0.5)}")
+
+    println("")
+    // string operations (free functions — Phase 1)
+    println("repeated(ha, 4) = {repeated("ha", 4)}")
+    println("repeated(abc, 3) = {repeated("abc", 3)}")
+    println("repeated(x, 0) = {repeated("x", 0)}")
+
+    println("")
+    // Primes up to 30
+    println("Primes up to 30:")
+    var n = 2
+    while n <= 30
+        if isPrime(n)
+            println("  {n}")
+        n = n + 1
+
+    // NOTE: Phase 2 will allow calling these as methods:
+    //   17.isPrime()     instead of isPrime(17)
+    //   5.factorial()    instead of factorial(5)
+    //   0.5.lerp(1.0, t) instead of lerp(0.5, 1.0, t)
+    //   "ha".repeated(4) instead of repeated("ha", 4)

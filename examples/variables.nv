@@ -1,0 +1,68 @@
+// variables.nv — Variables, types, and string interpolation
+//
+// Demonstrates: immutable/mutable bindings, type inference, basic types,
+// string interpolation, and integer division.
+//
+// STATUS: Compiles and runs. All features in this file are Phase 1.
+//   nv run examples/variables.nv
+
+module examples.variables
+
+// Type aliases are top-level declarations
+type Meters  = float
+type Seconds = float
+
+fn main()
+    // Immutable bindings — type inferred from right-hand side
+    let name  = "Alice"
+    let age   = 30
+    let score = 98.6
+    let flag  = true
+
+    // Mutable variable — explicit type optional
+    var count: int = 0
+    var label: str
+
+    count = count + 1
+    label = "step {count}"
+
+    // String interpolation with { }
+    println("Name: {name}, Age: {age}")
+    println("Score: {score}, Flag: {flag}")
+    println(label)
+
+    // Numeric types with explicit annotation
+    let big:  int   = 1000000
+    let tiny: float = 0.0015
+
+    println("big={big}, tiny={tiny}")
+
+    // Integer division — ÷ only (// is always a comment)
+    let n = 17
+    let half    = n ÷ 2
+    let quarter = n ÷ 4
+    println("{n} div 2 = {half}, {n} div 4 = {quarter}")
+
+    // Bitwise operators: & | << >>
+    // ^ is exponentiation, not XOR
+    let a = 10   // binary 1010
+    let b = 12   // binary 1100
+    let bitAnd   = a & b
+    let bitOr    = a | b
+    let leftShift  = 1 << 4
+    let rightShift = 64 >> 2
+    println("{a} & {b} = {bitAnd}")
+    println("{a} | {b} = {bitOr}")
+    println("1 << 4 = {leftShift}")
+    println("64 >> 2 = {rightShift}")
+
+    // Type alias usage — Meters and float are interchangeable (transparent alias)
+    // NOTE: type alias codegen is not yet wired; use float directly for now.
+    let dist: float = 42.0
+    let time: float = 5.0
+    let speed = dist / time
+    println("Speed: {speed} m/s")
+
+    // Power operator
+    let pw = 2.0 ^ 10.0
+    println("2.0^10.0 = {pw}")

@@ -1,0 +1,154 @@
+// value_types.nv — struct vs record vs class; weak/unowned references
+//
+// Demonstrates: struct (value type, copied on assignment),
+// class (reference type), direct field access, and weak/unowned refs.
+//
+// STATUS: Compiles and runs (Phase 1).
+//   Known Phase 1 constraints:
+//   - self.field access inside method bodies returns incorrect values (Phase 2).
+//     Use direct field access (obj.field) from outside instead.
+//   - Class body fields (fields with initializers) cause OOM in parser.
+//   - record codegen is Phase 2 — struct is used as substitute below.
+//   - weak/unowned references are Phase 2.
+//   - Operator overloading (fn +) is Phase 2.
+//   - self mutations do not persist across calls (Phase 2 RC).
+//   The runnable demo uses free functions and direct field access.
+//   nv run examples/value_types.nv
+
+module examples.value_types
+
+// ─── struct — value type ──────────────────────────────────────────────────────
+//
+// struct is stack-allocated and copied on assignment.
+// Primary constructors are fully supported. Direct field access works.
+// NOTE: self.field in struct methods returns incorrect values in Phase 1 —
+// use free functions that take the struct as a parameter instead.
+
+struct Vec2(x: float, y: float)
+    // NOTE: self.field access in methods is Phase 2. Methods are declared
+    // here for documentation; use the free functions below to run today.
+    // fn lengthSq() → float
+    //     → self.x ^ 2.0 + self.y ^ 2.0
+    // fn dot(other: Vec2) → float
+    //     → self.x * other.x + self.y * other.y
+
+struct Color(r: int, g: int, b: int)
+    // fn luminance() → float
+    //     → 0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+
+struct Rect(x: float, y: float, w: float, h: float)
+    // fn area() → float  → self.w * self.h
+
+// ─── record — immutable reference type (Phase 2) ─────────────────────────────
+//
+// record signals "pure data, no mutable state":
+//   record Point(x: float, y: float)
+// Two records with equal fields are == (structural equality).
+// record codegen is Phase 2 — struct is used as substitute here.
+
+// ─── class — reference type ───────────────────────────────────────────────────
+//
+// class is reference-counted. Construction and direct field access work today.
+// NOTE: self.field in methods returns incorrect values (Phase 2).
+// NOTE: class body fields (var field = ...) cause parser OOM — use only
+// constructor params.
+
+class Box(label: str, capacity: int)
+    // fn isLarge() → bool  → self.capacity > 100  // Phase 2: self.field
+
+class Person(name: str, age: int)
+    // fn greet() → str  → "Hello, " + self.name  // Phase 2: self.field
+
+// ─── Weak/unowned references (Phase 2) ───────────────────────────────────────
+//
+// class TreeNode(value: int)
+//     weak var parent: TreeNode? = nil   // does not keep parent alive
+//     fn depth() → int
+//         if let p = self.parent
+//             → 1 + p.depth()
+//         → 0
+//
+// class Account(name: str)
+//     unowned let bank: Bank             // account cannot outlive the bank
+
+// ─── Free functions (work today — use obj.field directly) ────────────────────
+
+fn vec2LengthSq(v: Vec2) → float
+    → v.x * v.x + v.y * v.y
+
+fn vec2Dot(a: Vec2, b: Vec2) → float
+    → a.x * b.x + a.y * b.y
+
+fn vec2Scale(v: Vec2, factor: float) → Vec2
+    → Vec2(v.x * factor, v.y * factor)
+
+fn vec2Add(a: Vec2, b: Vec2) → Vec2
+    → Vec2(a.x + b.x, a.y + b.y)
+
+fn colorLuminance(c: Color) → float
+    → 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+
+fn colorIsDark(c: Color) → bool
+    → colorLuminance(c) < 128.0
+
+fn rectArea(r: Rect) → float
+    → r.w * r.h
+
+fn rectPerimeter(r: Rect) → float
+    → 2.0 * (r.w + r.h)
+
+fn rectContains(r: Rect, px: float, py: float) → bool
+    → px >= r.x ∧ px <= r.x + r.w ∧ py >= r.y ∧ py <= r.y + r.h
+
+fn boxIsLarge(b: Box) → bool
+    → b.capacity > 100
+
+fn main()
+    // struct — value semantics via direct field access
+    let v1 = Vec2(3.0, 4.0)
+    let v2 = Vec2(1.0, 2.0)
+    println("v1 = Vec2({v1.x}, {v1.y})")
+    println("v2 = Vec2({v2.x}, {v2.y})")
+    println("v1.lengthSq() = {vec2LengthSq(v1)}")        // 25
+    println("v1.dot(v2)    = {vec2Dot(v1, v2)}")          // 11
+    let v3 = vec2Scale(v1, 2.0)
+    println("v1.scale(2)   = Vec2({v3.x}, {v3.y})")      // Vec2(6, 8)
+    let v4 = vec2Add(v1, v2)
+    println("v1 + v2       = Vec2({v4.x}, {v4.y})")      // Vec2(4, 6)
+
+    println("")
+    let rect = Rect(0.0, 0.0, 10.0, 5.0)
+    println("rect        = Rect({rect.x},{rect.y} {rect.w}x{rect.h})")
+    println("area        = {rectArea(rect)}")
+    println("perimeter   = {rectPerimeter(rect)}")
+    println("contains(5,2)  = {rectContains(rect, 5.0, 2.0)}")
+    println("contains(11,2) = {rectContains(rect, 11.0, 2.0)}")
+
+    // struct as record substitute — direct field access
+    println("")
+    let red   = Color(255, 0, 0)
+    let black = Color(0, 0, 0)
+    let white = Color(255, 255, 255)
+    println("red   = Color({red.r},{red.g},{red.b})")
+    println("black = Color({black.r},{black.g},{black.b})")
+    println("red.luminance()    = {colorLuminance(red)}")
+    println("red.isDark()       = {colorIsDark(red)}")
+    println("black.isDark()     = {colorIsDark(black)}")
+    println("white.isDark()     = {colorIsDark(white)}")
+
+    // class — shared reference type (read-only demo, mutation is Phase 2)
+    println("")
+    let box1 = Box("Toolbox", 200)
+    let box2 = Box("Pencil case", 50)
+    println("box1 = Box({box1.label}, cap={box1.capacity})")
+    println("box2 = Box({box2.label}, cap={box2.capacity})")
+    println("box1.isLarge() = {boxIsLarge(box1)}")
+    println("box2.isLarge() = {boxIsLarge(box2)}")
+
+    let p1 = Person("Alice", 30)
+    let p2 = Person("Bob", 25)
+    println("{p1.name} (age {p1.age})")
+    println("{p2.name} (age {p2.age})")
+
+    println("")
+    println("Value types demo complete.")
