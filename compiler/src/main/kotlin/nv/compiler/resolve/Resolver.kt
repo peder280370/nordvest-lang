@@ -151,6 +151,7 @@ class Resolver(private val sourcePath: String) {
         // Built-in functions
         scope.define(Symbol.BuiltinSym("print",   resolvedType = Type.TFun(listOf(Type.TStr), Type.TUnit)))
         scope.define(Symbol.BuiltinSym("println", resolvedType = Type.TFun(listOf(Type.TStr), Type.TUnit)))
+        scope.define(Symbol.BuiltinSym("len",     resolvedType = Type.TFun(listOf(Type.TUnknown), Type.TInt)))
 
         // Result constructors
         scope.define(Symbol.BuiltinSym("Ok",  resolvedType = Type.TUnknown))
@@ -200,7 +201,14 @@ class Resolver(private val sourcePath: String) {
             is StructDecl      -> scope.define(Symbol.StructSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
             is RecordDecl      -> scope.define(Symbol.RecordSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
             is InterfaceDecl   -> scope.define(Symbol.InterfaceSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
-            is SealedClassDecl -> scope.define(Symbol.SealedClassSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
+            is SealedClassDecl -> {
+                val err = scope.define(Symbol.SealedClassSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
+                // Register variant names as callable constructors in the module scope
+                for (variant in decl.variants) {
+                    scope.define(Symbol.LetSym(variant.name, variant.span, Visibility.PUBLIC, SymbolOrigin.MODULE, decl = decl))
+                }
+                err
+            }
             is EnumDecl        -> scope.define(Symbol.EnumSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
             is TypeAliasDecl   -> scope.define(Symbol.TypeAliasSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))
             is LetDecl         -> scope.define(Symbol.LetSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE, decl = decl))

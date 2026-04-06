@@ -37,7 +37,7 @@ fn main()
     for inp in inputs
         let result = parseJsonToken(inp)
         match result
-            Ok(v):  println("Parsed: " + showJson(v))
-            Err(e): println("Error: " + e)
+            Ok(v):  → println("Parsed: " + showJson(v))
+            Err(msg): → println("Error: " + msg)
 
     println("Done.")

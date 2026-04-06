@@ -11,10 +11,10 @@ async fn httpGet(host: str, path: str) → str
     → "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!"
 
 async fn processResponse(resp: str) → int
-    println("Processing response (" + "{len(resp)}" + " bytes)")
+    println("Processing response ({len(resp)} bytes)")
     → 200
 
-fn main()
+async fn main()
     println("nv-http: async HTTP/1.1 client")
     println("Connecting to example.com...")
 
@@ -22,5 +22,5 @@ fn main()
     let resp = await httpGet("example.com", "/")
     let code = await processResponse(resp)
 
-    println("Status: " + "{code}")
+    println("Status: {code}")
     println("Done.")

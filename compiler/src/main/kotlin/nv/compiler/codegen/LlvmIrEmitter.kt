@@ -54,6 +54,10 @@ class LlvmIrEmitter(
     // ── Struct layout registry (name → ordered list of field name+type) ──
     private val structLayouts = mutableMapOf<String, List<Pair<String, Type>>>()
 
+    // ── Sealed class registry: className → decl; variant "ClassName.Variant" → tag index ──
+    private val sealedClassDecls = mutableMapOf<String, SealedClassDecl>()
+    private val variantTags      = mutableMapOf<String, Int>()   // "JsonValue.JsonBool" → 1
+
     // ─────────────────────────────────────────────────────────────────────
     // Public entry point
     // ─────────────────────────────────────────────────────────────────────
@@ -63,6 +67,7 @@ class LlvmIrEmitter(
         emitPreamble()
         emitDeclares()
         emitRuntimeFunctions()
+        emitSealedClassFunctions()
 
         val file = tcModule.resolvedModule.file
         for (decl in file.declarations) {
@@ -111,6 +116,12 @@ class LlvmIrEmitter(
                 is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
                 is ClassDecl  -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
                 is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
+                is SealedClassDecl -> {
+                    sealedClassDecls[decl.name] = decl
+                    for ((idx, variant) in decl.variants.withIndex()) {
+                        variantTags["${decl.name}.${variant.name}"] = idx
+                    }
+                }
                 else -> {}
             }
         }
@@ -444,7 +455,81 @@ define void @nv_rc_release(i8* %ptr) {
 entry:
   ret void
 }
+
+; Result<T, E> constructors: {i64 tag=0/1, i64 value}
+; nv_Ok wraps an i8* value pointer (or any pointer-sized value)
+define i8* @nv_Ok(i8* %val) {
+entry:
+  %p = call i8* @malloc(i64 16)
+  %tp = bitcast i8* %p to i64*
+  store i64 0, i64* %tp, align 8
+  %vp = getelementptr i64, i64* %tp, i64 1
+  %ival = ptrtoint i8* %val to i64
+  store i64 %ival, i64* %vp, align 8
+  ret i8* %p
+}
+
+define i8* @nv_Err(i8* %msg) {
+entry:
+  %p = call i8* @malloc(i64 16)
+  %tp = bitcast i8* %p to i64*
+  store i64 1, i64* %tp, align 8
+  %vp = getelementptr i64, i64* %tp, i64 1
+  %ival = ptrtoint i8* %msg to i64
+  store i64 %ival, i64* %vp, align 8
+  ret i8* %p
+}
 """.trimIndent())
+    }
+
+    /**
+     * Emit constructor functions for every sealed class variant declared in the current module.
+     * Each variant is represented as a heap-allocated {i64 tag, i64 value} struct (16 bytes).
+     * The tag is the variant's 0-based index within the sealed class.
+     * The value is the first constructor param coerced to i64 (0 for no-param variants).
+     */
+    private fun emitSealedClassFunctions() {
+        for ((_, decl) in sealedClassDecls) {
+            for ((idx, variant) in decl.variants.withIndex()) {
+                emitSealedVariantConstructor(variant, idx)
+            }
+        }
+    }
+
+    private fun emitSealedVariantConstructor(variant: SealedVariant, tag: Int) {
+        val mangledName = "@nv_${variant.name}"
+        if (variant.params.isEmpty()) {
+            rtFns.appendLine("""
+define i8* $mangledName() {
+entry:
+  %p = call i8* @malloc(i64 16)
+  %tp = bitcast i8* %p to i64*
+  store i64 $tag, i64* %tp, align 8
+  %vp = getelementptr i64, i64* %tp, i64 1
+  store i64 0, i64* %vp, align 8
+  ret i8* %p
+}""".trimIndent())
+        } else {
+            val paramType = resolveTypeNode(variant.params[0].type)
+            val paramLt = llvmType(paramType)
+            val storeStmt = when (paramLt) {
+                "i8*"    -> "  %ival = ptrtoint i8* %param to i64\n  store i64 %ival, i64* %vp, align 8"
+                "i1"     -> "  %ival = zext i1 %param to i64\n  store i64 %ival, i64* %vp, align 8"
+                "double" -> "  %ival = bitcast double %param to i64\n  store i64 %ival, i64* %vp, align 8"
+                "float"  -> "  %fext = fpext float %param to double\n  %ival = bitcast double %fext to i64\n  store i64 %ival, i64* %vp, align 8"
+                else     -> "  store i64 %param, i64* %vp, align 8"   // i64 and sub-types
+            }
+            rtFns.appendLine("""
+define i8* $mangledName($paramLt %param) {
+entry:
+  %p = call i8* @malloc(i64 16)
+  %tp = bitcast i8* %p to i64*
+  store i64 $tag, i64* %tp, align 8
+  %vp = getelementptr i64, i64* %tp, i64 1
+$storeStmt
+  ret i8* %p
+}""".trimIndent())
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -460,14 +545,36 @@ entry:
         Type.TByte, Type.TChar                        -> "i8"
         Type.TUnit, Type.TNever                       -> "void"
         is Type.TNullable                             -> llvmType(t.inner)
+        is Type.TFuture                               -> llvmType(t.inner)
         is Type.TArray, is Type.TMap, is Type.TResult,
         is Type.TNamed, is Type.TGpuBuffer,
         is Type.TSequence                             -> "i8*"
         else                                          -> "i64"   // TUnknown, TError, TVar, TTuple, etc.
     }
 
-    private fun typeOf(expr: Expr): Type =
-        tcModule.typeMap[expr.span.start.offset] ?: Type.TUnknown
+    private fun typeOf(expr: Expr): Type {
+        val mapped = tcModule.typeMap[expr.span.start.offset to expr.span.end.offset]
+        if (mapped != null && mapped != Type.TUnknown) return mapped
+        // Fallback for pattern-bound or locally-defined variables not in typeMap
+        if (expr is IdentExpr) {
+            val lt = varAllocas[expr.name]?.second
+            if (lt != null) return llvmTypeToType(lt)
+        }
+        return mapped ?: Type.TUnknown
+    }
+
+    /** Reverse-map an LLVM type string to a Nordvest Type (best-effort). */
+    private fun llvmTypeToType(lt: String): Type = when (lt) {
+        "i64"    -> Type.TInt
+        "i32"    -> Type.TInt
+        "i1"     -> Type.TBool
+        "i8"     -> Type.TChar
+        "double" -> Type.TFloat
+        "float"  -> Type.TFloat32
+        "void"   -> Type.TUnit
+        "i8*"    -> Type.TStr   // conservative; may be a named type
+        else     -> Type.TUnknown
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // Fresh register / label / string helpers
@@ -1131,23 +1238,77 @@ entry:
         bodyLabel: String,
         endLabel: String,
     ) {
-        // Simplified: just emit a comment; proper array iteration requires runtime support
         val arrReg = emitExpr(iterableExpr)
+        val iterableType = typeOf(iterableExpr)
 
-        // For now emit a placeholder that compiles but iterates 0 times
-        val idxReg = emitAlloca("arr.idx.${labelIdx}", "i64")
+        val elemType = when (iterableType) {
+            is Type.TArray -> iterableType.element
+            Type.TStr      -> Type.TChar
+            else           -> Type.TStr  // best-effort fallback for TUnknown collections
+        }
+        val elemLt   = llvmType(elemType)
+        val elemSize = llvmTypeSize(elemLt).coerceAtLeast(1).toLong()
+
+        // Load count from the 8-byte header at the start of the array
+        val hdrPtr   = fresh("arr.hdr")
+        emit("  $hdrPtr = bitcast i8* $arrReg to i64*")
+        val countReg = fresh("arr.count")
+        emit("  $countReg = load i64, i64* $hdrPtr, align 8")
+
+        val idxReg = emitAlloca("for.idx.${labelIdx}", "i64")
         emitStore("i64", "0", idxReg)
         emit("  br label %$condLabel")
 
         emitRaw("$condLabel:")
         isTerminated = false
-        // We don't know length without runtime support; always false for now
-        emit("  br label %$endLabel")
+        val curIdx = fresh("for.i")
+        emit("  $curIdx = load i64, i64* $idxReg, align 8")
+        val cond = fresh("for.cond")
+        emit("  $cond = icmp slt i64 $curIdx, $countReg")
+        emit("  br i1 $cond, label %$bodyLabel, label %$endLabel")
 
         emitRaw("$bodyLabel:")
         isTerminated = false
+
+        // Pointer to element data (starts at offset 8)
+        val dataStart = fresh("arr.data")
+        emit("  $dataStart = getelementptr i8, i8* $arrReg, i64 8")
+        val elemValReg = if (elemLt == "i8") {
+            val ptrReg = fresh("elem.ptr")
+            emit("  $ptrReg = getelementptr i8, i8* $dataStart, i64 $curIdx")
+            val r = fresh("elem.val")
+            emit("  $r = load i8, i8* $ptrReg, align 1")
+            r
+        } else {
+            val castReg = fresh("elem.cast")
+            emit("  $castReg = bitcast i8* $dataStart to ${llvmPtrType(elemLt)}")
+            val ptrReg = fresh("elem.ptr")
+            emit("  $ptrReg = getelementptr $elemLt, ${llvmPtrType(elemLt)} $castReg, i64 $curIdx")
+            val r = fresh("elem.val")
+            emit("  $r = load $elemLt, ${llvmPtrType(elemLt)} $ptrReg, align $elemSize")
+            r
+        }
+
+        // Bind loop variable
+        val bindName = when (val b = stmt.binding) {
+            is IdentBinding -> b.name
+            is TupleBinding -> b.names.firstOrNull() ?: "_"
+        }
+        if (bindName != "_") {
+            val bindAlloca = emitAlloca(bindName, elemLt)
+            varAllocas[bindName] = Pair(bindAlloca, elemLt)
+            emitStore(elemLt, elemValReg, bindAlloca)
+        }
+
         stmt.body.forEach { emitStmt(it) }
-        if (!isTerminated) emit("  br label %$condLabel")
+
+        // Increment and loop back
+        if (!isTerminated) {
+            val nextIdx = fresh("next.i")
+            emit("  $nextIdx = add i64 $curIdx, 1")
+            emitStore("i64", nextIdx, idxReg)
+            emit("  br label %$condLabel")
+        }
     }
 
     private fun emitAssignStmt(stmt: AssignStmt) {
@@ -1283,11 +1444,9 @@ entry:
     }
 
     private fun emitAwaitExpr(expr: AwaitExpr): String {
-        // Phase 2.1 bootstrap: call @nv_future_await on the future pointer.
-        val futureReg = emitExpr(expr.operand)
-        val result = fresh("await")
-        emit("  $result = call i8* @nv_future_await(i8* $futureReg)")
-        return result
+        // Phase 2.1 bootstrap: async functions run synchronously and return values
+        // directly — await is a no-op pass-through.
+        return emitExpr(expr.operand)
     }
 
     private fun emitSpawnExprValue(expr: SpawnExpr): String {
@@ -1362,10 +1521,21 @@ entry:
 
     private fun emitIdentExpr(expr: IdentExpr): String {
         val name = expr.name
-        val entry = varAllocas[name] ?: return "0"
-        val (allocaReg, lt) = entry
-        if (lt == "void") return "0"
-        return emitLoad(lt, allocaReg)
+        val entry = varAllocas[name]
+        if (entry != null) {
+            val (allocaReg, lt) = entry
+            if (lt == "void") return "0"
+            return emitLoad(lt, allocaReg)
+        }
+        // Check if it's a no-param sealed variant or similar value-typed ident
+        val symType = tcModule.resolvedModule.moduleScope.lookup(name)?.resolvedType
+        if (symType is Type.TNamed) {
+            // No-arg constructor call
+            val res = fresh("call")
+            emit("  $res = call i8* @nv_$name()")
+            return res
+        }
+        return "0"
     }
 
     private fun emitInterpolatedString(expr: InterpolatedStringExpr): String {
@@ -1725,7 +1895,9 @@ entry:
         }
         // Regular user-defined function
         val mangledName = "@nv_$fnName"
-        val retLt = "i64"  // conservative default; proper typing done above
+        val fnSymType = tcModule.resolvedModule.moduleScope.lookup(fnName)?.resolvedType
+        val fnRetType = (fnSymType as? Type.TFun)?.returnType
+        val retLt = fnRetType?.let { llvmType(it) } ?: "i64"
         val argList = argRegs.zip(argTypes).joinToString(", ") { (r, t) ->
             val lt = llvmType(t); "$lt noundef $r"
         }
@@ -2102,7 +2274,17 @@ entry:
             isTerminated = false
 
             when (val body = arm.body) {
-                is ExprMatchArmBody  -> { emitExpr(body.expr); Unit }
+                is ExprMatchArmBody  -> {
+                    val valReg  = emitExpr(body.expr)
+                    val valType = typeOf(body.expr)
+                    val valLt   = llvmType(valType)
+                    // Only emit ret if the expression produces a real value (not unit/void).
+                    // Unit-typed arms (e.g. println inside a loop match) just fall through.
+                    if (valType != Type.TUnit && valLt != "void" && fnReturnType != "void") {
+                        val coerced = coerceToType(valReg, valType, fnReturnType)
+                        terminate("  ret $fnReturnType $coerced")
+                    }
+                }
                 is BlockMatchArmBody -> body.stmts.forEach { emitStmt(it) }
             }
             if (!isTerminated) emit("  br label %$mergeLabel")
@@ -2176,8 +2358,77 @@ entry:
                     res
                 }
             }
+            is TypePattern -> emitTypePatternCheck(subjectReg, subjectType, pattern)
             else -> "1"
         }
+    }
+
+    /**
+     * Emit a check for a TypePattern (sealed class variant or Result Ok/Err).
+     * Sealed class variants are represented as heap-allocated {i64 tag, i64 payload} (16 bytes).
+     * Returns an i1 register: 1 if the tag matches, 0 otherwise.
+     * As a side effect, binds any BindingPattern variables via varAllocas.
+     */
+    private fun emitTypePatternCheck(subjectReg: String, subjectType: Type, pattern: TypePattern): String {
+        val variantName = pattern.typeName.text
+
+        // Determine expected tag
+        val tag: Int
+        val payloadParamType: Type?
+        when (variantName) {
+            "Ok"  -> { tag = 0; payloadParamType = null }
+            "Err" -> { tag = 1; payloadParamType = Type.TStr }
+            else  -> {
+                val sealedDecl = sealedClassDecls.values.firstOrNull { sd ->
+                    sd.variants.any { it.name == variantName }
+                } ?: return "1"  // Unknown variant — always match (fallback)
+                val variantIdx = sealedDecl.variants.indexOfFirst { it.name == variantName }
+                tag = variantIdx
+                payloadParamType = sealedDecl.variants[variantIdx].params.firstOrNull()
+                    ?.let { resolveTypeNode(it.type) }
+            }
+        }
+
+        // Cast subject i8* → i64* and load tag
+        val castReg = fresh("vcast")
+        emit("  $castReg = bitcast i8* $subjectReg to i64*")
+        val tagReg = fresh("vtag")
+        emit("  $tagReg = load i64, i64* $castReg, align 8")
+        val matchedReg = fresh("vmatch")
+        emit("  $matchedReg = icmp eq i64 $tagReg, $tag")
+
+        // Bind positional pattern variables
+        val posArgs = pattern.args as? PositionalTypePatternArgs
+        if (posArgs != null && posArgs.patterns.isNotEmpty()) {
+            // Load the payload i64
+            val vpReg = fresh("vpay")
+            emit("  $vpReg = getelementptr i64, i64* $castReg, i64 1")
+            val payI64Reg = fresh("pay_i64")
+            emit("  $payI64Reg = load i64, i64* $vpReg, align 8")
+
+            for (subPat in posArgs.patterns) {
+                if (subPat is BindingPattern) {
+                    val paramLt = payloadParamType?.let { llvmType(it) } ?: "i8*"
+                    val extractedReg = when (paramLt) {
+                        "i8*" -> {
+                            val r = fresh("extract"); emit("  $r = inttoptr i64 $payI64Reg to i8*"); r
+                        }
+                        "i1" -> {
+                            val r = fresh("extract"); emit("  $r = trunc i64 $payI64Reg to i1"); r
+                        }
+                        "double" -> {
+                            val r = fresh("extract"); emit("  $r = bitcast i64 $payI64Reg to double"); r
+                        }
+                        else -> payI64Reg   // i64 and other integer types
+                    }
+                    val allocaReg = emitAlloca(subPat.name, paramLt)
+                    varAllocas[subPat.name] = Pair(allocaReg, paramLt)
+                    emitStore(paramLt, extractedReg, allocaReg)
+                }
+            }
+        }
+
+        return matchedReg
     }
 
     private fun emitIndexExpr(expr: IndexExpr): String {

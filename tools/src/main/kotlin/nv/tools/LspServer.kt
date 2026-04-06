@@ -486,10 +486,10 @@ class LspServer(
     private fun findTypeAtPosition(source: String, path: String, line: Int, char: Int): String? {
         val offset = lineCharToOffset(source, line, char)
         val module = typeCheckSource(source, path) ?: return null
-        // Look up type at or near offset in the typeMap
+        // Look up the most specific type whose span contains the offset
         val entry = module.typeMap.entries
-            .filter { (k, _) -> k <= offset }
-            .maxByOrNull { (k, _) -> k }
+            .filter { (k, _) -> k.first <= offset && offset < k.second }
+            .minByOrNull { (k, _) -> k.second - k.first }
         return entry?.value?.display()
     }
 

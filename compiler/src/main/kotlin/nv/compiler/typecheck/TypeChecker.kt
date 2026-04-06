@@ -22,7 +22,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     // ── State ─────────────────────────────────────────────────────────────
 
     private val errors   = mutableListOf<TypeCheckError>()
-    private val typeMap  = mutableMapOf<Int, Type>()          // expr span-offset → Type
+    private val typeMap  = mutableMapOf<Pair<Int,Int>, Type>() // expr (start,end) span → Type
 
     /** memberTypeMap: "TypeName.fieldName" → Type (populated from declarations). */
     private val memberTypeMap = mutableMapOf<String, Type>()
@@ -96,6 +96,8 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
         // Ok/Err are generic constructors — TUnknown works here
         setBuiltin("Ok",  Type.TFun(listOf(Type.TUnknown), Type.TResult(Type.TUnknown, Type.TUnknown)))
         setBuiltin("Err", Type.TFun(listOf(Type.TUnknown), Type.TResult(Type.TUnknown, Type.TUnknown)))
+        // len() always returns int
+        setBuiltin("len", Type.TFun(listOf(Type.TUnknown), Type.TInt))
     }
 
     /** Walk the module scope and seed the env with already-typed symbols. */
@@ -119,18 +121,21 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             is SealedClassDecl -> {
                 val variantNames = decl.variants.map { it.name }
                 sealedVariants[decl.name] = variantNames
+                val sealedType = Type.TNamed(decl.name, decl.typeParams.map { Type.TVar(it.name) })
                 // Each variant is also a named type and a constructor
                 for (variant in decl.variants) {
                     val paramTypes = variant.params.map { resolveTypeNode(it.type) }
-                    val constructorType = if (paramTypes.isEmpty())
-                        Type.TNamed(decl.name, decl.typeParams.map { Type.TVar(it.name) })
-                    else
-                        Type.TFun(paramTypes, Type.TNamed(decl.name, decl.typeParams.map { Type.TVar(it.name) }))
+                    val constructorType = if (paramTypes.isEmpty()) sealedType
+                    else Type.TFun(paramTypes, sealedType)
                     memberTypeMap["${decl.name}.${variant.name}"] = constructorType
+                    // Also register in module scope so callers can find the return type
+                    resolvedModule.moduleScope.lookup(variant.name)?.let { sym ->
+                        sym.resolvedType = constructorType
+                    }
                 }
                 // The sealed type itself
                 resolvedModule.moduleScope.lookup(decl.name)?.let { sym ->
-                    sym.resolvedType = Type.TNamed(decl.name, decl.typeParams.map { Type.TVar(it.name) })
+                    sym.resolvedType = sealedType
                 }
             }
             is EnumDecl -> {
@@ -159,7 +164,8 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 withTypeParams(decl.typeParams.map { it.name }.toSet()) {
                     val paramTypes = decl.params.map { resolveTypeNode(it.type) }
                     val retType = decl.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
-                    val fnType = Type.TFun(paramTypes, retType)
+                    val wrappedRetType = if (decl.isAsync) Type.TFuture(retType) else retType
+                    val fnType = Type.TFun(paramTypes, wrappedRetType)
                     resolvedModule.moduleScope.lookup(decl.name)?.let { sym ->
                         sym.resolvedType = fnType
                     }
@@ -658,7 +664,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
      */
     fun synthesize(expr: Expr, env: TypeEnv): Type {
         val type = synthesizeRaw(expr, env)
-        typeMap[expr.span.start.offset] = type
+        typeMap[expr.span.start.offset to expr.span.end.offset] = type
         return type
     }
 
@@ -805,7 +811,20 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
         }
 
         return when (expr.op) {
-            BinaryOp.PLUS, BinaryOp.MINUS, BinaryOp.STAR, BinaryOp.SLASH -> {
+            BinaryOp.PLUS -> {
+                // String concatenation: str + str → str
+                if (lType == Type.TStr && rType == Type.TStr) {
+                    Type.TStr
+                } else {
+                    val promo = numericPromotion(lType, rType)
+                    if (promo == null && lType != Type.TUnknown && rType != Type.TUnknown &&
+                        lType != Type.TError && rType != Type.TError) {
+                        errors += TypeCheckError.OperatorTypeMismatch(expr.op.symbol, lType, rType, expr.span)
+                        Type.TError
+                    } else promo ?: lType
+                }
+            }
+            BinaryOp.MINUS, BinaryOp.STAR, BinaryOp.SLASH -> {
                 val promo = numericPromotion(lType, rType)
                 if (promo == null && lType != Type.TUnknown && rType != Type.TUnknown &&
                     lType != Type.TError && rType != Type.TError) {
