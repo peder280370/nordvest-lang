@@ -291,8 +291,9 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
 
     private fun parseAnnotationArg(): AnnotationArg {
         val start = peek().span
-        // Named: ident: value
-        if (at(IDENT) && at(COLON, 1)) {
+        // Named: ident: value — also allow keywords like 'fn', 'lib', 'cxx', etc. as arg names
+        val isKeywordArgName = at(COLON, 1) && peek().kind != IDENT
+        if ((at(IDENT) || isKeywordArgName) && at(COLON, 1)) {
             val name = advance().text
             advance() // colon
             val value = parseAnnotationArgValue()
@@ -611,9 +612,12 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val whereClause = if (at(WHERE)) parseWhereClause() else emptyList()
         val byExpr: Expr? = null // 'by' delegation - not in PEG, skip for now
         expectNewline()
-        expectIndent("class $name")
-        val members = parseClassMembers()
-        expectDedent()
+        val members = if (at(INDENT)) {
+            advance()
+            val ms = parseClassMembers()
+            expectDedent()
+            ms
+        } else emptyList()
         return ClassDecl(spanFrom(start), docComment, annotations, vis, name, typeParams, ctorParams, superTypes, whereClause, members)
     }
 

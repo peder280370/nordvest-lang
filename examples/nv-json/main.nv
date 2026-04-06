@@ -1,0 +1,43 @@
+module examples.json
+
+/** Streaming JSON parser example.
+ *
+ * Demonstrates Result<T>, sealed classes, and pattern matching.
+ */
+
+sealed class JsonValue
+    JsonNull
+    JsonBool(value: bool)
+    JsonInt(value: int)
+    JsonStr(value: str)
+
+fn parseJsonToken(s: str) → Result<JsonValue>
+    if len(s) == 0
+        → Err("empty input")
+    if s == "null"
+        → Ok(JsonNull)
+    if s == "true"
+        → Ok(JsonBool(true))
+    if s == "false"
+        → Ok(JsonBool(false))
+    → Ok(JsonStr(s))
+
+fn showJson(v: JsonValue) → str
+    match v
+        JsonNull:    → "null"
+        JsonBool(b): → if b then "true" else "false"
+        JsonInt(n):  → "{n}"
+        JsonStr(s):  → "\"" + s + "\""
+        _:           → "[unknown]"
+
+fn main()
+    println("nv-json: streaming JSON parser example")
+
+    let inputs = ["null", "true", "false", "hello", ""]
+    for inp in inputs
+        let result = parseJsonToken(inp)
+        match result
+            Ok(v):  println("Parsed: " + showJson(v))
+            Err(e): println("Error: " + e)
+
+    println("Done.")

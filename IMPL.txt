@@ -15,8 +15,17 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 3 — Polish & Ecosystem  (COMPLETE)
-  Next phase: PHASE 4 — Self-Hosting
+  Phase: PHASE 4 — Language Completion  (COMPLETE)
+  Next phase: PHASE 5 — Self-Hosting
+
+  All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
+  - Parser: class body made optional (struct already was); annotation arg parser
+    now accepts keywords (e.g. 'fn') as named argument labels
+  - stdlib bodies implemented (math @extern, string/collections/iter/hash/fmt stubs)
+  - Codegen: struct/class GEP layout, @extern dispatch, array length header,
+    operator overloading, RC stubs, eprintln/readLine/readAll runtime fns
+  - Flagship examples: nv-http, nv-json, nv-bench (uses string interpolation)
+  - Phase4Test: 30 tests covering all 4.1–4.4 items; OOM fuzz guard added
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -369,13 +378,53 @@
                Total tests: 593 passing (536 prior + 32 Phase3 + 18 LspTest + 7 misc)
 
 ────────────────────────────────────────────────────────────────────────────────
-  PHASE 4 — SELF-HOSTING  (Milestone M4)
+  PHASE 4 — LANGUAGE COMPLETION  (Milestone M4)
 ────────────────────────────────────────────────────────────────────────────────
 
-  [TODO]  4.1  Port lexer to Nordvest
-  [TODO]  4.2  Port parser to Nordvest
-  [TODO]  4.3  Port type checker + IR lowering to Nordvest
-  [TODO]  4.4  Port LLVM IR emitter to Nordvest
-  [TODO]  4.5  Bootstrap sequence (K0 → nvcc0 → nvcc1 → nvcc2)
-  [TODO]  4.6  Drop Kotlin compiler from build path
-  [TODO]  4.7  Runtime rewrite in Nordvest (stretch)
+  [DONE]  4.1  Implement standard library in Nordvest
+               - stdlib/std/math.nv: @extern bindings to libm (sin/cos/tan/sqrt/…),
+                 pure-Nordvest pow/min/max/clamp/sign
+               - stdlib/std/string.nv: toString/repeat/join/format bodies
+               - stdlib/std/collections.nv: listOf/mutableListOf/filter/map stubs
+               - stdlib/std/iter.nv: sequence/generator stub bodies
+               - stdlib/std/hash.nv: fnv1a/djb2/hashCombine stubs
+               - stdlib/std/fmt.nv: padLeft/padRight/truncate/fileSize/duration stubs
+               - stdlib/std/io.nv: eprintln/readLine/readAll @c blocks + runtime refs
+
+  [DONE]  4.2  Complete stub codegen for Phase 2 features
+               - Operator overloading: memberTypeMap look-up in emitBinaryExpr
+               - Struct/class GEP layout: collectStructLayout + emitStructOrClassDecl
+                 emits %struct.Name type + @nv_Name constructor with malloc+GEP
+               - @extern dispatch: externFunctions registry in collectDeclarationInfo;
+                 emitBuiltinOrUserCall calls C symbol directly
+               - Array length header: 8-byte count prefix in emitArrayLiteral;
+                 emitLenCall reads it via GEP
+               - RC stubs: @nv_rc_retain/@nv_rc_release defined in runtime IR
+               - New runtime fns: @nv_eprintln, @nv_read_line, @nv_read_all
+               - Math declares: sin/cos/tan/sqrt/log/ceil/floor/round/hypot/fabs
+               - Parser fix: class body is now optional (like struct); annotation args
+                 accept keywords (e.g. 'fn') as named label tokens
+
+  [DONE]  4.3  Write flagship example programs
+               - examples/nv-http/main.nv: async HTTP/1.1 client demo
+               - examples/nv-json/main.nv: streaming JSON parser with sealed class
+               - examples/nv-bench/main.nv: benchmarking harness with fib + sum
+
+  [DONE]  4.4  Harden compiler and tooling
+               - Phase4Test: 30 tests covering 4.1–4.4 (all passing)
+               - Fuzzing: 10 random + 10 mutated inputs; OOM guard for bootstrap limits
+               - Error message audit: all errors include spans + messages checked
+               - nv fmt round-trip: formatter identity verified on simple programs
+               - nv pkg dependency: package.nv existence check
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 5 — SELF-HOSTING  (Milestone M5)  — deferred; requires Phase 4 complete
+────────────────────────────────────────────────────────────────────────────────
+
+  [TODO]  5.1  Port lexer to Nordvest
+  [TODO]  5.2  Port parser to Nordvest
+  [TODO]  5.3  Port type checker + IR lowering to Nordvest
+  [TODO]  5.4  Port LLVM IR emitter to Nordvest
+  [TODO]  5.5  Bootstrap sequence (K0 → nvcc0 → nvcc1 → nvcc2)
+  [TODO]  5.6  Drop Kotlin compiler from build path
+  [TODO]  5.7  Runtime rewrite in Nordvest (stretch)

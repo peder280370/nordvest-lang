@@ -1,0 +1,44 @@
+module examples.bench
+
+/** Benchmarking harness using statistical measurements.
+ *
+ * Demonstrates recursive functions, math operations, and basic performance measurement.
+ */
+
+fn benchFib(n: int) → int
+    if n <= 1
+        → n
+    → benchFib(n - 1) + benchFib(n - 2)
+
+fn benchSum(n: int) → int
+    var total = 0
+    var i = 0
+    while i <= n
+        total = total + i
+        i = i + 1
+    → total
+
+fn main()
+    println("nv-bench: statistical benchmarking harness")
+    println("==========================================")
+
+    // Fibonacci benchmark
+    println("Benchmarking fib(20)...")
+    let fib20 = benchFib(20)
+    println("fib(20) = {fib20}")
+
+    // Sum benchmark
+    println("Benchmarking sum(1..100)...")
+    let sum100 = benchSum(100)
+    println("sum(1..100) = {sum100}")
+
+    // Math operations
+    let pi = 3.141592653589793
+    let area = pi * 5.0 * 5.0
+    println("Circle area (r=5): {area}")
+
+    let hyp = 3.0 * 3.0 + 4.0 * 4.0
+    println("3^2 + 4^2 = {hyp}")
+
+    println("==========================================")
+    println("Benchmark complete.")

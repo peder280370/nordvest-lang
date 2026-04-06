@@ -3,38 +3,88 @@ module std.collections
 // ── List ──────────────────────────────────────────────────────────────────────
 
 pub fn listOf<T>(items: [T]) → [T]
+    → items
+
 pub fn mutableListOf<T>() → [T]
+    → []
+
 pub fn listAppend<T>(list: [T], item: T) → [T]
+    → list
+
 pub fn listRemove<T>(list: [T], index: int) → [T]
+    → list
+
 pub fn listContains<T>(list: [T], item: T) → bool
+    → false
+
 pub fn listSort<T>(list: [T]) → [T]
+    → list
+
 pub fn listReverse<T>(list: [T]) → [T]
+    → list
+
 pub fn listMap<T, U>(list: [T], f: (T) → U) → [U]
+    → []
+
 pub fn listFilter<T>(list: [T], f: (T) → bool) → [T]
+    → list
+
 pub fn listFold<T, U>(list: [T], init: U, f: (U, T) → U) → U
+    → init
+
 pub fn listFirst<T>(list: [T]) → T?
+    → nil
+
 pub fn listLast<T>(list: [T]) → T?
+    → nil
+
 pub fn listSlice<T>(list: [T], from: int, to: int) → [T]
+    → list
+
 pub fn listZip<T, U>(a: [T], b: [U]) → [(T, U)]
+    → []
+
 pub fn listFlatten<T>(nested: [[T]]) → [T]
+    → []
 
 // ── Set (hash-based) ──────────────────────────────────────────────────────────
 
 pub fn setOf<T>(items: [T]) → [T]
+    → items
+
 pub fn setContains<T>(set: [T], item: T) → bool
+    → false
+
 pub fn setAdd<T>(set: [T], item: T) → [T]
+    → set
+
 pub fn setRemove<T>(set: [T], item: T) → [T]
+    → set
+
 pub fn setUnion<T>(a: [T], b: [T]) → [T]
+    → a
+
 pub fn setIntersect<T>(a: [T], b: [T]) → [T]
+    → []
+
 pub fn setDiff<T>(a: [T], b: [T]) → [T]
+    → a
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 
 pub fn queueEnqueue<T>(queue: [T], item: T) → [T]
+    → queue
+
 pub fn queueDequeue<T>(queue: [T]) → T?
+    → nil
 
 // ── Stack ─────────────────────────────────────────────────────────────────────
 
 pub fn stackPush<T>(stack: [T], item: T) → [T]
+    → stack
+
 pub fn stackPop<T>(stack: [T]) → T?
+    → nil
+
 pub fn stackPeek<T>(stack: [T]) → T?
+    → nil

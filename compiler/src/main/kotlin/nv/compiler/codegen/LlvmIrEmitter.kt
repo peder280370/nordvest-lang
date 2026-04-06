@@ -47,11 +47,19 @@ class LlvmIrEmitter(
     private data class LoopTarget(val condLabel: String, val endLabel: String, val userLabel: String?)
     private val loopStack = ArrayDeque<LoopTarget>()
 
+    // ── Extern function registry (populated at start of emit()) ──────────
+    private data class ExternInfo(val cSymbol: String, val retType: Type, val paramTypes: List<Type>)
+    private val externFunctions = mutableMapOf<String, ExternInfo>()
+
+    // ── Struct layout registry (name → ordered list of field name+type) ──
+    private val structLayouts = mutableMapOf<String, List<Pair<String, Type>>>()
+
     // ─────────────────────────────────────────────────────────────────────
     // Public entry point
     // ─────────────────────────────────────────────────────────────────────
 
     fun emit(): CodegenResult {
+        collectDeclarationInfo()
         emitPreamble()
         emitDeclares()
         emitRuntimeFunctions()
@@ -74,6 +82,67 @@ class LlvmIrEmitter(
             append(userFns)
         }
         return CodegenResult.Success(ir)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Declaration info collection (pass 0)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun collectDeclarationInfo() {
+        val file = tcModule.resolvedModule.file
+        for (decl in file.declarations) {
+            when (decl) {
+                is FunctionSignatureDecl -> {
+                    if (decl.annotations.any { it.name == "extern" }) {
+                        val csym = externCSymbol(decl.annotations, decl.name)
+                        val retTy = decl.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+                        val paramTys = decl.params.map { resolveTypeNode(it.type) }
+                        externFunctions[decl.name] = ExternInfo(csym, retTy, paramTys)
+                    }
+                }
+                is FunctionDecl -> {
+                    if (decl.annotations.any { it.name == "extern" } && decl.body.isEmpty()) {
+                        val csym = externCSymbol(decl.annotations, decl.name)
+                        val retTy = decl.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+                        val paramTys = decl.params.map { resolveTypeNode(it.type) }
+                        externFunctions[decl.name] = ExternInfo(csym, retTy, paramTys)
+                    }
+                }
+                is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
+                is ClassDecl  -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
+                is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
+                else -> {}
+            }
+        }
+    }
+
+    private fun externCSymbol(annotations: List<nv.compiler.parser.Annotation>, default: String): String =
+        annotations.firstOrNull { it.name == "extern" }
+            ?.args?.firstOrNull { it.name == "fn" || it.name == null }
+            ?.let { arg: AnnotationArg ->
+                when (val v = arg.value) {
+                    is AnnotationStrValue   -> v.value
+                    is AnnotationIdentValue -> v.name.text
+                    else -> null
+                }
+            } ?: default
+
+    private fun collectStructLayout(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>) {
+        val fields = ctorParams.map { cp -> cp.name to resolveTypeNode(cp.type) }.toMutableList()
+        for (m in members) {
+            when (m) {
+                is FieldDecl -> fields += m.name to resolveTypeNode(m.typeAnnotation)
+                is VarDecl   -> if (m.typeAnnotation != null) fields += m.name to resolveTypeNode(m.typeAnnotation)
+                is LetDecl   -> if (m.typeAnnotation != null) fields += m.name to resolveTypeNode(m.typeAnnotation)
+                else -> {}
+            }
+        }
+        structLayouts[name] = fields
+        // Also emit struct type definition into globals
+        if (fields.isNotEmpty()) {
+            val fieldTypes = fields.joinToString(", ") { (_, t) -> llvmType(t) }
+            globals.appendLine("%struct.$name = type { $fieldTypes }")
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -120,6 +189,29 @@ declare void  @nv_channel_send(i8*, i8*)
 declare i8*   @nv_channel_receive(i8*)
 declare i32   @nv_channel_try_receive(i8*, i8**)
 declare void  @nv_channel_close(i8*)
+declare double @sin(double)
+declare double @cos(double)
+declare double @tan(double)
+declare double @asin(double)
+declare double @acos(double)
+declare double @atan(double)
+declare double @atan2(double, double)
+declare double @exp(double)
+declare double @log(double)
+declare double @log2(double)
+declare double @log10(double)
+declare double @ceil(double)
+declare double @floor(double)
+declare double @round(double)
+declare double @sqrt(double)
+declare double @hypot(double, double)
+declare double @fabs(double)
+declare i32    @scanf(i8*, ...)
+declare i64    @strtol(i8*, i8**, i32)
+declare double @strtod(i8*, i8**)
+declare i32    @sscanf(i8*, i8*, ...)
+declare i32    @atoi(i8*)
+declare i32    @getchar()
 """.trimIndent())
     }
 
@@ -269,6 +361,88 @@ entry:
   call i32 (i8*, ...) @printf(i8* %fmtpanic, i8* %msg)
   call void @exit(i32 1)
   unreachable
+}
+
+define void @nv_eprintln(i8* %s) {
+entry:
+  %fmtsn = getelementptr [4 x i8], [4 x i8]* @.fmt.sn, i64 0, i64 0
+  call i32 (i8*, ...) @printf(i8* %fmtsn, i8* %s)
+  ret void
+}
+
+define i8* @nv_read_line() {
+entry:
+  %buf = call i8* @malloc(i64 4096)
+  %i = alloca i64, align 8
+  store i64 0, i64* %i, align 8
+  br label %rl.loop
+rl.loop:
+  %ch = call i32 @getchar()
+  %at_newline = icmp eq i32 %ch, 10
+  %at_eof     = icmp eq i32 %ch, -1
+  %done = or i1 %at_newline, %at_eof
+  br i1 %done, label %rl.done, label %rl.store
+rl.store:
+  %idx = load i64, i64* %i, align 8
+  %too_big = icmp sge i64 %idx, 4095
+  br i1 %too_big, label %rl.done, label %rl.write
+rl.write:
+  %ch8 = trunc i32 %ch to i8
+  %ptr = getelementptr i8, i8* %buf, i64 %idx
+  store i8 %ch8, i8* %ptr, align 1
+  %idx1 = add i64 %idx, 1
+  store i64 %idx1, i64* %i, align 8
+  br label %rl.loop
+rl.done:
+  %len = load i64, i64* %i, align 8
+  %is_empty = icmp eq i64 %len, 0
+  %ret_null = and i1 %at_eof, %is_empty
+  br i1 %ret_null, label %rl.null, label %rl.ok
+rl.null:
+  call void @free(i8* %buf)
+  ret i8* null
+rl.ok:
+  %term = getelementptr i8, i8* %buf, i64 %len
+  store i8 0, i8* %term, align 1
+  ret i8* %buf
+}
+
+define i8* @nv_read_all() {
+entry:
+  %buf = call i8* @malloc(i64 65536)
+  %len = alloca i64, align 8
+  store i64 0, i64* %len, align 8
+  br label %ra.loop
+ra.loop:
+  %ch = call i32 @getchar()
+  %at_eof = icmp eq i32 %ch, -1
+  br i1 %at_eof, label %ra.done, label %ra.check
+ra.check:
+  %idx = load i64, i64* %len, align 8
+  %too_big = icmp sge i64 %idx, 65535
+  br i1 %too_big, label %ra.done, label %ra.write
+ra.write:
+  %ptr = getelementptr i8, i8* %buf, i64 %idx
+  %ch8 = trunc i32 %ch to i8
+  store i8 %ch8, i8* %ptr, align 1
+  %idx1 = add i64 %idx, 1
+  store i64 %idx1, i64* %len, align 8
+  br label %ra.loop
+ra.done:
+  %l = load i64, i64* %len, align 8
+  %term = getelementptr i8, i8* %buf, i64 %l
+  store i8 0, i8* %term, align 1
+  ret i8* %buf
+}
+
+define void @nv_rc_retain(i8* %ptr) {
+entry:
+  ret void
+}
+
+define void @nv_rc_release(i8* %ptr) {
+entry:
+  ret void
 }
 """.trimIndent())
     }
@@ -440,7 +614,10 @@ entry:
                 }
                 // otherwise interface signature — skip
             }
-            else            -> { /* unsupported at top-level in Phase 1.5 */ }
+            is StructDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
+            is ClassDecl  -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
+            is RecordDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
+            else          -> { /* unsupported at top-level */ }
         }
     }
 
@@ -545,6 +722,106 @@ entry:
         // Assemble full function
         val noreturn = if (fn.name == "nv_panic") " noreturn" else ""
         userFns.appendLine("define $fnReturnType $mangledName($paramList)$noreturn {")
+        userFns.appendLine("entry:")
+        userFns.append(fnAllocas)
+        userFns.append(fnBody)
+        userFns.appendLine("}")
+        userFns.appendLine()
+    }
+
+    private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>) {
+        val fields = structLayouts[name] ?: return
+        if (fields.isEmpty()) return
+
+        // Constructor function: @nv_Name(field_types...) → i8*
+        val totalSize = fields.sumOf { (_, t) -> llvmTypeSize(llvmType(t)) }
+        val allocSize = maxOf(totalSize, 8)
+
+        fnBody    = StringBuilder()
+        fnAllocas = StringBuilder()
+        varAllocas.clear()
+        tempIdx   = 0
+        labelIdx  = 0
+        isTerminated = false
+        loopStack.clear()
+
+        val paramList = fields.joinToString(", ") { (fname, ft) -> "${llvmType(ft)} %ctor.$fname" }
+
+        val objReg = fresh("obj")
+        emit("  $objReg = call i8* @malloc(i64 $allocSize)")
+        val castReg = fresh("cast")
+        val structType = "%struct.$name"
+        emit("  $castReg = bitcast i8* $objReg to $structType*")
+
+        fields.forEachIndexed { idx, (fname, ft) ->
+            val fieldLt = llvmType(ft)
+            val ptrReg = fresh("fp")
+            emit("  $ptrReg = getelementptr $structType, $structType* $castReg, i32 0, i32 $idx")
+            emit("  store $fieldLt %ctor.$fname, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
+        }
+        terminate("  ret i8* $objReg")
+
+        userFns.appendLine("define i8* @nv_$name($paramList) {")
+        userFns.appendLine("entry:")
+        userFns.append(fnAllocas)
+        userFns.append(fnBody)
+        userFns.appendLine("}")
+        userFns.appendLine()
+
+        // Emit member functions
+        for (member in members) {
+            if (member is FunctionDecl && !member.annotations.any { it.name == "extern" }) {
+                emitMethodDecl(name, member)
+            }
+        }
+    }
+
+    private fun emitMethodDecl(typeName: String, fn: FunctionDecl) {
+        fnBody    = StringBuilder()
+        fnAllocas = StringBuilder()
+        varAllocas.clear()
+        tempIdx   = 0
+        labelIdx  = 0
+        isTerminated = false
+        loopStack.clear()
+
+        val nvRetType = fn.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+        fnReturnType = llvmType(nvRetType)
+
+        // self as first param (i8*)
+        val selfAlloca = emitAlloca("self", "i8*")
+        varAllocas["self"] = Pair(selfAlloca, "i8*")
+        emitStore("i8*", "%self", selfAlloca)
+
+        // Other params
+        for (p in fn.params) {
+            val pt = resolveTypeNode(p.type)
+            val lt = llvmType(pt)
+            val allocaReg = emitAlloca(p.name, lt)
+            varAllocas[p.name] = Pair(allocaReg, lt)
+            emitStore(lt, "%param.${p.name}", allocaReg)
+        }
+
+        for (stmt in fn.body) emitStmt(stmt)
+        if (!isTerminated) {
+            when (fnReturnType) {
+                "void"   -> terminate("  ret void")
+                "i32"    -> terminate("  ret i32 0")
+                "i64"    -> terminate("  ret i64 0")
+                "i1"     -> terminate("  ret i1 0")
+                "double" -> terminate("  ret double 0.0")
+                else     -> terminate("  ret i8* null")
+            }
+        }
+
+        val opSuffix = operatorToSuffix(fn.name)
+        val mangledName = if (opSuffix != null) "@nv_${typeName}_op_$opSuffix" else "@nv_${typeName}_${fn.name}"
+        val paramList = buildString {
+            append("i8* %self")
+            for (p in fn.params) append(", ${llvmType(resolveTypeNode(p.type))} %param.${p.name}")
+        }
+
+        userFns.appendLine("define $fnReturnType $mangledName($paramList) {")
         userFns.appendLine("entry:")
         userFns.append(fnAllocas)
         userFns.append(fnBody)
@@ -1143,6 +1420,21 @@ entry:
         else                        -> reg  // best effort
     }
 
+    private fun binaryOpSymbol(op: BinaryOp): String = when (op) {
+        BinaryOp.PLUS -> "+"; BinaryOp.MINUS -> "-"; BinaryOp.STAR -> "*"
+        BinaryOp.SLASH -> "/"; BinaryOp.EQ -> "=="; BinaryOp.NEQ -> "!="
+        BinaryOp.LT -> "<"; BinaryOp.GT -> ">"; BinaryOp.LEQ -> "<="
+        BinaryOp.GEQ -> ">="; BinaryOp.MOD -> "%"; BinaryOp.POWER -> "^"
+        else -> op.name
+    }
+
+    private fun operatorToSuffix(name: String): String? = when (name) {
+        "+"  -> "plus"; "-" -> "minus"; "*" -> "mul"; "/" -> "div"
+        "==" -> "eq"; "!=" -> "neq"; "<" -> "lt"; ">" -> "gt"
+        "<=" -> "le"; ">=" -> "ge"; "%" -> "mod"; "^" -> "pow"
+        else -> null
+    }
+
     private fun emitBinaryExpr(expr: BinaryExpr): String {
         // Short-circuit for && and ||
         if (expr.op == BinaryOp.AND) return emitShortCircuit(expr, isAnd = true)
@@ -1151,6 +1443,27 @@ entry:
         if (expr.op == BinaryOp.NULL_COALESCE) return emitNullCoalesce(expr)
         // Pipeline
         if (expr.op == BinaryOp.PIPELINE) return emitPipeline(expr)
+
+        // Operator overloading: check if left type defines the operator
+        val leftTypeForOp = typeOf(expr.left)
+        if (leftTypeForOp is Type.TNamed) {
+            val opSym = binaryOpSymbol(expr.op)
+            val opKey = "${leftTypeForOp.qualifiedName}.$opSym"
+            val overload = tcModule.memberTypeMap[opKey]
+            if (overload is Type.TFun && overload.params.size == 1) {
+                val lReg = emitExpr(expr.left)
+                val rReg = emitExpr(expr.right)
+                val rType = typeOf(expr.right)
+                val retLt = llvmType(overload.returnType)
+                val typeName = leftTypeForOp.qualifiedName.substringAfterLast('.')
+                val suffix = operatorToSuffix(opSym)
+                val mangledFn = if (suffix != null) "@nv_${typeName}_op_$suffix"
+                                else "@nv_${typeName}_op_custom"
+                val res = fresh("opol")
+                emit("  $res = call $retLt $mangledFn(i8* noundef $lReg, ${llvmType(rType)} noundef $rReg)")
+                return res
+            }
+        }
 
         val leftReg  = emitExpr(expr.left)
         val rightReg = emitExpr(expr.right)
@@ -1376,8 +1689,42 @@ entry:
     private fun emitCallExpr(expr: CallExpr, callee: MemberAccessExpr) = emitMethodCall(expr, callee)
 
     private fun emitBuiltinOrUserCall(fnName: String, argRegs: List<String>, argTypes: List<Type>): String {
+        // Check if it's an @extern function → call C symbol directly
+        val ext = externFunctions[fnName]
+        if (ext != null) {
+            val retLt = llvmType(ext.retType)
+            val argList = if (ext.paramTypes.isNotEmpty()) {
+                argRegs.zip(ext.paramTypes).joinToString(", ") { (r, t) -> "${llvmType(t)} noundef $r" }
+            } else {
+                argRegs.zip(argTypes).joinToString(", ") { (r, t) -> "${llvmType(t)} noundef $r" }
+            }
+            if (retLt == "void") {
+                emit("  call void @${ext.cSymbol}($argList)")
+                return "0"
+            }
+            val res = fresh("extcall")
+            emit("  $res = call $retLt @${ext.cSymbol}($argList)")
+            return res
+        }
+        // Special stdlib functions
+        when (fnName) {
+            "eprintln" -> {
+                val strReg = if (argRegs.isNotEmpty()) {
+                    val r = argRegs[0]; val t = argTypes.getOrElse(0) { Type.TStr }
+                    if (t == Type.TStr) r else convertToStr(r, t)
+                } else { stringConst("") }
+                emit("  call void @nv_eprintln(i8* $strReg)")
+                return "0"
+            }
+            "readLine" -> {
+                val res = fresh("rl"); emit("  $res = call i8* @nv_read_line()"); return res
+            }
+            "readAll" -> {
+                val res = fresh("ra"); emit("  $res = call i8* @nv_read_all()"); return res
+            }
+        }
+        // Regular user-defined function
         val mangledName = "@nv_$fnName"
-        // Determine return type from memberTypeMap or fall back to TUnknown
         val retLt = "i64"  // conservative default; proper typing done above
         val argList = argRegs.zip(argTypes).joinToString(", ") { (r, t) ->
             val lt = llvmType(t); "$lt noundef $r"
@@ -1528,6 +1875,14 @@ entry:
             emit("  $res = call i64 @nv_str_len(i8*$argReg)")
             return res
         }
+        // For arrays: length is stored in first 8 bytes of the array header
+        if (argType is Type.TArray) {
+            val lenPtr = fresh("lenptr")
+            emit("  $lenPtr = bitcast i8* $argReg to i64*")
+            val lenReg = fresh("arrlen")
+            emit("  $lenReg = load i64, i64* $lenPtr, align 8")
+            return lenReg
+        }
         return "0"
     }
 
@@ -1543,7 +1898,23 @@ entry:
             }
             expr.member == "str" -> convertToStr(receiverReg, receiverType)
             else -> {
-                // General member access — not fully supported in Phase 1.5
+                // Struct/record/class field access via GEP
+                val typeName = if (receiverType is Type.TNamed) receiverType.qualifiedName.substringAfterLast('.') else ""
+                val fields = if (typeName.isNotEmpty()) structLayouts[typeName] else null
+                if (fields != null && receiverType is Type.TNamed) {
+                    val fieldIdx = fields.indexOfFirst { it.first == expr.member }
+                    if (fieldIdx >= 0) {
+                        val fieldType = fields[fieldIdx].second
+                        val fieldLt = llvmType(fieldType)
+                        val castReg = fresh("sfcast")
+                        emit("  $castReg = bitcast i8* $receiverReg to %struct.$typeName*")
+                        val ptrReg = fresh("sfptr")
+                        emit("  $ptrReg = getelementptr %struct.$typeName, %struct.$typeName* $castReg, i32 0, i32 $fieldIdx")
+                        val loadReg = fresh("sfld")
+                        emit("  $loadReg = load $fieldLt, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
+                        return loadReg
+                    }
+                }
                 "0"
             }
         }
@@ -1643,16 +2014,32 @@ entry:
     }
 
     private fun emitArrayLiteral(expr: ArrayLiteralExpr): String {
-        // Phase 1.5: allocate a raw array via malloc
-        if (expr.elements.isEmpty()) return "null"
+        val count = expr.elements.size.toLong()
+        if (expr.elements.isEmpty()) {
+            // Alloc just the header (count=0)
+            val rawReg = fresh("arr.empty")
+            emit("  $rawReg = call i8* @malloc(i64 8)")
+            val hdrPtr = fresh("hdrptr")
+            emit("  $hdrPtr = bitcast i8* $rawReg to i64*")
+            emit("  store i64 0, i64* $hdrPtr, align 8")
+            return rawReg
+        }
         val elemType = typeOf(expr.elements[0])
         val elemLt   = llvmType(elemType)
         val elemSize = llvmTypeSize(elemLt)
-        val totalSize = elemSize * expr.elements.size
+        val dataSize = elemSize * expr.elements.size
+        val totalSize = 8 + dataSize  // 8-byte header for count
         val rawReg = fresh("arr.raw")
         emit("  $rawReg = call i8* @malloc(i64 $totalSize)")
+        // Store count in header
+        val hdrPtr = fresh("hdrptr")
+        emit("  $hdrPtr = bitcast i8* $rawReg to i64*")
+        emit("  store i64 $count, i64* $hdrPtr, align 8")
+        // Elements start at offset 8
+        val dataStart = fresh("arr.data")
+        emit("  $dataStart = getelementptr i8, i8* $rawReg, i64 8")
         val arrReg = fresh("arr")
-        emit("  $arrReg = bitcast i8* $rawReg to ${llvmPtrType(elemLt)}")
+        emit("  $arrReg = bitcast i8* $dataStart to ${llvmPtrType(elemLt)}")
         for ((i, elemExpr) in expr.elements.withIndex()) {
             val valReg   = emitExpr(elemExpr)
             val coerced  = coerceToType(valReg, typeOf(elemExpr), elemLt)
@@ -1660,10 +2047,8 @@ entry:
             emit("  $idxReg = getelementptr $elemLt, ${llvmPtrType(elemLt)} $arrReg, i64 $i")
             emit("  store $elemLt $coerced, ${llvmPtrType(elemLt)} $idxReg, align $elemSize")
         }
-        // Return as i8*
-        val retReg = fresh("arrret")
-        emit("  $retReg = bitcast ${llvmPtrType(elemLt)} $arrReg to i8*")
-        return retReg
+        // Return the header pointer (i8*)
+        return rawReg
     }
 
     private fun emitTupleLiteral(expr: TupleLiteralExpr): String {
@@ -1807,10 +2192,19 @@ entry:
             is Type.TStr   -> "i8"
             else           -> "i64"
         }
-        val castReg = fresh("idxcast")
-        emit("  $castReg = bitcast i8* $receiverReg to ${llvmPtrType(elemLt)}")
-        val ptrReg = fresh("idxptr")
         val idxI64 = if (idxArg.expr != null) coerceToI64(idxReg, typeOf(idxArg.expr!!)) else "0"
+        val castReg: String
+        if (receiverType is Type.TArray) {
+            // Skip the 8-byte count header
+            val dataPtr = fresh("arr.data")
+            emit("  $dataPtr = getelementptr i8, i8* $receiverReg, i64 8")
+            castReg = fresh("idxcast")
+            emit("  $castReg = bitcast i8* $dataPtr to ${llvmPtrType(elemLt)}")
+        } else {
+            castReg = fresh("idxcast")
+            emit("  $castReg = bitcast i8* $receiverReg to ${llvmPtrType(elemLt)}")
+        }
+        val ptrReg = fresh("idxptr")
         emit("  $ptrReg = getelementptr $elemLt, ${llvmPtrType(elemLt)} $castReg, i64 $idxI64")
         val res = fresh("idx")
         emit("  $res = load $elemLt, ${llvmPtrType(elemLt)} $ptrReg, align 1")

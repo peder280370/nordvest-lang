@@ -430,56 +430,98 @@ Milestone: M3 "Developer Experience"
     - All stdlib v2 modules have ≥ 80% test coverage.
 
 ────────────────────────────────────────────────────────────────────────────────
-  PHASE 4 — SELF-HOSTING
+  PHASE 4 — LANGUAGE COMPLETION
+  Goal: the language is fully usable; the stdlib is real; flagship programs exist
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M4 "First Real Programs"
+
+  Rationale: self-hosting was the original Phase 4 goal, but it is premature and
+  backwards. Self-hosting is a signal of language maturity, not a cause of it.
+  The stdlib is all stubs, Phase 2 codegen is incomplete, and no substantial
+  program has been written in Nordvest. Trying to port the compiler before those
+  problems are solved would mean implementing missing features to serve the
+  compiler rather than users, and maintaining two compiler implementations in
+  lockstep. The Kotlin bootstrap compiler is a solid, tested reference
+  implementation — it is not a liability. Phase 4 makes the language genuinely
+  usable; self-hosting is deferred to Phase 5 once that is true.
+
+  4.1  Implement the standard library in Nordvest
+       - The stdlib/std/*.nv files have signatures but no bodies. Implement:
+           std.collections  HashMap<K,V>, Set<T>, BTreeMap, Queue, Stack
+           std.string       trim, split, join, replace, parseFloat, parseInt, ...
+           std.iter         map, filter, reduce, zip, enumerate, flatten, take, ...
+           std.fs           read, write, readLines, exists, stat, walk
+           std.io           stdin/stdout/stderr, buffered readers/writers
+           std.math         sin/cos/tan/sqrt/log/floor/ceil/round/clamp/gcd/lcm
+           std.hash         Hash trait, FNV-1a, SipHash implementations
+           std.fmt          format!, sprintf-style formatting, padding, alignment
+       - Each module must have ≥ 80% test coverage using nv test.
+       - This is the most important deliverable: real programs need real stdlib.
+
+  4.2  Complete stub codegen for Phase 2 features
+       - async/await: emit actual coroutine frames (setjmp/longjmp or ucontext).
+       - Channels: nv_chan_send / nv_chan_recv backed by a real MPSC queue.
+       - Operator overloading: emit user-defined operator calls in LlvmIrEmitter.
+       - Lazy sequences / generators: emit state-machine frame per yield.
+       - for-in over Iterable types using the Iterator protocol.
+       - Struct layout: pack fields by alignment; emit typed GEP in IR.
+       - Reference counting: emit retain/release around class allocations;
+         weak/unowned pointer semantics in the runtime.
+
+  4.3  Write flagship example programs
+       - Three non-trivial programs that exercise the full language:
+           (a) nv-http: async HTTP/1.1 client using std.net, std.io, async/await
+           (b) nv-json: streaming JSON parser returning Result<T>, using std.string
+           (c) nv-bench: statistical benchmarking harness using std.stats, std.time
+       - These live in examples/ and are compiled and run in CI.
+       - Their purpose is to find design gaps that unit tests miss, and to serve
+         as canonical demonstrations of idiomatic Nordvest.
+
+  4.4  Harden the compiler and tooling
+       - Fuzzing: feed random/mutated .nv inputs; compiler must never segfault.
+       - Error message audit: every compile error has a source span and a
+         human-readable suggestion; no "internal error" leaks to the user.
+       - nv fmt round-trip: fmt(fmt(x)) == fmt(x) on 100% of the test corpus.
+       - LSP: completion and hover tested end-to-end in VS Code and Neovim.
+       - nv pkg install: resolve a real dependency graph (two packages, one
+         transitive dep) and build successfully.
+
+  Phase 4 success criteria:
+    - All stdlib modules listed in 4.1 compile and pass their own test suites.
+    - All three flagship programs compile and run correctly end-to-end.
+    - async/await, channels, operator overloading, and lazy sequences each
+      have at least one end-to-end integration test in the golden test suite.
+    - 0 open "UnsupportedFeature" codegen errors on the flagship programs.
+    - A new contributor can write a 100-line Nordvest program using only the
+      stdlib without hitting a stub or missing feature.
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 5 — SELF-HOSTING  (deferred; revisit after Phase 4)
   Goal: the Nordvest compiler is written in Nordvest
 ────────────────────────────────────────────────────────────────────────────────
 
-Milestone: M4 "Self-Hosting Compiler"
+  Prerequisite: Phase 4 complete; std.collections, std.string, std.fs, std.io,
+  std.hash all implemented and stable; all Phase 2 codegen features working.
 
-  Rationale: self-hosting is the ultimate proof of language expressiveness and
-  completeness. It also bootstraps the ecosystem — contributions to the compiler
-  can be made in Nordvest itself.
+  Rationale: once the language can write real programs without hitting missing
+  features, porting the compiler becomes natural rather than forced. The Kotlin
+  bootstrap compiler (K0) remains the trusted reference; the Nordvest compiler
+  only replaces it after passing 100% of K0's test suite.
 
-  4.1  Port the lexer from Kotlin to Nordvest
-       - Start with the simplest, most self-contained module.
-       - Use the Kotlin compiler to compile the Nordvest lexer; run its tests.
-
-  4.2  Port the parser
-       - The recursive-descent parser is well-suited to Nordvest's sealed/match
-         pattern; each production becomes a match arm.
-
-  4.3  Port the type checker and IR lowering
-       - The most complex step. Requires a mature std.collections (HashMap, Set,
-         sorted structures) and robust Result propagation throughout.
-       - The HIR/MIR data structures are naturally expressed as sealed classes.
-
-  4.4  Port the LLVM IR emitter
-       - Use @extern to call into LLVM C API from Nordvest.
-       - Or: emit textual LLVM IR (a string-manipulation task well-suited to
-         Nordvest's string interpolation).
-
-  4.5  Bootstrap sequence (the "chicken and egg" protocol)
-       - Stage 0: Kotlin compiler (K0) compiles Nordvest compiler source → nvcc0.
-       - Stage 1: nvcc0 compiles Nordvest compiler source → nvcc1.
-       - Stage 2: nvcc1 compiles Nordvest compiler source → nvcc2.
-       - Verify: nvcc1 and nvcc2 are bit-for-bit identical (Trusting Trust check).
-       - Archive K0 as the "bootstrap seed" — a small, auditable binary.
-
-  4.6  Drop the Kotlin compiler from the build path
-       - Update CI to use nvcc1 as the compiler for all subsequent builds.
-       - Keep K0 archived but not required for normal development.
-
-  4.7  Runtime rewrite in Nordvest (optional stretch goal)
-       - The C runtime support library can be rewritten in Nordvest + @c for
-         the parts that must be C (startup, longjmp, etc.).
-
-  Phase 4 success criteria:
-    - nv build compiler/main.nv (using a prior nv binary) produces a compiler
-      that passes 100% of the existing test suite.
-    - The self-hosted compiler's output is identical to the Kotlin compiler's
-      output for all programs in the test corpus.
-    - End-to-end: a fresh checkout with only the bootstrap seed can build the
-      full toolchain.
+  5.1  Port the lexer from Kotlin to Nordvest
+  5.2  Port the parser (sealed/match maps naturally to recursive-descent prods)
+  5.3  Port the type checker and IR lowering
+       - Requires mature std.collections and robust Result propagation.
+  5.4  Port the LLVM IR emitter
+       - Emit textual LLVM IR via string interpolation, or use @extern LLVM C API.
+  5.5  Bootstrap sequence
+       - K0 compiles Nordvest compiler source → nvcc0
+       - nvcc0 compiles it → nvcc1; nvcc1 compiles it → nvcc2
+       - nvcc1 and nvcc2 must pass identical test suites (not bit-for-bit IR,
+         which is brittle, but identical program behaviour).
+  5.6  Drop Kotlin from the build path; archive K0 as bootstrap seed.
+  5.7  Runtime rewrite in Nordvest (optional stretch goal).
 
 
 ================================================================================

@@ -8,9 +8,12 @@ pub fn println(value: str)
 
 /** Print to stderr. */
 pub fn eprintln(value: str)
+    eprintln(value)
 
 /** Read a line from stdin. Returns nil on EOF. */
 pub fn readLine() → str?
+    → readLine()
 
 /** Read all of stdin as a string. */
 pub fn readAll() → str
+    → readAll()

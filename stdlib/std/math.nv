@@ -4,25 +4,36 @@ pub let π: float = 3.141592653589793
 pub let e: float = 2.718281828459045
 pub let ∞: float = 1.0 / 0.0
 
-pub fn abs(x: float) → float
-pub fn sqrt(x: float) → float
-pub fn sin(x: float) → float
-pub fn cos(x: float) → float
-pub fn tan(x: float) → float
-pub fn asin(x: float) → float
-pub fn acos(x: float) → float
-pub fn atan(x: float) → float
-pub fn atan2(y: float, x: float) → float
-pub fn exp(x: float) → float
-pub fn log(x: float) → float
-pub fn log2(x: float) → float
-pub fn log10(x: float) → float
-pub fn ceil(x: float) → float
-pub fn floor(x: float) → float
-pub fn round(x: float) → float
-pub fn min(a: float, b: float) → float
-pub fn max(a: float, b: float) → float
-pub fn clamp(x: float, lo: float, hi: float) → float
+@extern pub fn sin(x: float) → float
+@extern pub fn cos(x: float) → float
+@extern pub fn tan(x: float) → float
+@extern pub fn asin(x: float) → float
+@extern pub fn acos(x: float) → float
+@extern pub fn atan(x: float) → float
+@extern pub fn atan2(y: float, x: float) → float
+@extern pub fn exp(x: float) → float
+@extern pub fn log(x: float) → float
+@extern pub fn log2(x: float) → float
+@extern pub fn log10(x: float) → float
+@extern pub fn ceil(x: float) → float
+@extern pub fn floor(x: float) → float
+@extern pub fn round(x: float) → float
+@extern pub fn sqrt(x: float) → float
+@extern pub fn hypot(x: float, y: float) → float
+
+@extern(fn: "fabs") pub fn abs(x: float) → float
+
 pub fn pow(base: float, exp: float) → float
-pub fn hypot(x: float, y: float) → float
+    → base ^ exp
+
+pub fn min(a: float, b: float) → float
+    → if a < b then a else b
+
+pub fn max(a: float, b: float) → float
+    → if a > b then a else b
+
+pub fn clamp(x: float, lo: float, hi: float) → float
+    → if x < lo then lo else if x > hi then hi else x
+
 pub fn sign(x: float) → float
+    → if x > 0.0 then 1.0 else if x < 0.0 then -1.0 else 0.0
