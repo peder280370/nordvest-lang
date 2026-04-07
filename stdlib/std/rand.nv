@@ -1,22 +1,8 @@
 module std.rand
 
-/** Seed the global random number generator. */
-pub fn seed(s: int)
-
-/** Generate a random float in [0, 1). */
-pub fn float() → float
-
-/** Generate a random integer in [min, max). */
-pub fn int(min: int, max: int) → int
-
-/** Generate a random boolean. */
-pub fn bool() → bool
-
-/** Shuffle a list in place. */
-pub fn shuffle<T>(list: [T]) → [T]
-
-/** Choose a random element from a list. */
-pub fn choice<T>(list: [T]) → T?
-
-/** Generate a random UUID v4 string. */
-pub fn uuid() → str
+@extern(fn: "nv_rand_seed")  pub fn seed(s: int)
+@extern(fn: "nv_rand_init")  pub fn init()
+@extern(fn: "nv_rand_float") pub fn float() → float
+@extern(fn: "nv_rand_int")   pub fn int(lo: int, hi: int) → int
+@extern(fn: "nv_rand_bool")  pub fn bool() → bool
+@extern(fn: "nv_rand_next")  pub fn next() → int

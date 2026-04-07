@@ -74,7 +74,21 @@ class LlvmIrEmitter(
         // Phase 5.3 — file I/O
         "nv_file_open", "nv_file_open_read", "nv_file_open_write", "nv_file_open_append",
         "nv_file_close", "nv_file_write", "nv_file_writeln",
-        "nv_file_read_line", "nv_file_read_all", "nv_file_exists", "nv_file_is_null"
+        "nv_file_read_line", "nv_file_read_all", "nv_file_exists", "nv_file_is_null",
+        // Phase 5.4 — std.fs
+        "nv_fs_exists", "nv_fs_is_dir", "nv_fs_is_file",
+        "nv_fs_mkdir", "nv_fs_rm", "nv_fs_rename",
+        "nv_fs_read_text", "nv_fs_write_text", "nv_fs_append_text",
+        "nv_fs_join_path", "nv_fs_parent_dir", "nv_fs_file_name", "nv_fs_file_ext",
+        "nv_fs_cwd", "nv_fs_chdir",
+        // Phase 5.4 — std.time
+        "nv_time_now_ms", "nv_time_now_float", "nv_time_monotonic_ns", "nv_time_sleep_ms",
+        // Phase 5.4 — std.process
+        "nv_process_getenv", "nv_process_setenv", "nv_process_exit",
+        "nv_process_pid", "nv_process_cwd", "nv_process_chdir", "nv_process_capture",
+        // Phase 5.4 — std.rand
+        "nv_rand_seed", "nv_rand_init", "nv_rand_next",
+        "nv_rand_float", "nv_rand_int", "nv_rand_bool"
     )
 
     // ── Struct layout registry (name → ordered list of field name+type) ──
@@ -201,6 +215,8 @@ class LlvmIrEmitter(
 @.str.mode_r = private unnamed_addr constant [2 x i8]  c"r\00", align 1
 @.str.mode_w = private unnamed_addr constant [2 x i8]  c"w\00", align 1
 @.str.mode_a = private unnamed_addr constant [2 x i8]  c"a\00", align 1
+@.str.p5_fsjoin = private unnamed_addr constant [6 x i8] c"%s/%s\00", align 1
+@nv_rand_state  = global i64 6364136223846793005, align 8
 """.trimIndent())
     }
 
@@ -267,6 +283,23 @@ declare i32    @fputs(i8*, i8*)
 declare i32    @fputc(i32, i8*)
 declare i32    @fflush(i8*)
 declare i32    @access(i8*, i32)
+declare i8*  @strrchr(i8*, i32)
+declare i8*  @memcpy(i8* noalias, i8* noalias, i64)
+declare i8*  @opendir(i8*)
+declare i32  @closedir(i8*)
+declare i32  @unlink(i8*)
+declare i32  @rmdir(i8*)
+declare i32  @mkdir(i8*, i32)
+declare i32  @rename(i8*, i8*)
+declare i8*  @getcwd(i8*, i64)
+declare i32  @chdir(i8*)
+declare i32  @clock_gettime(i32, i8*)
+declare i32  @nanosleep(i8*, i8*)
+declare i8*  @getenv(i8*)
+declare i32  @setenv(i8*, i8*, i32)
+declare i32  @getpid()
+declare i8*  @popen(i8*, i8*)
+declare i32  @pclose(i8*)
 """.trimIndent())
     }
 
@@ -527,6 +560,10 @@ entry:
         emitPhase5StringRuntime()
         emitPhase5CollectionsRuntime()
         emitPhase5IoRuntime()
+        emitPhase5FsRuntime()
+        emitPhase5TimeRuntime()
+        emitPhase5ProcessRuntime()
+        emitPhase5RandRuntime()
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1462,6 +1499,475 @@ entry:
 define i1 @nv_file_is_null(i8* %file) {
 entry:
   %r = icmp eq i8* %file, null
+  ret i1 %r
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase5FsRuntime() {
+        rtFns.appendLine("""
+; ── Phase 5.4: std.fs ────────────────────────────────────────────────────────
+
+; nv_fs_exists(path) → i1
+define i1 @nv_fs_exists(i8* %path) {
+entry:
+  %r = call i32 @access(i8* %path, i32 0)
+  %e = icmp eq i32 %r, 0
+  ret i1 %e
+}
+
+; nv_fs_is_dir(path) → i1
+define i1 @nv_fs_is_dir(i8* %path) {
+entry:
+  %d = call i8* @opendir(i8* %path)
+  %nn = icmp ne i8* %d, null
+  br i1 %nn, label %yes, label %no
+yes:
+  call i32 @closedir(i8* %d)
+  ret i1 1
+no:
+  ret i1 0
+}
+
+; nv_fs_is_file(path) → i1
+define i1 @nv_fs_is_file(i8* %path) {
+entry:
+  %e = call i32 @access(i8* %path, i32 0)
+  %ex = icmp eq i32 %e, 0
+  br i1 %ex, label %chkdir, label %no
+chkdir:
+  %d = call i8* @opendir(i8* %path)
+  %isdir = icmp ne i8* %d, null
+  br i1 %isdir, label %isdir_yes, label %yes
+isdir_yes:
+  call i32 @closedir(i8* %d)
+  ret i1 0
+yes:
+  ret i1 1
+no:
+  ret i1 0
+}
+
+; nv_fs_mkdir(path) → i64
+define i64 @nv_fs_mkdir(i8* %path) {
+entry:
+  %r = call i32 @mkdir(i8* %path, i32 493)
+  %r64 = sext i32 %r to i64
+  ret i64 %r64
+}
+
+; nv_fs_rm(path) → i64
+define i64 @nv_fs_rm(i8* %path) {
+entry:
+  %r = call i32 @unlink(i8* %path)
+  %ok = icmp eq i32 %r, 0
+  br i1 %ok, label %done, label %try_dir
+try_dir:
+  %r2 = call i32 @rmdir(i8* %path)
+  %r2_64 = sext i32 %r2 to i64
+  ret i64 %r2_64
+done:
+  ret i64 0
+}
+
+; nv_fs_rename(src, dst) → i64
+define i64 @nv_fs_rename(i8* %src, i8* %dst) {
+entry:
+  %r = call i32 @rename(i8* %src, i8* %dst)
+  %r64 = sext i32 %r to i64
+  ret i64 %r64
+}
+
+; nv_fs_read_text(path) → i8*  (null on error; caller must free)
+define i8* @nv_fs_read_text(i8* %path) {
+entry:
+  %mode = getelementptr [2 x i8], [2 x i8]* @.str.mode_r, i64 0, i64 0
+  %f = call i8* @fopen(i8* %path, i8* %mode)
+  %isnull = icmp eq i8* %f, null
+  br i1 %isnull, label %fail, label %read
+read:
+  %buf = call i8* @malloc(i64 65536)
+  %lenp = alloca i64, align 8
+  store i64 0, i64* %lenp, align 8
+  br label %frtloop
+frtloop:
+  %l = load i64, i64* %lenp, align 8
+  %toobig = icmp sge i64 %l, 65535
+  br i1 %toobig, label %frtdone, label %frtrd
+frtrd:
+  %rem = sub i64 65535, %l
+  %dp = getelementptr i8, i8* %buf, i64 %l
+  %n = call i64 @fread(i8* %dp, i64 1, i64 %rem, i8* %f)
+  %z = icmp eq i64 %n, 0
+  br i1 %z, label %frtdone, label %frtupd
+frtupd:
+  %l2 = add i64 %l, %n
+  store i64 %l2, i64* %lenp, align 8
+  br label %frtloop
+frtdone:
+  %lf = load i64, i64* %lenp, align 8
+  %tp = getelementptr i8, i8* %buf, i64 %lf
+  store i8 0, i8* %tp, align 1
+  call i32 @fclose(i8* %f)
+  ret i8* %buf
+fail:
+  ret i8* null
+}
+
+; nv_fs_write_text(path, text)
+define void @nv_fs_write_text(i8* %path, i8* %text) {
+entry:
+  %mode = getelementptr [2 x i8], [2 x i8]* @.str.mode_w, i64 0, i64 0
+  %f = call i8* @fopen(i8* %path, i8* %mode)
+  %isnull = icmp eq i8* %f, null
+  br i1 %isnull, label %done, label %write
+write:
+  call i32 @fputs(i8* %text, i8* %f)
+  call i32 @fclose(i8* %f)
+  ret void
+done:
+  ret void
+}
+
+; nv_fs_append_text(path, text)
+define void @nv_fs_append_text(i8* %path, i8* %text) {
+entry:
+  %mode = getelementptr [2 x i8], [2 x i8]* @.str.mode_a, i64 0, i64 0
+  %f = call i8* @fopen(i8* %path, i8* %mode)
+  %isnull = icmp eq i8* %f, null
+  br i1 %isnull, label %done, label %write
+write:
+  call i32 @fputs(i8* %text, i8* %f)
+  call i32 @fclose(i8* %f)
+  ret void
+done:
+  ret void
+}
+
+; nv_fs_join_path(base, part) → i8*
+define i8* @nv_fs_join_path(i8* %base, i8* %part) {
+entry:
+  %blen = call i64 @strlen(i8* %base)
+  %plen = call i64 @strlen(i8* %part)
+  %tot = add i64 %blen, %plen
+  %sz = add i64 %tot, 3
+  %buf = call i8* @malloc(i64 %sz)
+  %fmt = getelementptr [6 x i8], [6 x i8]* @.str.p5_fsjoin, i64 0, i64 0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 %sz, i8* %fmt, i8* %base, i8* %part)
+  ret i8* %buf
+}
+
+; nv_fs_parent_dir(path) → i8*
+define i8* @nv_fs_parent_dir(i8* %path) {
+entry:
+  %slash = call i8* @strrchr(i8* %path, i32 47)
+  %isnull = icmp eq i8* %slash, null
+  br i1 %isnull, label %ret_dot, label %compute
+compute:
+  %pi = ptrtoint i8* %path to i64
+  %si = ptrtoint i8* %slash to i64
+  %off = sub i64 %si, %pi
+  %isroot = icmp eq i64 %off, 0
+  br i1 %isroot, label %ret_root, label %ret_parent
+ret_root:
+  %rbuf = call i8* @malloc(i64 2)
+  store i8 47, i8* %rbuf, align 1
+  %rnp = getelementptr i8, i8* %rbuf, i64 1
+  store i8 0, i8* %rnp, align 1
+  ret i8* %rbuf
+ret_parent:
+  %sz = add i64 %off, 1
+  %buf = call i8* @malloc(i64 %sz)
+  call i8* @memcpy(i8* %buf, i8* %path, i64 %off)
+  %np = getelementptr i8, i8* %buf, i64 %off
+  store i8 0, i8* %np, align 1
+  ret i8* %buf
+ret_dot:
+  %dbuf = call i8* @malloc(i64 2)
+  store i8 46, i8* %dbuf, align 1
+  %dnp = getelementptr i8, i8* %dbuf, i64 1
+  store i8 0, i8* %dnp, align 1
+  ret i8* %dbuf
+}
+
+; nv_fs_file_name(path) → i8*  (pointer into path, no alloc)
+define i8* @nv_fs_file_name(i8* %path) {
+entry:
+  %slash = call i8* @strrchr(i8* %path, i32 47)
+  %isnull = icmp eq i8* %slash, null
+  br i1 %isnull, label %ret_path, label %ret_after
+ret_path:
+  ret i8* %path
+ret_after:
+  %next = getelementptr i8, i8* %slash, i64 1
+  ret i8* %next
+}
+
+; nv_fs_file_ext(path) → i8*  (pointer into path, no alloc; empty str if no ext)
+define i8* @nv_fs_file_ext(i8* %path) {
+entry:
+  %name = call i8* @nv_fs_file_name(i8* %path)
+  %dot = call i8* @strrchr(i8* %name, i32 46)
+  %isnull = icmp eq i8* %dot, null
+  br i1 %isnull, label %ret_empty, label %ret_ext
+ret_empty:
+  %ebuf = call i8* @malloc(i64 1)
+  store i8 0, i8* %ebuf, align 1
+  ret i8* %ebuf
+ret_ext:
+  %next = getelementptr i8, i8* %dot, i64 1
+  ret i8* %next
+}
+
+; nv_fs_cwd() → i8*
+define i8* @nv_fs_cwd() {
+entry:
+  %buf = call i8* @malloc(i64 4096)
+  %r = call i8* @getcwd(i8* %buf, i64 4096)
+  %isnull = icmp eq i8* %r, null
+  br i1 %isnull, label %fail, label %ok
+ok:
+  ret i8* %buf
+fail:
+  store i8 0, i8* %buf, align 1
+  ret i8* %buf
+}
+
+; nv_fs_chdir(path) → i64
+define i64 @nv_fs_chdir(i8* %path) {
+entry:
+  %r = call i32 @chdir(i8* %path)
+  %r64 = sext i32 %r to i64
+  ret i64 %r64
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase5TimeRuntime() {
+        rtFns.appendLine("""
+; ── Phase 5.4: std.time ──────────────────────────────────────────────────────
+
+; nv_time_now_ms() → i64  (milliseconds since epoch via CLOCK_REALTIME=0)
+define i64 @nv_time_now_ms() {
+entry:
+  %ts = alloca [16 x i8], align 8
+  %tsp = bitcast [16 x i8]* %ts to i8*
+  call i32 @clock_gettime(i32 0, i8* %tsp)
+  %secp = bitcast [16 x i8]* %ts to i64*
+  %nsecp = getelementptr i64, i64* %secp, i64 1
+  %sec = load i64, i64* %secp, align 8
+  %nsec = load i64, i64* %nsecp, align 8
+  %sec_ms = mul i64 %sec, 1000
+  %ns_ms = sdiv i64 %nsec, 1000000
+  %ms = add i64 %sec_ms, %ns_ms
+  ret i64 %ms
+}
+
+; nv_time_now_float() → double  (seconds since epoch as float)
+define double @nv_time_now_float() {
+entry:
+  %ms = call i64 @nv_time_now_ms()
+  %f = sitofp i64 %ms to double
+  %r = fdiv double %f, 1000.0
+  ret double %r
+}
+
+; nv_time_monotonic_ns() → i64  (CLOCK_REALTIME=0 used for portability)
+define i64 @nv_time_monotonic_ns() {
+entry:
+  %ts = alloca [16 x i8], align 8
+  %tsp = bitcast [16 x i8]* %ts to i8*
+  call i32 @clock_gettime(i32 0, i8* %tsp)
+  %secp = bitcast [16 x i8]* %ts to i64*
+  %nsecp = getelementptr i64, i64* %secp, i64 1
+  %sec = load i64, i64* %secp, align 8
+  %nsec = load i64, i64* %nsecp, align 8
+  %sec_ns = mul i64 %sec, 1000000000
+  %ns = add i64 %sec_ns, %nsec
+  ret i64 %ns
+}
+
+; nv_time_sleep_ms(ms)
+define void @nv_time_sleep_ms(i64 %ms) {
+entry:
+  %ts = alloca [16 x i8], align 8
+  %tsp = bitcast [16 x i8]* %ts to i8*
+  %secp = bitcast [16 x i8]* %ts to i64*
+  %nsecp = getelementptr i64, i64* %secp, i64 1
+  %sec = sdiv i64 %ms, 1000
+  %rem = srem i64 %ms, 1000
+  %nsec = mul i64 %rem, 1000000
+  store i64 %sec, i64* %secp, align 8
+  store i64 %nsec, i64* %nsecp, align 8
+  call i32 @nanosleep(i8* %tsp, i8* null)
+  ret void
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase5ProcessRuntime() {
+        rtFns.appendLine("""
+; ── Phase 5.4: std.process ───────────────────────────────────────────────────
+
+; nv_process_getenv(name) → i8*  (null if not set)
+define i8* @nv_process_getenv(i8* %name) {
+entry:
+  %r = call i8* @getenv(i8* %name)
+  ret i8* %r
+}
+
+; nv_process_setenv(name, value)
+define void @nv_process_setenv(i8* %name, i8* %value) {
+entry:
+  call i32 @setenv(i8* %name, i8* %value, i32 1)
+  ret void
+}
+
+; nv_process_exit(code: i64)
+define void @nv_process_exit(i64 %code) {
+entry:
+  %c = trunc i64 %code to i32
+  call void @exit(i32 %c)
+  unreachable
+}
+
+; nv_process_pid() → i64
+define i64 @nv_process_pid() {
+entry:
+  %r = call i32 @getpid()
+  %r64 = sext i32 %r to i64
+  ret i64 %r64
+}
+
+; nv_process_cwd() → i8*
+define i8* @nv_process_cwd() {
+entry:
+  %r = call i8* @nv_fs_cwd()
+  ret i8* %r
+}
+
+; nv_process_chdir(path) → i64
+define i64 @nv_process_chdir(i8* %path) {
+entry:
+  %r = call i32 @chdir(i8* %path)
+  %r64 = sext i32 %r to i64
+  ret i64 %r64
+}
+
+; nv_process_capture(cmd) → i8*  (stdout of cmd via popen; empty str on failure)
+define i8* @nv_process_capture(i8* %cmd) {
+entry:
+  %mode = getelementptr [2 x i8], [2 x i8]* @.str.mode_r, i64 0, i64 0
+  %f = call i8* @popen(i8* %cmd, i8* %mode)
+  %isnull = icmp eq i8* %f, null
+  br i1 %isnull, label %fail, label %read
+read:
+  %buf = call i8* @malloc(i64 65536)
+  %lenp = alloca i64, align 8
+  store i64 0, i64* %lenp, align 8
+  br label %pcloop
+pcloop:
+  %l = load i64, i64* %lenp, align 8
+  %toobig = icmp sge i64 %l, 65535
+  br i1 %toobig, label %pcdone, label %pcrd
+pcrd:
+  %rem = sub i64 65535, %l
+  %dp = getelementptr i8, i8* %buf, i64 %l
+  %n = call i64 @fread(i8* %dp, i64 1, i64 %rem, i8* %f)
+  %z = icmp eq i64 %n, 0
+  br i1 %z, label %pcdone, label %pcupd
+pcupd:
+  %l2 = add i64 %l, %n
+  store i64 %l2, i64* %lenp, align 8
+  br label %pcloop
+pcdone:
+  %lf = load i64, i64* %lenp, align 8
+  %tp = getelementptr i8, i8* %buf, i64 %lf
+  store i8 0, i8* %tp, align 1
+  call i32 @pclose(i8* %f)
+  ret i8* %buf
+fail:
+  %ebuf = call i8* @malloc(i64 1)
+  store i8 0, i8* %ebuf, align 1
+  ret i8* %ebuf
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase5RandRuntime() {
+        rtFns.appendLine("""
+; ── Phase 5.4: std.rand (xorshift64) ────────────────────────────────────────
+
+; nv_rand_seed(seed)
+define void @nv_rand_seed(i64 %seed) {
+entry:
+  %z = icmp eq i64 %seed, 0
+  %ns = select i1 %z, i64 6364136223846793005, i64 %seed
+  store i64 %ns, i64* @nv_rand_state, align 8
+  ret void
+}
+
+; nv_rand_next() → i64  (xorshift64)
+define i64 @nv_rand_next() {
+entry:
+  %s = load i64, i64* @nv_rand_state, align 8
+  %s1 = shl i64 %s, 13
+  %s2 = xor i64 %s, %s1
+  %s3 = lshr i64 %s2, 7
+  %s4 = xor i64 %s2, %s3
+  %s5 = shl i64 %s4, 17
+  %s6 = xor i64 %s4, %s5
+  store i64 %s6, i64* @nv_rand_state, align 8
+  ret i64 %s6
+}
+
+; nv_rand_init()  — seed from clock
+define void @nv_rand_init() {
+entry:
+  %ts = alloca [16 x i8], align 8
+  %tsp = bitcast [16 x i8]* %ts to i8*
+  call i32 @clock_gettime(i32 0, i8* %tsp)
+  %secp = bitcast [16 x i8]* %ts to i64*
+  %nsecp = getelementptr i64, i64* %secp, i64 1
+  %sec = load i64, i64* %secp, align 8
+  %nsec = load i64, i64* %nsecp, align 8
+  %seed = xor i64 %sec, %nsec
+  call void @nv_rand_seed(i64 %seed)
+  ret void
+}
+
+; nv_rand_float() → double  [0.0, 1.0)
+define double @nv_rand_float() {
+entry:
+  %n = call i64 @nv_rand_next()
+  %m = lshr i64 %n, 11
+  %f = uitofp i64 %m to double
+  %r = fdiv double %f, 9007199254740992.0
+  ret double %r
+}
+
+; nv_rand_int(lo, hi) → i64  [lo, hi)
+define i64 @nv_rand_int(i64 %lo, i64 %hi) {
+entry:
+  %n = call i64 @nv_rand_next()
+  %range = sub i64 %hi, %lo
+  %pos_range = icmp sgt i64 %range, 0
+  br i1 %pos_range, label %ok, label %ret_lo
+ok:
+  %range_u = bitcast i64 %range to i64
+  %mod = urem i64 %n, %range_u
+  %res = add i64 %mod, %lo
+  ret i64 %res
+ret_lo:
+  ret i64 %lo
+}
+
+; nv_rand_bool() → i1
+define i1 @nv_rand_bool() {
+entry:
+  %n = call i64 @nv_rand_next()
+  %b = and i64 %n, 1
+  %r = icmp eq i64 %b, 1
   ret i1 %r
 }
 """.trimIndent())

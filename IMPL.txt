@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.3 DONE)
-  Next: PHASE 5.4 (std.fs, std.time, std.process, std.rand) or PHASE 6 (IDE plugins)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.4 DONE)
+  Next: PHASE 5.5 (RC reference counting) or PHASE 6 (IDE plugins)
 
   All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
   - Parser: class body made optional (struct already was); annotation arg parser
@@ -472,11 +472,24 @@
                  declare+define for the same function in the same module)
                - Total tests: 674 passing (593 prior + ~30 Phase4 + ~51 Phase5Test)
 
-  [TODO]  5.4  std.fs, std.time, std.process, std.rand
-               - std.fs: Path type, exists/isFile/isDir/mkdir/rm/rename/readText/writeText
-               - std.time: clock_gettime @extern; Duration, Instant, sleep
-               - std.process: argv, env, exit, subprocess spawn
-               - std.rand: PCG seeded from /dev/urandom or clock
+  [DONE]  5.4  std.fs, std.time, std.process, std.rand — real implementation
+               - std.fs: exists/isFile/isDir/mkdir/rm/rename/readText/writeText/appendText
+                 joinPath/parentDir/fileName/fileExt/cwd/chdir — all as @extern bindings
+                 to inline LLVM IR runtime functions (nv_fs_*) in emitPhase5FsRuntime()
+               - std.time: nowMs/now/monotonicNs/sleepMs via clock_gettime/nanosleep
+                 in emitPhase5TimeRuntime()
+               - std.process: env/setEnv/exit/pid/cwd/chdir/capture via getenv/setenv/
+                 getpid/popen/pclose in emitPhase5ProcessRuntime(); exit uses i64→i32 trunc
+               - std.rand: xorshift64 PRNG (seed/init/next/float/int/bool) with global
+                 @nv_rand_state; seeded from clock_gettime in emitPhase5RandRuntime()
+               - inlineRuntimeFns set updated with all 5.4 function names to prevent
+                 duplicate declare+define when @extern annotations are used
+               - Return types corrected: nv_fs_mkdir/rm/rename/chdir/nv_process_chdir
+                 return i64 (Nordvest int) via sext from i32 libc return values
+               - New libc declares: strrchr, memcpy, opendir, closedir, unlink, rmdir,
+                 mkdir, rename, getcwd, chdir, clock_gettime, nanosleep, getenv, setenv,
+                 getpid, popen, pclose
+               - Total tests: 710 passing (674 prior + 36 new Phase5Test 5.4 tests)
 
   [TODO]  5.5  RC (reference counting) — real implementation
                - nv_rc_retain/nv_rc_release: atomic refcount in heap header

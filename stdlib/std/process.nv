@@ -1,31 +1,9 @@
 module std.process
 
-/** Get a command-line argument by index. */
-pub fn arg(index: int) → str?
-
-/** Get all command-line arguments. */
-pub fn args() → [str]
-
-/** Get an environment variable value. */
-pub fn env(name: str) → str?
-
-/** Set an environment variable. */
-pub fn setEnv(name: str, value: str)
-
-/** Exit the process with the given exit code. */
-pub fn exit(code: int)
-
-/** Get the current process ID. */
-pub fn pid() → int
-
-/** Run a subprocess and return its exit code. */
-pub fn run(cmd: str, args: [str]) throws ProcessError → int
-
-/** Run a subprocess and capture stdout as a string. */
-pub fn capture(cmd: str, args: [str]) throws ProcessError → str
-
-/** Get the current working directory. */
-pub fn cwd() → str
-
-/** Change the current working directory. */
-pub fn chdir(path: str) throws ProcessError
+@extern(fn: "nv_process_getenv")  pub fn env(name: str) → str?
+@extern(fn: "nv_process_setenv")  pub fn setEnv(name: str, value: str)
+@extern(fn: "nv_process_exit")    pub fn exit(code: int)
+@extern(fn: "nv_process_pid")     pub fn pid() → int
+@extern(fn: "nv_process_cwd")     pub fn cwd() → str
+@extern(fn: "nv_process_chdir")   pub fn chdir(path: str) → int
+@extern(fn: "nv_process_capture") pub fn capture(cmd: str) → str

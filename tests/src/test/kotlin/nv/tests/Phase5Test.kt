@@ -425,4 +425,279 @@ class Phase5Test {
         val out = runProgram(ir)
         assertEquals("hello from nordvest", out)
     }
+
+    // ── 5.4 std.fs: stdlib file ───────────────────────────────────────────
+    @Test fun `stdlib fs module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/fs.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_fs_exists"),    "missing nv_fs_exists @extern")
+        assertTrue(c.contains("nv_fs_is_file"),   "missing nv_fs_is_file @extern")
+        assertTrue(c.contains("nv_fs_is_dir"),    "missing nv_fs_is_dir @extern")
+        assertTrue(c.contains("nv_fs_mkdir"),     "missing nv_fs_mkdir @extern")
+        assertTrue(c.contains("nv_fs_rm"),        "missing nv_fs_rm @extern")
+        assertTrue(c.contains("nv_fs_rename"),    "missing nv_fs_rename @extern")
+        assertTrue(c.contains("nv_fs_read_text"), "missing nv_fs_read_text @extern")
+        assertTrue(c.contains("nv_fs_write_text"),"missing nv_fs_write_text @extern")
+        assertTrue(c.contains("nv_fs_join_path"), "missing nv_fs_join_path @extern")
+    }
+
+    @Test fun `phase5 fs runtime functions are emitted in IR`() {
+        val ir = compileOk("module test\nfn main()\n    println(\"ok\")")
+        assertTrue(ir.contains("define i1 @nv_fs_exists"),      "nv_fs_exists missing")
+        assertTrue(ir.contains("define i1 @nv_fs_is_dir"),      "nv_fs_is_dir missing")
+        assertTrue(ir.contains("define i1 @nv_fs_is_file"),     "nv_fs_is_file missing")
+        assertTrue(ir.contains("define i64 @nv_fs_mkdir"),      "nv_fs_mkdir missing")
+        assertTrue(ir.contains("define i64 @nv_fs_rm"),         "nv_fs_rm missing")
+        assertTrue(ir.contains("define i8* @nv_fs_read_text"),  "nv_fs_read_text missing")
+        assertTrue(ir.contains("define void @nv_fs_write_text"),"nv_fs_write_text missing")
+        assertTrue(ir.contains("define i8* @nv_fs_join_path"),  "nv_fs_join_path missing")
+        assertTrue(ir.contains("define i8* @nv_fs_parent_dir"), "nv_fs_parent_dir missing")
+        assertTrue(ir.contains("define i8* @nv_fs_file_name"),  "nv_fs_file_name missing")
+        assertTrue(ir.contains("define i8* @nv_fs_file_ext"),   "nv_fs_file_ext missing")
+        assertTrue(ir.contains("@opendir"),  "opendir not declared")
+        assertTrue(ir.contains("@closedir"), "closedir not declared")
+        assertTrue(ir.contains("@unlink"),   "unlink not declared")
+        assertTrue(ir.contains("@mkdir"),    "mkdir not declared")
+        assertTrue(ir.contains("@rename"),   "rename not declared")
+        assertTrue(ir.contains("@getcwd"),   "getcwd not declared")
+        assertTrue(ir.contains("@strrchr"),  "strrchr not declared")
+    }
+
+    @Test fun `fs exists and isDir run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fs_exists") pub fn fsExists(path: str) → bool
+            @extern(fn: "nv_fs_is_dir") pub fn fsIsDir(path: str) → bool
+            @extern(fn: "nv_fs_is_file") pub fn fsIsFile(path: str) → bool
+            fn main()
+                if fsExists("/tmp")
+                    println("tmp exists")
+                if fsIsDir("/tmp")
+                    println("tmp is dir")
+                if fsIsFile("/tmp")
+                    println("tmp is file")
+                else
+                    println("tmp not file")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("tmp exists\ntmp is dir\ntmp not file", out)
+    }
+
+    @Test fun `fs write read rename rm run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fs_write_text") pub fn fsWrite(path: str, text: str)
+            @extern(fn: "nv_fs_read_text")  pub fn fsRead(path: str) → str?
+            @extern(fn: "nv_fs_rename")     pub fn fsRename(src: str, dst: str) → int
+            @extern(fn: "nv_fs_rm")         pub fn fsRm(path: str) → int
+            @extern(fn: "nv_fs_exists")     pub fn fsExists(path: str) → bool
+            fn main()
+                let p1 = "/tmp/nv_p54_a.txt"
+                let p2 = "/tmp/nv_p54_b.txt"
+                fsWrite(p1, "hello 54")
+                let c = fsRead(p1)
+                if let s = c
+                    println(s)
+                fsRename(p1, p2)
+                if fsExists(p2)
+                    println("renamed ok")
+                fsRm(p2)
+                if fsExists(p2)
+                    println("still exists")
+                else
+                    println("deleted ok")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("hello 54\nrenamed ok\ndeleted ok", out)
+    }
+
+    @Test fun `fs joinPath parentDir fileName fileExt run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fs_join_path")  pub fn fsJoin(base: str, part: str) → str
+            @extern(fn: "nv_fs_parent_dir") pub fn fsParent(path: str) → str
+            @extern(fn: "nv_fs_file_name")  pub fn fsName(path: str) → str
+            @extern(fn: "nv_fs_file_ext")   pub fn fsExt(path: str) → str
+            fn main()
+                println(fsJoin("/tmp", "test.txt"))
+                println(fsParent("/tmp/test.txt"))
+                println(fsName("/tmp/test.txt"))
+                println(fsExt("/tmp/test.txt"))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("/tmp/test.txt\n/tmp\ntest.txt\ntxt", out)
+    }
+
+    // ── 5.4 std.time: stdlib file ─────────────────────────────────────────
+    @Test fun `stdlib time module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/time.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_time_now_ms"),       "missing nv_time_now_ms @extern")
+        assertTrue(c.contains("nv_time_monotonic_ns"), "missing nv_time_monotonic_ns @extern")
+        assertTrue(c.contains("nv_time_sleep_ms"),     "missing nv_time_sleep_ms @extern")
+    }
+
+    @Test fun `phase5 time runtime functions are emitted in IR`() {
+        val ir = compileOk("module test\nfn main()\n    println(\"ok\")")
+        assertTrue(ir.contains("define i64 @nv_time_now_ms"),       "nv_time_now_ms missing")
+        assertTrue(ir.contains("define double @nv_time_now_float"), "nv_time_now_float missing")
+        assertTrue(ir.contains("define i64 @nv_time_monotonic_ns"), "nv_time_monotonic_ns missing")
+        assertTrue(ir.contains("define void @nv_time_sleep_ms"),    "nv_time_sleep_ms missing")
+        assertTrue(ir.contains("@clock_gettime"), "clock_gettime not declared")
+        assertTrue(ir.contains("@nanosleep"),     "nanosleep not declared")
+    }
+
+    @Test fun `time nowMs runs and returns positive value`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_time_now_ms") pub fn timeNowMs() → int
+            fn main()
+                let t = timeNowMs()
+                if t > 0
+                    println("positive")
+                else
+                    println("non-positive")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("positive", out)
+    }
+
+    // ── 5.4 std.process: stdlib file ──────────────────────────────────────
+    @Test fun `stdlib process module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/process.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_process_getenv"),  "missing nv_process_getenv @extern")
+        assertTrue(c.contains("nv_process_setenv"),  "missing nv_process_setenv @extern")
+        assertTrue(c.contains("nv_process_exit"),    "missing nv_process_exit @extern")
+        assertTrue(c.contains("nv_process_pid"),     "missing nv_process_pid @extern")
+        assertTrue(c.contains("nv_process_capture"), "missing nv_process_capture @extern")
+    }
+
+    @Test fun `phase5 process runtime functions are emitted in IR`() {
+        val ir = compileOk("module test\nfn main()\n    println(\"ok\")")
+        assertTrue(ir.contains("define i8* @nv_process_getenv"),  "nv_process_getenv missing")
+        assertTrue(ir.contains("define void @nv_process_setenv"), "nv_process_setenv missing")
+        assertTrue(ir.contains("define void @nv_process_exit"),   "nv_process_exit missing")
+        assertTrue(ir.contains("define i64 @nv_process_pid"),     "nv_process_pid missing")
+        assertTrue(ir.contains("define i8* @nv_process_capture"), "nv_process_capture missing")
+        assertTrue(ir.contains("@getenv"),  "getenv not declared")
+        assertTrue(ir.contains("@setenv"),  "setenv not declared")
+        assertTrue(ir.contains("@getpid"),  "getpid not declared")
+        assertTrue(ir.contains("@popen"),   "popen not declared")
+        assertTrue(ir.contains("@pclose"),  "pclose not declared")
+    }
+
+    @Test fun `process getenv setenv run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_process_getenv") pub fn procGetenv(name: str) → str?
+            @extern(fn: "nv_process_setenv") pub fn procSetenv(name: str, value: str)
+            fn main()
+                procSetenv("NV_TEST_VAR", "hello")
+                let v = procGetenv("NV_TEST_VAR")
+                if let s = v
+                    println(s)
+                else
+                    println("not found")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("hello", out)
+    }
+
+    @Test fun `process pid returns positive`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_process_pid") pub fn procPid() → int
+            fn main()
+                let p = procPid()
+                if p > 0
+                    println("positive pid")
+                else
+                    println("bad pid")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("positive pid", out)
+    }
+
+    // ── 5.4 std.rand: stdlib file ─────────────────────────────────────────
+    @Test fun `stdlib rand module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/rand.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_rand_seed"),  "missing nv_rand_seed @extern")
+        assertTrue(c.contains("nv_rand_float"), "missing nv_rand_float @extern")
+        assertTrue(c.contains("nv_rand_int"),   "missing nv_rand_int @extern")
+        assertTrue(c.contains("nv_rand_bool"),  "missing nv_rand_bool @extern")
+    }
+
+    @Test fun `phase5 rand runtime functions are emitted in IR`() {
+        val ir = compileOk("module test\nfn main()\n    println(\"ok\")")
+        assertTrue(ir.contains("define void @nv_rand_seed"),  "nv_rand_seed missing")
+        assertTrue(ir.contains("define i64 @nv_rand_next"),   "nv_rand_next missing")
+        assertTrue(ir.contains("define double @nv_rand_float"), "nv_rand_float missing")
+        assertTrue(ir.contains("define i64 @nv_rand_int"),    "nv_rand_int missing")
+        assertTrue(ir.contains("define i1 @nv_rand_bool"),    "nv_rand_bool missing")
+        assertTrue(ir.contains("@nv_rand_state"),             "nv_rand_state global missing")
+    }
+
+    @Test fun `rand int produces values in range`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_rand_seed") pub fn randSeed(s: int)
+            @extern(fn: "nv_rand_int")  pub fn randInt(lo: int, hi: int) → int
+            fn main()
+                randSeed(42)
+                var ok = true
+                var i = 0
+                while i < 20
+                    let r = randInt(0, 10)
+                    if r < 0
+                        ok = false
+                    if r >= 10
+                        ok = false
+                    i = i + 1
+                if ok
+                    println("all in range")
+                else
+                    println("out of range")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("all in range", out)
+    }
+
+    @Test fun `rand float produces values in 0 1`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_rand_seed")  pub fn randSeed(s: int)
+            @extern(fn: "nv_rand_float") pub fn randFloat() → float
+            fn main()
+                randSeed(99)
+                var ok = true
+                var i = 0
+                while i < 10
+                    let r = randFloat()
+                    if r < 0.0
+                        ok = false
+                    if r >= 1.0
+                        ok = false
+                    i = i + 1
+                if ok
+                    println("all in [0,1)")
+                else
+                    println("out of range")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("all in [0,1)", out)
+    }
 }

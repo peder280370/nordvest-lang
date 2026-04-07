@@ -1,22 +1,6 @@
 module std.time
 
-/** Unix timestamp in seconds since epoch. */
-pub fn now() → float
-
-/** Unix timestamp in milliseconds since epoch. */
-pub fn nowMs() → int
-
-/** Sleep for the given number of milliseconds. */
-pub fn sleepMs(ms: int)
-
-/** Sleep for the given number of seconds. */
-pub fn sleep(seconds: float)
-
-/** Format a Unix timestamp as an ISO-8601 string. */
-pub fn format(ts: float, fmt: str) → str
-
-/** Parse an ISO-8601 datetime string to a Unix timestamp. */
-pub fn parse(s: str) → Result<float>
-
-/** Get the monotonic clock value in nanoseconds (for benchmarking). */
-pub fn monotonicNs() → int
+@extern(fn: "nv_time_now_ms")       pub fn nowMs() → int
+@extern(fn: "nv_time_now_float")    pub fn now() → float
+@extern(fn: "nv_time_monotonic_ns") pub fn monotonicNs() → int
+@extern(fn: "nv_time_sleep_ms")     pub fn sleepMs(ms: int)
