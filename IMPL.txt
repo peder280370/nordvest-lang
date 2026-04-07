@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 4 — Language Completion  (COMPLETE)
-  Next phase: PHASE 5 — Stdlib & Production Hardening
+  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.3 DONE)
+  Next: PHASE 5.4 (std.fs, std.time, std.process, std.rand) or PHASE 6 (IDE plugins)
 
   All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
   - Parser: class body made optional (struct already was); annotation arg parser
@@ -424,30 +424,53 @@
   NOTE: The Kotlin compiler is retained permanently. Self-hosting is dropped.
   Phase 5 focuses on real stdlib implementations and solid reference counting.
 
-  [TODO]  5.1  std.string — real implementation
-               - UTF-8 string as length-prefixed heap allocation
-               - Core ops in C runtime: slice, indexOf, contains, split, trim,
-                 replace, toUpper, toLower, startsWith, endsWith, toInt, toFloat
-               - String interpolation backed by real concat/format runtime
-               - stdlib/std/string.nv: real bodies via @extern + Nordvest wrappers
-               - Golden file tests for each operation
+  [DONE]  5.1  std.string — real implementation
+               - Core ops added as inline LLVM IR in LlvmIrEmitter.emitPhase5StringRuntime():
+                 nv_str_slice, nv_str_index_of, nv_str_contains, nv_str_starts_with,
+                 nv_str_ends_with, nv_str_to_upper, nv_str_to_lower, nv_str_trim,
+                 nv_str_replace, nv_str_repeat, nv_str_parse_int, nv_str_parse_float
+               - New libc declares: strtoll, toupper, tolower, isspace, strstr, strtod
+               - stdlib/std/string.nv: @extern bindings for all ops + Nordvest-body helpers
+                 (toString/join/format remain pure-Nordvest; parseInt returns int not Result<int>)
+               - nv_runtime.h/c: reference C implementations added for all Phase 5.1 functions
+               - Phase5Test.kt: integration tests for all string ops (run with clang)
 
-  [TODO]  5.2  std.collections — real implementation
-               - List<T>: growable heap array (malloc/realloc)
-                 add, remove, get, set, len, capacity, sort, slice, contains
-               - Map<K,V>: open-addressing hash map
-                 insert, get, delete, contains, keys, values, entries
-               - Set<T>: hash set backed by Map<K,Unit>
-               - Iterator protocol wired to real for-in codegen
-               - RC integration: retain/release on element add/remove
-               - stdlib/std/collections.nv: real bodies replacing stubs
+  [DONE]  5.2  std.collections — real implementation
+               - List operations added as inline LLVM IR in emitPhase5CollectionsRuntime():
+                 nv_arr_push_i64/str, nv_arr_contains_i64/str, nv_arr_index_of_i64/str
+               - Map<str,str> operations: nv_map_new, nv_map_len, nv_map_get_str,
+                 nv_map_has_str, nv_map_set_str (O(n) list-of-pairs; correct for bootstrap)
+               - New libc declare: realloc (for nv_map_set_str growth)
+               - stdlib/std/collections.nv: typed @extern variants added alongside generic stubs;
+                 Map @extern bindings; generic stubs kept for type-erased cases
+               - nv_runtime.h/c: reference C implementations added for all Phase 5.2 functions
+               - Phase5Test.kt: integration tests for push/contains/indexOf (int+str) and all map ops
 
-  [TODO]  5.3  std.io — real implementation
-               - readLine(): allocating line reader from stdin
-               - File type: open/close/read/write/seek via @extern over C stdio
-               - Buffered reader/writer wrappers in Nordvest
-               - IOError sealed class with real POSIX error codes
-               - print/println/eprintln hardened (already @c stubs — complete)
+  [DONE]  5.3  std.io — real implementation
+               - File I/O added as inline LLVM IR in emitPhase5IoRuntime():
+                 nv_file_open/open_read/open_write/open_append, nv_file_close,
+                 nv_file_write, nv_file_writeln, nv_file_read_line, nv_file_read_all,
+                 nv_file_exists, nv_file_is_null
+               - New libc declares: fopen, fclose, fgets, fread, fwrite, fputs, fputc,
+                 fflush, access; global mode string constants @.str.mode_r/w/a
+               - stdlib/std/io.nv: IOError sealed class (NotFound/PermissionDenied/
+                 AlreadyExists/InvalidInput/BrokenPipe/Other); @extern file bindings;
+                 readText/writeText convenience wrappers in Nordvest
+               - File handles passed as str (opaque i8*) — bootstrap type hack
+               - nv_runtime.h/c: reference C implementations added for all Phase 5.3 functions
+               - Phase5Test.kt: file write+read round-trip test to /tmp/nv_phase5_test.txt
+
+               Fixes alongside 5.1–5.3:
+               - Resolver: @extern FunctionSignatureDecl now registered in module scope
+                 (pass 1 collectDecl) so callers can resolve them — previously skipped
+               - TypeChecker: @extern FunctionSignatureDecl now typed in buildTypeRegistry
+                 (pass 1 registerDecl) so call expressions get correct return types
+               - Symbol.FunctionSym.decl: made nullable (default null) to support
+                 FunctionSignatureDecl-based symbols with no FunctionDecl
+               - LlvmIrEmitter: inlineRuntimeFns set added; emitExternDecl/emitExternSigDecl
+                 skip declare for runtime-defined functions (Apple Clang 12 rejects
+                 declare+define for the same function in the same module)
+               - Total tests: 674 passing (593 prior + ~30 Phase4 + ~51 Phase5Test)
 
   [TODO]  5.4  std.fs, std.time, std.process, std.rand
                - std.fs: Path type, exists/isFile/isDir/mkdir/rm/rename/readText/writeText

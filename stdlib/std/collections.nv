@@ -1,12 +1,40 @@
 module std.collections
 
-// ── List ──────────────────────────────────────────────────────────────────────
+// ── List<T> operations ────────────────────────────────────────────────────────
+// The Nordvest [T] array type uses a {i64 count, element_data...} heap layout.
+// Typed push/contains variants call into Phase 5.2 runtime implementations.
 
 pub fn listOf<T>(items: [T]) → [T]
     → items
 
 pub fn mutableListOf<T>() → [T]
     → []
+
+// ── Typed append (real implementations via @extern) ──────────────────────────
+
+/** Append an int to a list, returning the new list. */
+@extern(fn: "nv_arr_push_i64") pub fn listAppendInt(list: [int], item: int) → [int]
+
+/** Append a str to a list, returning the new list. */
+@extern(fn: "nv_arr_push_str") pub fn listAppendStr(list: [str], item: str) → [str]
+
+// ── Typed contains (real implementations via @extern) ─────────────────────────
+
+/** Return true if any element of list equals item (int lists). */
+@extern(fn: "nv_arr_contains_i64") pub fn listContainsInt(list: [int], item: int) → bool
+
+/** Return true if any element of list equals item (str lists). */
+@extern(fn: "nv_arr_contains_str") pub fn listContainsStr(list: [str], item: str) → bool
+
+// ── Typed indexOf (real implementations via @extern) ──────────────────────────
+
+/** Return the index of item in list, or -1 (int lists). */
+@extern(fn: "nv_arr_index_of_i64") pub fn listIndexOfInt(list: [int], item: int) → int
+
+/** Return the index of item in list, or -1 (str lists). */
+@extern(fn: "nv_arr_index_of_str") pub fn listIndexOfStr(list: [str], item: str) → int
+
+// ── Generic stubs (type-erased; use typed variants above for real behaviour) ──
 
 pub fn listAppend<T>(list: [T], item: T) → [T]
     → list
@@ -47,7 +75,7 @@ pub fn listZip<T, U>(a: [T], b: [U]) → [(T, U)]
 pub fn listFlatten<T>(nested: [[T]]) → [T]
     → []
 
-// ── Set (hash-based) ──────────────────────────────────────────────────────────
+// ── Set (hash-based, backed by str/int lists) ─────────────────────────────────
 
 pub fn setOf<T>(items: [T]) → [T]
     → items
@@ -88,3 +116,22 @@ pub fn stackPop<T>(stack: [T]) → T?
 
 pub fn stackPeek<T>(stack: [T]) → T?
     → nil
+
+// ── Map<str, str> — real implementation via @extern ───────────────────────────
+// Map layout: {i64 count, [key_ptr i8*, val_ptr i8*] pairs...} (pairs at offset 8)
+// All map functions may return a NEW pointer on insert; always reassign the variable.
+
+/** Create an empty str→str map. */
+@extern(fn: "nv_map_new")     pub fn mapNew() → [str: str]
+
+/** Return the number of entries in the map. */
+@extern(fn: "nv_map_len")     pub fn mapLen(map: [str: str]) → int
+
+/** Return true if key is present. */
+@extern(fn: "nv_map_has_str") pub fn mapHas(map: [str: str], key: str) → bool
+
+/** Return value for key, or nil if absent. */
+@extern(fn: "nv_map_get_str") pub fn mapGet(map: [str: str], key: str) → str?
+
+/** Insert or update key→val; returns updated map (may be a new pointer). */
+@extern(fn: "nv_map_set_str") pub fn mapSet(map: [str: str], key: str, val: str) → [str: str]

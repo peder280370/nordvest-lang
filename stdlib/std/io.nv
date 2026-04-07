@@ -1,19 +1,77 @@
 module std.io
 
+// ── Error type ────────────────────────────────────────────────────────────────
+
+/** I/O error categories. */
+sealed class IOError
+    NotFound(path: str)
+    PermissionDenied(path: str)
+    AlreadyExists(path: str)
+    InvalidInput(msg: str)
+    BrokenPipe(msg: str)
+    Other(msg: str)
+
+// ── Console I/O (backed by inline runtime) ────────────────────────────────────
+
 /** Print to stdout without newline. */
 pub fn print(value: str)
 
 /** Print to stdout with newline. */
 pub fn println(value: str)
 
-/** Print to stderr. */
+/** Print to stderr with newline. */
 pub fn eprintln(value: str)
-    eprintln(value)
 
 /** Read a line from stdin. Returns nil on EOF. */
 pub fn readLine() → str?
-    → readLine()
 
 /** Read all of stdin as a string. */
 pub fn readAll() → str
-    → readAll()
+
+// ── File type ─────────────────────────────────────────────────────────────────
+// File wraps a libc FILE* as an opaque handle (i8* in LLVM IR).
+
+/** Open a file at path for reading. Returns nil on failure. */
+@extern(fn: "nv_file_open_read")   pub fn fileOpenRead(path: str) → str?
+
+/** Open a file at path for writing (creates or truncates). Returns nil on failure. */
+@extern(fn: "nv_file_open_write")  pub fn fileOpenWrite(path: str) → str?
+
+/** Open a file at path for appending. Returns nil on failure. */
+@extern(fn: "nv_file_open_append") pub fn fileOpenAppend(path: str) → str?
+
+/** Close a file handle opened with fileOpen*. */
+@extern(fn: "nv_file_close")       pub fn fileClose(file: str)
+
+/** Write a string to an open file. */
+@extern(fn: "nv_file_write")       pub fn fileWrite(file: str, s: str)
+
+/** Write a string followed by a newline to an open file. */
+@extern(fn: "nv_file_writeln")     pub fn fileWriteln(file: str, s: str)
+
+/** Read one line from an open file. Returns nil on EOF. */
+@extern(fn: "nv_file_read_line")   pub fn fileReadLine(file: str) → str?
+
+/** Read the entire contents of an open file. */
+@extern(fn: "nv_file_read_all")    pub fn fileReadAll(file: str) → str
+
+/** Return true if the path exists and is accessible. */
+@extern(fn: "nv_file_exists")      pub fn fileExists(path: str) → bool
+
+/** Convenience: read the entire contents of a file at path. */
+pub fn readText(path: str) → str?
+    let f = fileOpenRead(path)
+    if let handle = f
+        let content = fileReadAll(handle)
+        fileClose(handle)
+        → content
+    → nil
+
+/** Convenience: write text to a file at path, creating or overwriting it. */
+pub fn writeText(path: str, content: str) → bool
+    let f = fileOpenWrite(path)
+    if let handle = f
+        fileWrite(handle, content)
+        fileClose(handle)
+        → true
+    → false

@@ -33,7 +33,7 @@ sealed class Symbol {
         override val visibility: Visibility,
         override val origin: SymbolOrigin,
         override var resolvedType: Type = Type.TUnknown,
-        val decl: FunctionDecl,
+        val decl: FunctionDecl? = null,
     ) : Symbol()
 
     data class LetSym(

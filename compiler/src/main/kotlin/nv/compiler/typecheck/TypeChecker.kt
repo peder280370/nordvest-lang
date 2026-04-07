@@ -171,6 +171,19 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                     }
                 }
             }
+            is FunctionSignatureDecl -> {
+                // @extern module-level signatures need their type registered so calls are correctly typed
+                if (decl.annotations.any { it.name == "extern" }) {
+                    withTypeParams(decl.typeParams.map { it.name }.toSet()) {
+                        val paramTypes = decl.params.map { resolveTypeNode(it.type) }
+                        val retType = decl.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+                        val fnType = Type.TFun(paramTypes, retType)
+                        resolvedModule.moduleScope.lookup(decl.name)?.let { sym ->
+                            sym.resolvedType = fnType
+                        }
+                    }
+                }
+            }
             is ExtendDecl -> {
                 // Register extension members on the target type
                 val targetName = decl.target.name.text

@@ -1,0 +1,64 @@
+// string_ops.nv — Phase 5.1: real string operations via @extern runtime
+//
+// Demonstrates: slice, indexOf, contains, startsWith, endsWith, trim,
+// replace, toUpper, toLower, repeat, parseInt, parseFloat.
+//
+// STATUS: Compiles and runs (Phase 5.1).
+//   nv run examples/string_ops.nv
+
+module examples.string_ops
+
+@extern(fn: "nv_str_slice")       pub fn strSlice(s: str, start: int, end: int) → str
+@extern(fn: "nv_str_index_of")    pub fn strIndexOf(s: str, needle: str) → int
+@extern(fn: "nv_str_contains")    pub fn strContains(s: str, needle: str) → bool
+@extern(fn: "nv_str_starts_with") pub fn strStartsWith(s: str, prefix: str) → bool
+@extern(fn: "nv_str_ends_with")   pub fn strEndsWith(s: str, suffix: str) → bool
+@extern(fn: "nv_str_trim")        pub fn strTrim(s: str) → str
+@extern(fn: "nv_str_replace")     pub fn strReplace(s: str, old: str, new: str) → str
+@extern(fn: "nv_str_to_upper")    pub fn strToUpper(s: str) → str
+@extern(fn: "nv_str_to_lower")    pub fn strToLower(s: str) → str
+@extern(fn: "nv_str_repeat")      pub fn strRepeat(s: str, n: int) → str
+@extern(fn: "nv_str_parse_int")   pub fn strParseInt(s: str) → int
+@extern(fn: "nv_str_parse_float") pub fn strParseFloat(s: str) → float
+
+fn main()
+    let greeting = "  Hello, Nordvest!  "
+
+    // Trim whitespace
+    let trimmed = strTrim(greeting)
+    println("trimmed:    '{trimmed}'")
+
+    // Case conversion
+    println("upper:      {strToUpper(trimmed)}")
+    println("lower:      {strToLower(trimmed)}")
+
+    // Slicing
+    let s = "Hello, World!"
+    let world = strSlice(s, 7, 12)
+    println("slice[7:12]: {world}")
+
+    // Search
+    let idx = strIndexOf(s, "World")
+    println("indexOf 'World': {idx}")
+
+    // Predicates
+    if strContains(s, "World")
+        println("contains 'World': yes")
+    if strStartsWith(s, "Hello")
+        println("startsWith 'Hello': yes")
+    if strEndsWith(s, "!")
+        println("endsWith '!': yes")
+
+    // Replace
+    let replaced = strReplace(s, "World", "Nordvest")
+    println("replace:    {replaced}")
+
+    // Repeat
+    let bar = strRepeat("-", 20)
+    println(bar)
+
+    // Parse numbers
+    let n = strParseInt("42")
+    let f = strParseFloat("3.14")
+    println("parseInt('42'): {n}")
+    println("parseFloat('3.14'): {f}")

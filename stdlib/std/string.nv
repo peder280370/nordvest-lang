@@ -1,5 +1,53 @@
 module std.string
 
+// ── Parsing ──────────────────────────────────────────────────────────────────
+
+/** Parse a decimal integer string. Returns 0 on parse error. */
+@extern(fn: "nv_str_parse_int")   pub fn parseInt(s: str) → int
+
+/** Parse a floating-point string. Returns 0.0 on parse error. */
+@extern(fn: "nv_str_parse_float") pub fn parseFloat(s: str) → float
+
+// ── Slicing and searching ─────────────────────────────────────────────────────
+
+/** Return the substring s[from..to) (indices clamped to valid range). */
+@extern(fn: "nv_str_slice")       pub fn slice(s: str, from: int, to: int) → str
+
+/** Return the byte offset of the first occurrence of needle, or -1. */
+@extern(fn: "nv_str_index_of")    pub fn indexOf(s: str, needle: str) → int
+
+/** Return true if s contains needle. */
+@extern(fn: "nv_str_contains")    pub fn contains(s: str, needle: str) → bool
+
+/** Return true if s begins with prefix. */
+@extern(fn: "nv_str_starts_with") pub fn startsWith(s: str, prefix: str) → bool
+
+/** Return true if s ends with suffix. */
+@extern(fn: "nv_str_ends_with")   pub fn endsWith(s: str, suffix: str) → bool
+
+// ── Case conversion ──────────────────────────────────────────────────────────
+
+/** Return a new string with all ASCII letters uppercased. */
+@extern(fn: "nv_str_to_upper")    pub fn toUpper(s: str) → str
+
+/** Return a new string with all ASCII letters lowercased. */
+@extern(fn: "nv_str_to_lower")    pub fn toLower(s: str) → str
+
+// ── Whitespace ───────────────────────────────────────────────────────────────
+
+/** Return a new string with leading and trailing whitespace removed. */
+@extern(fn: "nv_str_trim")        pub fn trim(s: str) → str
+
+// ── Transformation ────────────────────────────────────────────────────────────
+
+/** Return s with every occurrence of from replaced by to. */
+@extern(fn: "nv_str_replace")     pub fn replace(s: str, from: str, to: str) → str
+
+/** Return s repeated n times. */
+@extern(fn: "nv_str_repeat")      pub fn repeat(s: str, n: int) → str
+
+// ── Conversion helpers ────────────────────────────────────────────────────────
+
 pub fn toString(x: int) → str
     → "{x}"
 
@@ -9,22 +57,20 @@ pub fn toString(x: float) → str
 pub fn toString(x: bool) → str
     → "{x}"
 
-pub fn parseInt(s: str) → Result<int>
-    → Ok(0)
+// ── Joining ───────────────────────────────────────────────────────────────────
 
-pub fn parseFloat(s: str) → Result<float>
-    → Ok(0.0)
-
-pub fn repeat(s: str, n: int) → str
+/** Join a list of strings with sep between each element. */
+pub fn join(parts: [str], sep: str) → str
     var result = ""
     var i = 0
-    while i < n
-        result = result + s
+    for p ∈ parts
+        if i > 0
+            result = result + sep + p
+        else
+            result = p
         i = i + 1
     → result
 
-pub fn join(parts: [str], sep: str) → str
-    → sep
-
+/** Interpolate positional "{}" placeholders in template with args. */
 pub fn format(template: str, args: [str]) → str
     → template

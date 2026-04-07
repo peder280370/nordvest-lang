@@ -217,9 +217,13 @@ class Resolver(private val sourcePath: String) {
                 for (d in decl.thenDecls + decl.elseDecls) collectDecl(d, scope)
                 null
             }
+            // @extern FunctionSignatureDecl binds a callable name so callers can resolve it
+            is FunctionSignatureDecl -> if (decl.annotations.any { it.name == "extern" })
+                scope.define(Symbol.FunctionSym(decl.name, decl.span, decl.visibility, SymbolOrigin.MODULE))
+            else null
             // These are not collected in pass 1 (no standalone name to bind at module level)
             is ExtendDecl, is FieldDecl, is AssocTypeDecl, is InitBlock,
-            is FunctionSignatureDecl, is ComputedPropertyDecl, is SubscriptDecl,
+            is ComputedPropertyDecl, is SubscriptDecl,
             is ModuleDecl, is ImportDecl -> null
         }
         if (error != null) errors += error
