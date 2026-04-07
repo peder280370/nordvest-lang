@@ -188,6 +188,22 @@ int nv_file_exists(const char *path);
 /** Return 1 if file handle is NULL. */
 int nv_file_is_null(const char *file);
 
+/* ── Phase 5.5: Reference counting ──────────────────────────────────────── */
+/*
+ * Class object layout: [i64 strong_count][i8* dtor_fn][user fields...]
+ * The object pointer points to the start of this block.
+ */
+
+/** Atomically increment strong_count. No-op on NULL. */
+void nv_rc_retain(void *ptr);
+
+/** Atomically decrement strong_count. When it reaches 0, calls dtor_fn(ptr)
+ *  (which must free the allocation) or calls free(ptr) if dtor_fn is NULL. */
+void nv_rc_release(void *ptr);
+
+/** Return ptr if strong_count > 0, else NULL. Safe for weak-reference loads. */
+void *nv_weak_load(void *ptr);
+
 /* ── Concurrency primitives (Phase 2.1) ─────────────────────────────────── */
 
 /**

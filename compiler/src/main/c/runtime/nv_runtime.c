@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <pthread.h>
 
 /* ── I/O ─────────────────────────────────────────────────────────────────── */
@@ -381,6 +382,41 @@ char *nv_file_read_all(char *file) {
 
 int nv_file_exists(const char *path) { return access(path, F_OK) == 0; }
 int nv_file_is_null(const char *file) { return file == NULL; }
+
+/* ── Phase 5.5: Reference counting ──────────────────────────────────────── */
+/*
+ * Class object layout: [int64_t strong_count][void* dtor_fn][user fields...]
+ * The object pointer points to the start of the block.
+ * strong_count is manipulated with C11 stdatomic operations.
+ */
+
+typedef struct { _Atomic int64_t strong_count; void (*dtor_fn)(void *); } nv_rc_hdr_t;
+
+void nv_rc_retain(void *ptr) {
+    if (!ptr) return;
+    nv_rc_hdr_t *h = (nv_rc_hdr_t *)ptr;
+    atomic_fetch_add_explicit(&h->strong_count, (int64_t)1, memory_order_seq_cst);
+}
+
+void nv_rc_release(void *ptr) {
+    if (!ptr) return;
+    nv_rc_hdr_t *h = (nv_rc_hdr_t *)ptr;
+    int64_t old = atomic_fetch_sub_explicit(&h->strong_count, (int64_t)1, memory_order_seq_cst);
+    if (old == 1) {
+        if (h->dtor_fn) {
+            h->dtor_fn(ptr);   /* destructor must call free(ptr) */
+        } else {
+            free(ptr);
+        }
+    }
+}
+
+void *nv_weak_load(void *ptr) {
+    if (!ptr) return NULL;
+    nv_rc_hdr_t *h = (nv_rc_hdr_t *)ptr;
+    int64_t sc = atomic_load_explicit(&h->strong_count, memory_order_seq_cst);
+    return (sc > 0) ? ptr : NULL;
+}
 
 /* ── Concurrency primitives (Phase 2.1) ─────────────────────────────────── */
 

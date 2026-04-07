@@ -88,11 +88,16 @@ class LlvmIrEmitter(
         "nv_process_pid", "nv_process_cwd", "nv_process_chdir", "nv_process_capture",
         // Phase 5.4 — std.rand
         "nv_rand_seed", "nv_rand_init", "nv_rand_next",
-        "nv_rand_float", "nv_rand_int", "nv_rand_bool"
+        "nv_rand_float", "nv_rand_int", "nv_rand_bool",
+        // Phase 5.5 — RC
+        "nv_rc_retain", "nv_rc_release", "nv_weak_load"
     )
 
     // ── Struct layout registry (name → ordered list of field name+type) ──
     private val structLayouts = mutableMapOf<String, List<Pair<String, Type>>>()
+
+    // ── Class type registry: names of ClassDecl types (have RC header) ──
+    private val classTypeNames = mutableSetOf<String>()
 
     // ── Sealed class registry: className → decl; variant "ClassName.Variant" → tag index ──
     private val sealedClassDecls = mutableMapOf<String, SealedClassDecl>()
@@ -153,9 +158,9 @@ class LlvmIrEmitter(
                         externFunctions[decl.name] = ExternInfo(csym, retTy, paramTys)
                     }
                 }
-                is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
-                is ClassDecl  -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
-                is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members)
+                is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
+                is ClassDecl  -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = true)
+                is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
                 is SealedClassDecl -> {
                     sealedClassDecls[decl.name] = decl
                     for ((idx, variant) in decl.variants.withIndex()) {
@@ -178,7 +183,7 @@ class LlvmIrEmitter(
                 }
             } ?: default
 
-    private fun collectStructLayout(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>) {
+    private fun collectStructLayout(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, isClass: Boolean = false) {
         val fields = ctorParams.map { cp -> cp.name to resolveTypeNode(cp.type) }.toMutableList()
         for (m in members) {
             when (m) {
@@ -188,11 +193,17 @@ class LlvmIrEmitter(
                 else -> {}
             }
         }
+        if (isClass) classTypeNames.add(name)
         structLayouts[name] = fields
-        // Also emit struct type definition into globals
+        // Emit struct type definition into globals.
+        // Class types get a 16-byte RC header prepended: { i64 strong_count, i8* dtor_fn, ...fields }
         if (fields.isNotEmpty()) {
             val fieldTypes = fields.joinToString(", ") { (_, t) -> llvmType(t) }
-            globals.appendLine("%struct.$name = type { $fieldTypes }")
+            if (isClass) {
+                globals.appendLine("%struct.$name = type { i64, i8*, $fieldTypes }")
+            } else {
+                globals.appendLine("%struct.$name = type { $fieldTypes }")
+            }
         }
     }
 
@@ -523,14 +534,63 @@ ra.done:
   ret i8* %buf
 }
 
+; ── Phase 5.5: Reference counting ────────────────────────────────────────────
+; Class object layout: { i64 strong_count, i8* dtor_fn, ...user fields }
+; nv_rc_retain — atomically increment strong_count (no-op on null)
 define void @nv_rc_retain(i8* %ptr) {
 entry:
+  %isnull = icmp eq i8* %ptr, null
+  br i1 %isnull, label %done, label %do_retain
+do_retain:
+  %hdr = bitcast i8* %ptr to i64*
+  %_old = atomicrmw add i64* %hdr, i64 1 seq_cst
+  br label %done
+done:
   ret void
 }
 
+; nv_rc_release — atomically decrement strong_count; destroy when it reaches 0
 define void @nv_rc_release(i8* %ptr) {
 entry:
+  %isnull = icmp eq i8* %ptr, null
+  br i1 %isnull, label %done, label %do_release
+do_release:
+  %hdr = bitcast i8* %ptr to i64*
+  %old = atomicrmw sub i64* %hdr, i64 1 seq_cst
+  %is_last = icmp eq i64 %old, 1
+  br i1 %is_last, label %destroy, label %done
+destroy:
+  ; load dtor_fn pointer stored at byte offset 8
+  %dtor_loc = getelementptr i8, i8* %ptr, i64 8
+  %dtor_pp  = bitcast i8* %dtor_loc to i8**
+  %dtor_raw = load i8*, i8** %dtor_pp, align 8
+  %null_dtor = icmp eq i8* %dtor_raw, null
+  br i1 %null_dtor, label %just_free, label %call_dtor
+call_dtor:
+  %dtor_fn = bitcast i8* %dtor_raw to void (i8*)*
+  call void %dtor_fn(i8* %ptr)
+  br label %done
+just_free:
+  call void @free(i8* %ptr)
+  br label %done
+done:
   ret void
+}
+
+; nv_weak_load — return ptr if strong_count > 0, else null (safe weak-ref load)
+define i8* @nv_weak_load(i8* %ptr) {
+entry:
+  %isnull = icmp eq i8* %ptr, null
+  br i1 %isnull, label %ret_null, label %check
+check:
+  %hdr = bitcast i8* %ptr to i64*
+  %sc  = load i64, i64* %hdr, align 8
+  %alive = icmp sgt i64 %sc, 0
+  br i1 %alive, label %ret_ptr, label %ret_null
+ret_ptr:
+  ret i8* %ptr
+ret_null:
+  ret i8* null
 }
 
 ; Result<T, E> constructors: {i64 tag=0/1, i64 value}
@@ -2212,9 +2272,9 @@ $storeStmt
                 }
                 // otherwise interface signature — skip
             }
-            is StructDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
-            is ClassDecl  -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
-            is RecordDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members)
+            is StructDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = false)
+            is ClassDecl  -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = true)
+            is RecordDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = false)
             else          -> { /* unsupported at top-level */ }
         }
     }
@@ -2333,13 +2393,16 @@ $storeStmt
         userFns.appendLine()
     }
 
-    private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>) {
+    private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, isClass: Boolean = false) {
         val fields = structLayouts[name] ?: return
         if (fields.isEmpty()) return
 
         // Constructor function: @nv_Name(field_types...) → i8*
-        val totalSize = fields.sumOf { (_, t) -> llvmTypeSize(llvmType(t)) }
-        val allocSize = maxOf(totalSize, 8)
+        // Class types prepend a 16-byte RC header: { i64 strong_count, i8* dtor_fn }
+        val userFieldsSize = fields.sumOf { (_, t) -> llvmTypeSize(llvmType(t)) }
+        val rcHeaderSize   = if (isClass) 16 else 0
+        val allocSize      = maxOf(userFieldsSize + rcHeaderSize, 8)
+        val fieldOffset    = if (isClass) 2 else 0   // GEP index of first user field
 
         fnBody    = StringBuilder()
         fnAllocas = StringBuilder()
@@ -2357,10 +2420,29 @@ $storeStmt
         val structType = "%struct.$name"
         emit("  $castReg = bitcast i8* $objReg to $structType*")
 
+        if (isClass) {
+            // Initialize strong_count = 1 (GEP index 0)
+            val scPtr = fresh("sc.ptr")
+            emit("  $scPtr = getelementptr $structType, $structType* $castReg, i32 0, i32 0")
+            emit("  store i64 1, i64* $scPtr, align 8")
+            // Store dtor_fn pointer (GEP index 1): null if no RC fields, else @nv_dtor_Name
+            val dtorPtr = fresh("dtor.ptr")
+            emit("  $dtorPtr = getelementptr $structType, $structType* $castReg, i32 0, i32 1")
+            val hasRcFields = fields.any { (_, t) -> isRcType(t) }
+            if (hasRcFields) {
+                val dtorCast = fresh("dtor.cast")
+                emit("  $dtorCast = bitcast void (i8*)* @nv_dtor_$name to i8*")
+                emit("  store i8* $dtorCast, i8** $dtorPtr, align 8")
+            } else {
+                emit("  store i8* null, i8** $dtorPtr, align 8")
+            }
+        }
+
         fields.forEachIndexed { idx, (fname, ft) ->
             val fieldLt = llvmType(ft)
-            val ptrReg = fresh("fp")
-            emit("  $ptrReg = getelementptr $structType, $structType* $castReg, i32 0, i32 $idx")
+            val ptrReg  = fresh("fp")
+            val gepIdx  = idx + fieldOffset
+            emit("  $ptrReg = getelementptr $structType, $structType* $castReg, i32 0, i32 $gepIdx")
             emit("  store $fieldLt %ctor.$fname, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
         }
         terminate("  ret i8* $objReg")
@@ -2372,12 +2454,45 @@ $storeStmt
         userFns.appendLine("}")
         userFns.appendLine()
 
+        // Emit per-class destructor only when there are RC fields to release
+        if (isClass && fields.any { (_, t) -> isRcType(t) }) emitClassDestructor(name, fields)
+
         // Emit member functions
         for (member in members) {
             if (member is FunctionDecl && !member.annotations.any { it.name == "extern" }) {
                 emitMethodDecl(name, member)
             }
         }
+    }
+
+    /** Emit a destructor @nv_dtor_Name that releases all RC-typed fields then frees the object. */
+    private fun emitClassDestructor(name: String, fields: List<Pair<String, Type>>) {
+        val structType = "%struct.$name"
+        val rcFields   = fields.withIndex().filter { (_, pair) -> isRcType(pair.second) }
+
+        userFns.appendLine("define void @nv_dtor_$name(i8* %ptr) {")
+        userFns.appendLine("entry:")
+        if (rcFields.isNotEmpty()) {
+            userFns.appendLine("  %dtor.cast = bitcast i8* %ptr to $structType*")
+            for ((idx, pair) in rcFields) {
+                val (fname, _) = pair
+                val gepIdx = idx + 2  // +2 to skip RC header fields
+                userFns.appendLine("  %dtor.fp.$fname = getelementptr $structType, $structType* %dtor.cast, i32 0, i32 $gepIdx")
+                userFns.appendLine("  %dtor.fv.$fname = load i8*, i8** %dtor.fp.$fname, align 8")
+                userFns.appendLine("  call void @nv_rc_release(i8* %dtor.fv.$fname)")
+            }
+        }
+        userFns.appendLine("  call void @free(i8* %ptr)")
+        userFns.appendLine("  ret void")
+        userFns.appendLine("}")
+        userFns.appendLine()
+    }
+
+    /** True if type t is a reference-counted class type (or nullable wrapper of one). */
+    private fun isRcType(t: Type): Boolean = when (t) {
+        is Type.TNamed    -> t.qualifiedName.substringAfterLast('.') in classTypeNames
+        is Type.TNullable -> isRcType(t.inner)
+        else              -> false
     }
 
     private fun emitMethodDecl(typeName: String, fn: FunctionDecl) {
@@ -3575,10 +3690,12 @@ $storeStmt
                     if (fieldIdx >= 0) {
                         val fieldType = fields[fieldIdx].second
                         val fieldLt = llvmType(fieldType)
+                        // Class types have a 2-field RC header prepended; offset GEP index accordingly
+                        val gepIdx = fieldIdx + (if (typeName in classTypeNames) 2 else 0)
                         val castReg = fresh("sfcast")
                         emit("  $castReg = bitcast i8* $receiverReg to %struct.$typeName*")
                         val ptrReg = fresh("sfptr")
-                        emit("  $ptrReg = getelementptr %struct.$typeName, %struct.$typeName* $castReg, i32 0, i32 $fieldIdx")
+                        emit("  $ptrReg = getelementptr %struct.$typeName, %struct.$typeName* $castReg, i32 0, i32 $gepIdx")
                         val loadReg = fresh("sfld")
                         emit("  $loadReg = load $fieldLt, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
                         return loadReg

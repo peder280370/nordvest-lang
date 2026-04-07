@@ -491,11 +491,24 @@
                  getpid, popen, pclose
                - Total tests: 710 passing (674 prior + 36 new Phase5Test 5.4 tests)
 
-  [TODO]  5.5  RC (reference counting) — real implementation
-               - nv_rc_retain/nv_rc_release: atomic refcount in heap header
-               - Class allocator: malloc(sizeof(rc_header) + sizeof(fields))
-               - Destructor chain: recursive release of RC fields on drop
-               - Weak references: zero out pointer on release
+  [DONE]  5.5  RC (reference counting) — real implementation
+               - nv_rc_retain: atomicrmw add on strong_count in heap header; null-safe
+               - nv_rc_release: atomicrmw sub; when count reaches 0, dispatches to
+                 per-class destructor (dtor_fn stored at offset 8) or calls free directly
+               - Class allocator: malloc(16 + sizeof(user_fields)); 16-byte RC header
+                 prepended as { i64 strong_count, i8* dtor_fn } — GEP indices offset by 2
+               - %struct.Name = type { i64, i8*, user_field_types... } for class types
+               - Destructor chain: @nv_dtor_Name emitted per class; releases RC-typed
+                 fields recursively via nv_rc_release, then calls free
+               - Classes with no RC fields: dtor_fn stored as null; no destructor emitted
+               - Weak references: nv_weak_load(ptr) returns ptr if strong_count > 0, else null
+               - collectStructLayout/emitStructOrClassDecl updated with isClass: Boolean
+               - classTypeNames registry tracks which TNamed types are ClassDecl
+               - isRcType() helper determines if a field needs RC release in destructor
+               - Field access GEP in emitMemberAccessExpr offsets by 2 for class types
+               - nv_runtime.h/c: C reference implementations using stdatomic (_Atomic int64_t)
+               - Phase5Test.kt: 12 new tests (8 IR structure + 4 integration)
+               - Total tests: 722 passing (710 prior + 12 new Phase5Test 5.5 tests)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)
