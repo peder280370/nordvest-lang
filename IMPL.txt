@@ -16,7 +16,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 
   Phase: PHASE 4 — Language Completion  (COMPLETE)
-  Next phase: PHASE 5 — Self-Hosting
+  Next phase: PHASE 5 — Stdlib & Production Hardening
 
   All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
   - Parser: class body made optional (struct already was); annotation arg parser
@@ -418,13 +418,87 @@
                - nv pkg dependency: package.nv existence check
 
 ────────────────────────────────────────────────────────────────────────────────
-  PHASE 5 — SELF-HOSTING  (Milestone M5)  — deferred; requires Phase 4 complete
+  PHASE 5 — STDLIB & PRODUCTION HARDENING  (Milestone M5)
 ────────────────────────────────────────────────────────────────────────────────
 
-  [TODO]  5.1  Port lexer to Nordvest
-  [TODO]  5.2  Port parser to Nordvest
-  [TODO]  5.3  Port type checker + IR lowering to Nordvest
-  [TODO]  5.4  Port LLVM IR emitter to Nordvest
-  [TODO]  5.5  Bootstrap sequence (K0 → nvcc0 → nvcc1 → nvcc2)
-  [TODO]  5.6  Drop Kotlin compiler from build path
-  [TODO]  5.7  Runtime rewrite in Nordvest (stretch)
+  NOTE: The Kotlin compiler is retained permanently. Self-hosting is dropped.
+  Phase 5 focuses on real stdlib implementations and solid reference counting.
+
+  [TODO]  5.1  std.string — real implementation
+               - UTF-8 string as length-prefixed heap allocation
+               - Core ops in C runtime: slice, indexOf, contains, split, trim,
+                 replace, toUpper, toLower, startsWith, endsWith, toInt, toFloat
+               - String interpolation backed by real concat/format runtime
+               - stdlib/std/string.nv: real bodies via @extern + Nordvest wrappers
+               - Golden file tests for each operation
+
+  [TODO]  5.2  std.collections — real implementation
+               - List<T>: growable heap array (malloc/realloc)
+                 add, remove, get, set, len, capacity, sort, slice, contains
+               - Map<K,V>: open-addressing hash map
+                 insert, get, delete, contains, keys, values, entries
+               - Set<T>: hash set backed by Map<K,Unit>
+               - Iterator protocol wired to real for-in codegen
+               - RC integration: retain/release on element add/remove
+               - stdlib/std/collections.nv: real bodies replacing stubs
+
+  [TODO]  5.3  std.io — real implementation
+               - readLine(): allocating line reader from stdin
+               - File type: open/close/read/write/seek via @extern over C stdio
+               - Buffered reader/writer wrappers in Nordvest
+               - IOError sealed class with real POSIX error codes
+               - print/println/eprintln hardened (already @c stubs — complete)
+
+  [TODO]  5.4  std.fs, std.time, std.process, std.rand
+               - std.fs: Path type, exists/isFile/isDir/mkdir/rm/rename/readText/writeText
+               - std.time: clock_gettime @extern; Duration, Instant, sleep
+               - std.process: argv, env, exit, subprocess spawn
+               - std.rand: PCG seeded from /dev/urandom or clock
+
+  [TODO]  5.5  RC (reference counting) — real implementation
+               - nv_rc_retain/nv_rc_release: atomic refcount in heap header
+               - Class allocator: malloc(sizeof(rc_header) + sizeof(fields))
+               - Destructor chain: recursive release of RC fields on drop
+               - Weak references: zero out pointer on release
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)
+────────────────────────────────────────────────────────────────────────────────
+
+  [TODO]  6.1  VS Code extension  (new repo: nordvest-lang/nv-vscode, TypeScript)
+               - Register .nv file type and "nordvest" language ID
+               - TextMate grammar: syntaxes/nordvest.tmLanguage.json
+                 (keywords, annotations, built-in types, Unicode math operators,
+                  bracket pairs, indentation rules)
+               - Shared grammar repo: nordvest-lang/nv-textmate-grammar
+                 (consumed by VS Code and Linguist/GitHub)
+               - LSP client via vscode-languageclient: launch nv-lsp subprocess;
+                 locate via PATH, bundled binary, or user config;
+                 "Nordvest: Restart Server" command + status bar
+               - Unicode input helper: \forall→∀, \sum→∑, \->→→, etc.
+               - Format on save (delegates to nv-lsp)
+               - Run current file: Cmd+F5 / Ctrl+F5 → nv run ${file} in terminal
+               - Snippets: fn, class, sealed, match, if let, guard let, async fn
+               - Platform vsix bundles with pre-built nv-lsp:
+                 linux-x64, linux-arm64, darwin-arm64, darwin-x64
+
+  [TODO]  6.2  IntelliJ plugin — Tier 1  (new repo: nordvest-lang/nv-intellij, Kotlin)
+               - NordvestFileType (.nv) + NordvestLanguage registration
+               - Hand-rolled IntelliJ Lexer for syntax highlighting
+                 (token types mirror VS Code TextMate scopes;
+                  brace/bracket matching: (), [], [[]], {})
+               - LSP4IJ integration: wire nv-lsp for diagnostics, completion,
+                 go-to-definition, hover, formatting, rename
+               - Run configurations: NordvestRunConfigurationType (nv run <file>)
+                 and NordvestTestRunConfigurationType (nv test [filter])
+               - Run gutter icons next to fn main() and fn test*()
+               - SDK settings: detect nv binary via PATH or project-level config
+               - File watcher: invoke nv fmt on save (opt-in, off by default)
+
+  [TODO]  6.3  IntelliJ plugin — Tier 2 PSI  (stretch goal)
+               - Full PSI tree replacing LSP4IJ
+               - Stub index for top-level declarations (fast cross-project lookup)
+               - Inspections: "Missing match case", "Redundant nullable",
+                 "Convert ASCII operator to Unicode"
+               - Quick-fixes: add missing sealed variants, add ? propagation
+               - Debugger: DWARF debug info via LLVM; XDebugger integration
