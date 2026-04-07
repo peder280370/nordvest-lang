@@ -27,6 +27,7 @@ out/
 
 # Claude
 .claude
+memory/
 
 
 # Nordvest compiler outputs
