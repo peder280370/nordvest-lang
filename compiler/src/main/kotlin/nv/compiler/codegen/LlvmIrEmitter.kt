@@ -93,6 +93,17 @@ class LlvmIrEmitter(
         "nv_rc_retain", "nv_rc_release", "nv_weak_load"
     )
 
+    // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
+    // When user calls these via @extern with integer params (e.g. int as null pointer),
+    // we emit inttoptr/ptrtoint casts to avoid LLVM type-mismatch errors.
+    private val inlineRuntimeFnPtrSigs: Map<String, Pair<String, List<String>>> = mapOf(
+        "nv_rc_retain"  to ("void" to listOf("i8*")),
+        "nv_rc_release" to ("void" to listOf("i8*")),
+        "nv_weak_load"  to ("i8*"  to listOf("i8*")),
+        "nv_Ok"         to ("i8*"  to listOf("i8*")),
+        "nv_Err"        to ("i8*"  to listOf("i8*")),
+    )
+
     // ── Struct layout registry (name → ordered list of field name+type) ──
     private val structLayouts = mutableMapOf<String, List<Pair<String, Type>>>()
 
@@ -3474,6 +3485,37 @@ $storeStmt
         // Check if it's an @extern function → call C symbol directly
         val ext = externFunctions[fnName]
         if (ext != null) {
+            // For pointer-typed inline runtime functions, emit inttoptr/ptrtoint casts
+            // to avoid LLVM type-mismatch when the @extern declaration uses int params.
+            val ptrSig = inlineRuntimeFnPtrSigs[ext.cSymbol]
+            if (ptrSig != null) {
+                val (actualRetLt, actualParamLts) = ptrSig
+                val castArgList = argRegs.indices.joinToString(", ") { i ->
+                    val r = argRegs[i]
+                    val paramLt = actualParamLts.getOrElse(i) { llvmType(argTypes.getOrElse(i) { Type.TInt }) }
+                    val srcLt = argTypes.getOrNull(i)?.let { llvmType(it) } ?: "i64"
+                    if (paramLt == "i8*" && srcLt != "i8*") {
+                        val castReg = fresh("itp")
+                        emit("  $castReg = inttoptr $srcLt $r to i8*")
+                        "i8* $castReg"
+                    } else {
+                        "$paramLt $r"
+                    }
+                }
+                if (actualRetLt == "void") {
+                    emit("  call void @${ext.cSymbol}($castArgList)")
+                    return "0"
+                }
+                val callRes = fresh("extcall")
+                emit("  $callRes = call $actualRetLt @${ext.cSymbol}($castArgList)")
+                val declRetLt = llvmType(ext.retType)
+                if (declRetLt == "i64" && actualRetLt == "i8*") {
+                    val ptiReg = fresh("pti")
+                    emit("  $ptiReg = ptrtoint i8* $callRes to i64")
+                    return ptiReg
+                }
+                return callRes
+            }
             val retLt = llvmType(ext.retType)
             val argList = if (ext.paramTypes.isNotEmpty()) {
                 argRegs.zip(ext.paramTypes).joinToString(", ") { (r, t) -> "${llvmType(t)} noundef $r" }
