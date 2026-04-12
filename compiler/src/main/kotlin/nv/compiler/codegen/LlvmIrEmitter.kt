@@ -90,7 +90,15 @@ class LlvmIrEmitter(
         "nv_rand_seed", "nv_rand_init", "nv_rand_next",
         "nv_rand_float", "nv_rand_int", "nv_rand_bool",
         // Phase 5.5 — RC
-        "nv_rc_retain", "nv_rc_release", "nv_weak_load"
+        "nv_rc_retain", "nv_rc_release", "nv_weak_load",
+        // Phase 5.6 — std.hash
+        "nv_hash_fnv1a", "nv_hash_djb2", "nv_hash_murmur3",
+        "nv_hash_crc32", "nv_hash_combine", "nv_hash_sha256", "nv_hash_md5",
+        // Phase 5.6 — std.fmt
+        "nv_fmt_int", "nv_fmt_float", "nv_fmt_truncate",
+        "nv_fmt_file_size", "nv_fmt_duration", "nv_fmt_thousands",
+        // Phase 5.6 — std.iter
+        "nv_iter_range", "nv_iter_range_step"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -239,6 +247,35 @@ class LlvmIrEmitter(
 @.str.mode_a = private unnamed_addr constant [2 x i8]  c"a\00", align 1
 @.str.p5_fsjoin = private unnamed_addr constant [6 x i8] c"%s/%s\00", align 1
 @nv_rand_state  = global i64 6364136223846793005, align 8
+; Phase 5.6 — SHA-256 constants
+@sha256_k = private constant [64 x i32] [i32 1116352408,i32 1899447441,i32 -1245643825,i32 -373957723,i32 961987163,i32 1508970993,i32 -1841331548,i32 -1424204075,i32 -670586216,i32 310598401,i32 607225278,i32 1426881987,i32 1925078388,i32 -2132889090,i32 -1680079193,i32 -1046744716,i32 -459576895,i32 -272742522,i32 264347078,i32 604807628,i32 770255983,i32 1249150122,i32 1555081692,i32 1996064986,i32 -1740746414,i32 -1473132947,i32 -1341970488,i32 -1084653625,i32 -958395405,i32 -710438585,i32 113926993,i32 338241895,i32 666307205,i32 773529912,i32 1294757372,i32 1396182291,i32 1695183700,i32 1986661051,i32 -2117940946,i32 -1838011259,i32 -1564481375,i32 -1474664885,i32 -1035236496,i32 -949202525,i32 -778901479,i32 -694614492,i32 -200395387,i32 275423344,i32 430227734,i32 506948616,i32 659060556,i32 883997877,i32 958139571,i32 1322822218,i32 1537002063,i32 1747873779,i32 1955562222,i32 2024104815,i32 -2067236844,i32 -1933114872,i32 -1866530822,i32 -1538233109,i32 -1090935817,i32 -965641998]
+@sha256_hinit = private constant [8 x i32] [i32 1779033703,i32 -1150833019,i32 1013904242,i32 -1521486534,i32 1359893119,i32 -1694144372,i32 528734635,i32 1541459225]
+; Phase 5.6 — MD5 constants
+@md5_T = private constant [64 x i32] [i32 -680876936,i32 -389564586,i32 606105819,i32 -1044525330,i32 -176418897,i32 1200080426,i32 -1473231341,i32 -45705983,i32 1770035416,i32 -1958414417,i32 -42063,i32 -1990404162,i32 1804603682,i32 -40341101,i32 -1502002290,i32 1236535329,i32 -165796510,i32 -1069501632,i32 643717713,i32 -373897302,i32 -701558691,i32 38016083,i32 -660478335,i32 -405537848,i32 568446438,i32 -1019803690,i32 -187363961,i32 1163531501,i32 -1444681467,i32 -51403784,i32 1735328473,i32 -1926607734,i32 -378558,i32 -2022574463,i32 1839030562,i32 -35309556,i32 -1530992060,i32 1272893353,i32 -155497632,i32 -1094730640,i32 681279174,i32 -358537222,i32 -722521979,i32 76029189,i32 -640364487,i32 -421815835,i32 530742520,i32 -995338651,i32 -198630844,i32 1126891415,i32 -1416354905,i32 -57434055,i32 1700485571,i32 -1894986606,i32 -1051523,i32 -2054922799,i32 1873313359,i32 -30611744,i32 -1560198380,i32 1309151649,i32 -145523070,i32 -1120210379,i32 718787259,i32 -343485551]
+@md5_s = private constant [64 x i8] [i8 7,i8 12,i8 17,i8 22,i8 7,i8 12,i8 17,i8 22,i8 7,i8 12,i8 17,i8 22,i8 7,i8 12,i8 17,i8 22,i8 5,i8 9,i8 14,i8 20,i8 5,i8 9,i8 14,i8 20,i8 5,i8 9,i8 14,i8 20,i8 5,i8 9,i8 14,i8 20,i8 4,i8 11,i8 16,i8 23,i8 4,i8 11,i8 16,i8 23,i8 4,i8 11,i8 16,i8 23,i8 4,i8 11,i8 16,i8 23,i8 6,i8 10,i8 15,i8 21,i8 6,i8 10,i8 15,i8 21,i8 6,i8 10,i8 15,i8 21,i8 6,i8 10,i8 15,i8 21]
+; Phase 5.6 — fmt format strings
+@.fmt.hex2 = private unnamed_addr constant [3 x i8] c"%x\00", align 1
+@.fmt.hexU8 = private unnamed_addr constant [5 x i8] c"%02x\00", align 1
+@.fmt.hex8 = private unnamed_addr constant [5 x i8] c"%08x\00", align 1
+@.fmt.u64  = private unnamed_addr constant [5 x i8] c"%llu\00", align 1
+@.fmt.fmtfloat_e = private unnamed_addr constant [5 x i8] c"%.*e\00", align 1
+@.fmt.fmtfloat_f = private unnamed_addr constant [5 x i8] c"%.*f\00", align 1
+@.fmt.fmtfloat_g = private unnamed_addr constant [5 x i8] c"%.*g\00", align 1
+@.fmt.fs_b   = private unnamed_addr constant [7 x i8] c"%lld B\00", align 1
+@.fmt.fs_int = private unnamed_addr constant [8 x i8] c"%lld %s\00", align 1
+@.fmt.fs_flt = private unnamed_addr constant [8 x i8] c"%.1f %s\00", align 1
+@.str.kb = private unnamed_addr constant [3 x i8] c"KB\00", align 1
+@.str.mb = private unnamed_addr constant [3 x i8] c"MB\00", align 1
+@.str.gb = private unnamed_addr constant [3 x i8] c"GB\00", align 1
+@.str.tb = private unnamed_addr constant [3 x i8] c"TB\00", align 1
+@.str.pb = private unnamed_addr constant [3 x i8] c"PB\00", align 1
+@.fmt.dur_ms  = private unnamed_addr constant [7 x i8] c"%lldms\00", align 1
+@.fmt.dur_s   = private unnamed_addr constant [6 x i8] c"%llds\00", align 1
+@.fmt.dur_ms2 = private unnamed_addr constant [12 x i8] c"%lldm %llds\00", align 1
+@.fmt.dur_hm  = private unnamed_addr constant [12 x i8] c"%lldh %lldm\00", align 1
+@.fmt.u64plain = private unnamed_addr constant [5 x i8] c"%llu\00", align 1
+@.fmt.llx = private unnamed_addr constant [5 x i8] c"%llx\00", align 1
+@.fmt.llo = private unnamed_addr constant [5 x i8] c"%llo\00", align 1
 """.trimIndent())
     }
 
@@ -307,6 +344,8 @@ declare i32    @fflush(i8*)
 declare i32    @access(i8*, i32)
 declare i8*  @strrchr(i8*, i32)
 declare i8*  @memcpy(i8* noalias, i8* noalias, i64)
+declare i8*  @memset(i8*, i32, i64)
+declare i8*  @calloc(i64, i64)
 declare i8*  @opendir(i8*)
 declare i32  @closedir(i8*)
 declare i32  @unlink(i8*)
@@ -635,6 +674,9 @@ entry:
         emitPhase5TimeRuntime()
         emitPhase5ProcessRuntime()
         emitPhase5RandRuntime()
+        emitPhase56HashRuntime()
+        emitPhase56FmtRuntime()
+        emitPhase56IterRuntime()
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -2044,8 +2086,1107 @@ entry:
 """.trimIndent())
     }
 
-    /**
-     * Emit constructor functions for every sealed class variant declared in the current module.
+    // ─────────────────────────────────────────────────────────────────────
+    // Phase 5.6 — std.hash real implementations (inline LLVM IR)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private fun emitPhase56HashRuntime() {
+        rtFns.appendLine("""
+; ── Phase 5.6: std.hash ──────────────────────────────────────────────────────
+
+; nv_hash_fnv1a(s) → i64  (FNV-1a)
+define i64 @nv_hash_fnv1a(i8* %s) {
+entry:
+  br label %loop
+loop:
+  %ptr  = phi i8* [ %s, %entry ], [ %np, %body ]
+  %hash = phi i64 [ -3750763034362895579, %entry ], [ %nh, %body ]
+  %c    = load i8, i8* %ptr, align 1
+  %done = icmp eq i8 %c, 0
+  br i1 %done, label %ret, label %body
+body:
+  %b64 = zext i8 %c to i64
+  %xd  = xor i64 %hash, %b64
+  %nh  = mul i64 %xd, 1099511628211
+  %np  = getelementptr i8, i8* %ptr, i64 1
+  br label %loop
+ret:
+  ret i64 %hash
+}
+
+; nv_hash_djb2(s) → i64  (djb2: hash*33 + byte)
+define i64 @nv_hash_djb2(i8* %s) {
+entry:
+  br label %loop
+loop:
+  %ptr  = phi i8* [ %s, %entry ], [ %np, %body ]
+  %hash = phi i64 [ 5381, %entry ], [ %nh, %body ]
+  %c    = load i8, i8* %ptr, align 1
+  %done = icmp eq i8 %c, 0
+  br i1 %done, label %ret, label %body
+body:
+  %b64 = zext i8 %c to i64
+  %h33 = mul i64 %hash, 33
+  %nh  = add i64 %h33, %b64
+  %np  = getelementptr i8, i8* %ptr, i64 1
+  br label %loop
+ret:
+  ret i64 %hash
+}
+
+; nv_hash_crc32(s) → i64  (IEEE CRC-32, polynomial 0xEDB88320, bit-by-bit)
+; -306674912 = 0xEDB88320 as signed i32
+define i64 @nv_hash_crc32(i8* %s) {
+entry:
+  br label %loop
+loop:
+  %ptr  = phi i8* [ %s, %entry ], [ %np, %body ]
+  %crc  = phi i32 [ -1, %entry ], [ %r7, %body ]
+  %c    = load i8, i8* %ptr, align 1
+  %done = icmp eq i8 %c, 0
+  br i1 %done, label %ret, label %body
+body:
+  %b8 = zext i8 %c to i32
+  %c0 = xor i32 %crc, %b8
+  %l0 = and i32 %c0, 1
+  %s0 = lshr i32 %c0, 1
+  %e0 = icmp ne i32 %l0, 0
+  %p0 = select i1 %e0, i32 -306674912, i32 0
+  %r0 = xor i32 %s0, %p0
+  %l1 = and i32 %r0, 1
+  %s1 = lshr i32 %r0, 1
+  %e1 = icmp ne i32 %l1, 0
+  %p1 = select i1 %e1, i32 -306674912, i32 0
+  %r1 = xor i32 %s1, %p1
+  %l2 = and i32 %r1, 1
+  %s2 = lshr i32 %r1, 1
+  %e2 = icmp ne i32 %l2, 0
+  %p2 = select i1 %e2, i32 -306674912, i32 0
+  %r2 = xor i32 %s2, %p2
+  %l3 = and i32 %r2, 1
+  %s3 = lshr i32 %r2, 1
+  %e3 = icmp ne i32 %l3, 0
+  %p3 = select i1 %e3, i32 -306674912, i32 0
+  %r3 = xor i32 %s3, %p3
+  %l4 = and i32 %r3, 1
+  %s4 = lshr i32 %r3, 1
+  %e4 = icmp ne i32 %l4, 0
+  %p4 = select i1 %e4, i32 -306674912, i32 0
+  %r4 = xor i32 %s4, %p4
+  %l5 = and i32 %r4, 1
+  %s5 = lshr i32 %r4, 1
+  %e5 = icmp ne i32 %l5, 0
+  %p5 = select i1 %e5, i32 -306674912, i32 0
+  %r5 = xor i32 %s5, %p5
+  %l6 = and i32 %r5, 1
+  %s6 = lshr i32 %r5, 1
+  %e6 = icmp ne i32 %l6, 0
+  %p6 = select i1 %e6, i32 -306674912, i32 0
+  %r6 = xor i32 %s6, %p6
+  %l7 = and i32 %r6, 1
+  %s7 = lshr i32 %r6, 1
+  %e7 = icmp ne i32 %l7, 0
+  %p7 = select i1 %e7, i32 -306674912, i32 0
+  %r7 = xor i32 %s7, %p7
+  %np = getelementptr i8, i8* %ptr, i64 1
+  br label %loop
+ret:
+  %final = xor i32 %crc, -1
+  %r64   = zext i32 %final to i64
+  ret i64 %r64
+}
+
+; nv_hash_combine(h1, h2) → i64
+define i64 @nv_hash_combine(i64 %h1, i64 %h2) {
+entry:
+  %a   = add i64 %h2, 2654435769
+  %sl6 = shl i64 %h1, 6
+  %sr2 = lshr i64 %h1, 2
+  %b   = add i64 %a, %sl6
+  %cc  = add i64 %b, %sr2
+  %res = xor i64 %h1, %cc
+  ret i64 %res
+}
+
+; nv_hash_murmur3(s, seed) → i64  (MurmurHash3-inspired 64-bit)
+; c1 = 0x87c37b91114253d5 (signed: -8663945395140668459)
+; c2 = 0x4cf5ad432745937f (signed:  5545529020109919103)
+define i64 @nv_hash_murmur3(i8* %s, i64 %seed) {
+entry:
+  %len = call i64 @strlen(i8* %s)
+  %nblocks = udiv i64 %len, 8
+  br label %blkloop
+blkloop:
+  %bi = phi i64 [ 0, %entry ], [ %binc, %blkbody ]
+  %h  = phi i64 [ %seed, %entry ], [ %hnext, %blkbody ]
+  %blkdone = icmp eq i64 %bi, %nblocks
+  br i1 %blkdone, label %tail, label %blkbody
+blkbody:
+  %off  = mul i64 %bi, 8
+  %bptr = getelementptr i8, i8* %s, i64 %off
+  %kp   = bitcast i8* %bptr to i64*
+  %kraw = load i64, i64* %kp, align 1
+  %k1   = mul i64 %kraw, -8663945395140668459
+  %rl31l = shl i64 %k1, 31
+  %rl31r = lshr i64 %k1, 33
+  %k2   = or i64 %rl31l, %rl31r
+  %k3   = mul i64 %k2, 5545529020109919103
+  %hxk  = xor i64 %h, %k3
+  %rl27l = shl i64 %hxk, 27
+  %rl27r = lshr i64 %hxk, 37
+  %hrot = or i64 %rl27l, %rl27r
+  %h5   = mul i64 %hrot, 5
+  %hnext = add i64 %h5, 1390208809
+  %binc = add i64 %bi, 1
+  br label %blkloop
+tail:
+  ; accumulate remaining bytes into k, little-endian
+  %tail_off = mul i64 %nblocks, 8
+  %tail_ptr = getelementptr i8, i8* %s, i64 %tail_off
+  %tail_len = urem i64 %len, 8
+  br label %tailloop
+tailloop:
+  %ti  = phi i64 [ 0, %tail ], [ %tinc, %tailbody ]
+  %tk  = phi i64 [ 0, %tail ], [ %tknext, %tailbody ]
+  %tdone = icmp eq i64 %ti, %tail_len
+  br i1 %tdone, label %finalize, label %tailbody
+tailbody:
+  %tbptr = getelementptr i8, i8* %tail_ptr, i64 %ti
+  %tb    = load i8, i8* %tbptr, align 1
+  %tb64  = zext i8 %tb to i64
+  %shift = mul i64 %ti, 8
+  %tb_sh = shl i64 %tb64, %shift
+  %tknext = or i64 %tk, %tb_sh
+  %tinc  = add i64 %ti, 1
+  br label %tailloop
+finalize:
+  ; Mix tail k into h (if any tail bytes)
+  %has_tail = icmp ne i64 %tail_len, 0
+  %tk_c1    = mul i64 %tk, -8663945395140668459
+  %rl31l2   = shl i64 %tk_c1, 31
+  %rl31r2   = lshr i64 %tk_c1, 33
+  %tk_rot   = or i64 %rl31l2, %rl31r2
+  %tk_c2    = mul i64 %tk_rot, 5545529020109919103
+  %h_with_tail = xor i64 %h, %tk_c2
+  %h_fin = select i1 %has_tail, i64 %h_with_tail, i64 %h
+  ; fmix64
+  %hf1  = xor i64 %h_fin, %len
+  %hf2  = lshr i64 %hf1, 33
+  %hf3  = xor i64 %hf1, %hf2
+  %hf4  = mul i64 %hf3, -49064778989728563
+  %hf5  = lshr i64 %hf4, 33
+  %hf6  = xor i64 %hf4, %hf5
+  %hf7  = mul i64 %hf6, -4265267296055464877
+  %hf8  = lshr i64 %hf7, 33
+  %hf9  = xor i64 %hf7, %hf8
+  ret i64 %hf9
+}
+
+; ── SHA-256 helper: process one 512-bit block ────────────────────────────────
+; nv_sha256_block(h: i32*, blk: i8*)  — updates h[0..7] in place
+define void @nv_sha256_block(i32* %h, i8* %blk) {
+entry:
+  %W = alloca [64 x i32], align 4
+  br label %winit
+winit:
+  %wi   = phi i32 [ 0, %entry ], [ %winc, %winit_body ]
+  %wdone = icmp eq i32 %wi, 16
+  br i1 %wdone, label %wexp, label %winit_body
+winit_body:
+  %wi64   = zext i32 %wi to i64
+  %byteoff = mul i64 %wi64, 4
+  %p0     = getelementptr i8, i8* %blk, i64 %byteoff
+  %off1   = add i64 %byteoff, 1
+  %off2   = add i64 %byteoff, 2
+  %off3   = add i64 %byteoff, 3
+  %p1     = getelementptr i8, i8* %blk, i64 %off1
+  %p2     = getelementptr i8, i8* %blk, i64 %off2
+  %p3     = getelementptr i8, i8* %blk, i64 %off3
+  %b0r    = load i8, i8* %p0, align 1
+  %b1r    = load i8, i8* %p1, align 1
+  %b2r    = load i8, i8* %p2, align 1
+  %b3r    = load i8, i8* %p3, align 1
+  %b0     = zext i8 %b0r to i32
+  %b1     = zext i8 %b1r to i32
+  %b2     = zext i8 %b2r to i32
+  %b3     = zext i8 %b3r to i32
+  %b0s    = shl i32 %b0, 24
+  %b1s    = shl i32 %b1, 16
+  %b2s    = shl i32 %b2, 8
+  %w01    = or i32 %b0s, %b1s
+  %w012   = or i32 %w01, %b2s
+  %word   = or i32 %w012, %b3
+  %Wptr   = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %wi64
+  store i32 %word, i32* %Wptr, align 4
+  %winc   = add i32 %wi, 1
+  br label %winit
+wexp:
+  %wxi  = phi i32 [ 16, %winit ], [ %wxinc, %wexp_body ]
+  %wxdone = icmp eq i32 %wxi, 64
+  br i1 %wxdone, label %cinit, label %wexp_body
+wexp_body:
+  %wxi64  = zext i32 %wxi to i64
+  %im15   = sub i32 %wxi, 15
+  %im15_64 = zext i32 %im15 to i64
+  %Wim15p = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %im15_64
+  %wim15  = load i32, i32* %Wim15p, align 4
+  %r7lo   = lshr i32 %wim15, 7
+  %r7hi   = shl  i32 %wim15, 25
+  %r7     = or   i32 %r7lo, %r7hi
+  %r18lo  = lshr i32 %wim15, 18
+  %r18hi  = shl  i32 %wim15, 14
+  %r18    = or   i32 %r18lo, %r18hi
+  %sr3    = lshr i32 %wim15, 3
+  %s0a    = xor  i32 %r7,  %r18
+  %s0     = xor  i32 %s0a, %sr3
+  %im2    = sub i32 %wxi, 2
+  %im2_64 = zext i32 %im2 to i64
+  %Wim2p  = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %im2_64
+  %wim2   = load i32, i32* %Wim2p, align 4
+  %r17lo  = lshr i32 %wim2, 17
+  %r17hi  = shl  i32 %wim2, 15
+  %r17    = or   i32 %r17lo, %r17hi
+  %r19lo  = lshr i32 %wim2, 19
+  %r19hi  = shl  i32 %wim2, 13
+  %r19    = or   i32 %r19lo, %r19hi
+  %sr10   = lshr i32 %wim2, 10
+  %s1a    = xor  i32 %r17, %r19
+  %s1     = xor  i32 %s1a, %sr10
+  %im16   = sub i32 %wxi, 16
+  %im16_64 = zext i32 %im16 to i64
+  %Wim16p = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %im16_64
+  %wim16  = load i32, i32* %Wim16p, align 4
+  %im7    = sub i32 %wxi, 7
+  %im7_64 = zext i32 %im7 to i64
+  %Wim7p  = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %im7_64
+  %wim7   = load i32, i32* %Wim7p, align 4
+  %wa     = add i32 %wim16, %s0
+  %wb     = add i32 %wa,    %wim7
+  %wc     = add i32 %wb,    %s1
+  %Wip    = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %wxi64
+  store i32 %wc, i32* %Wip, align 4
+  %wxinc  = add i32 %wxi, 1
+  br label %wexp
+cinit:
+  %h0 = load i32, i32* %h, align 4
+  %h1p = getelementptr i32, i32* %h, i64 1
+  %h1 = load i32, i32* %h1p, align 4
+  %h2p = getelementptr i32, i32* %h, i64 2
+  %h2 = load i32, i32* %h2p, align 4
+  %h3p = getelementptr i32, i32* %h, i64 3
+  %h3 = load i32, i32* %h3p, align 4
+  %h4p = getelementptr i32, i32* %h, i64 4
+  %h4 = load i32, i32* %h4p, align 4
+  %h5p = getelementptr i32, i32* %h, i64 5
+  %h5 = load i32, i32* %h5p, align 4
+  %h6p = getelementptr i32, i32* %h, i64 6
+  %h6 = load i32, i32* %h6p, align 4
+  %h7p = getelementptr i32, i32* %h, i64 7
+  %h7 = load i32, i32* %h7p, align 4
+  br label %compress
+compress:
+  %ci   = phi i32 [ 0, %cinit ], [ %cinc, %cbody ]
+  %ca   = phi i32 [ %h0, %cinit ], [ %ca_new, %cbody ]
+  %cb   = phi i32 [ %h1, %cinit ], [ %ca,     %cbody ]
+  %cc   = phi i32 [ %h2, %cinit ], [ %cb,     %cbody ]
+  %cd   = phi i32 [ %h3, %cinit ], [ %cc,     %cbody ]
+  %ce   = phi i32 [ %h4, %cinit ], [ %ce_new, %cbody ]
+  %cf   = phi i32 [ %h5, %cinit ], [ %ce,     %cbody ]
+  %cg   = phi i32 [ %h6, %cinit ], [ %cf,     %cbody ]
+  %chv  = phi i32 [ %h7, %cinit ], [ %cg,     %cbody ]
+  %cdone = icmp eq i32 %ci, 64
+  br i1 %cdone, label %cdone_bb, label %cbody
+cbody:
+  %ci64  = zext i32 %ci to i64
+  %Kgep  = getelementptr [64 x i32], [64 x i32]* @sha256_k, i64 0, i64 %ci64
+  %K_i   = load i32, i32* %Kgep, align 4
+  %Wgep  = getelementptr [64 x i32], [64 x i32]* %W, i64 0, i64 %ci64
+  %W_i   = load i32, i32* %Wgep, align 4
+  %ep1_r6l  = lshr i32 %ce, 6
+  %ep1_r6h  = shl  i32 %ce, 26
+  %ep1_r6   = or   i32 %ep1_r6l,  %ep1_r6h
+  %ep1_r11l = lshr i32 %ce, 11
+  %ep1_r11h = shl  i32 %ce, 21
+  %ep1_r11  = or   i32 %ep1_r11l, %ep1_r11h
+  %ep1_r25l = lshr i32 %ce, 25
+  %ep1_r25h = shl  i32 %ce, 7
+  %ep1_r25  = or   i32 %ep1_r25l, %ep1_r25h
+  %ep1a  = xor i32 %ep1_r6,  %ep1_r11
+  %ep1   = xor i32 %ep1a,    %ep1_r25
+  %ch_ef = and  i32 %ce, %cf
+  %ne    = xor  i32 %ce, -1
+  %ch_ng = and  i32 %ne, %cg
+  %ch    = xor  i32 %ch_ef, %ch_ng
+  %t1a   = add  i32 %chv, %ep1
+  %t1b   = add  i32 %t1a, %ch
+  %t1c   = add  i32 %t1b, %K_i
+  %t1    = add  i32 %t1c, %W_i
+  %ep0_r2l  = lshr i32 %ca, 2
+  %ep0_r2h  = shl  i32 %ca, 30
+  %ep0_r2   = or   i32 %ep0_r2l,  %ep0_r2h
+  %ep0_r13l = lshr i32 %ca, 13
+  %ep0_r13h = shl  i32 %ca, 19
+  %ep0_r13  = or   i32 %ep0_r13l, %ep0_r13h
+  %ep0_r22l = lshr i32 %ca, 22
+  %ep0_r22h = shl  i32 %ca, 10
+  %ep0_r22  = or   i32 %ep0_r22l, %ep0_r22h
+  %ep0a  = xor i32 %ep0_r2,  %ep0_r13
+  %ep0   = xor i32 %ep0a,    %ep0_r22
+  %maj_ab = and i32 %ca, %cb
+  %maj_ac = and i32 %ca, %cc
+  %maj_bc = and i32 %cb, %cc
+  %maj_a  = xor i32 %maj_ab, %maj_ac
+  %maj    = xor i32 %maj_a,  %maj_bc
+  %t2     = add i32 %ep0, %maj
+  %ca_new = add i32 %t1, %t2
+  %ce_new = add i32 %cd, %t1
+  %cinc   = add i32 %ci, 1
+  br label %compress
+cdone_bb:
+  %na0 = add i32 %h0, %ca
+  %na1 = add i32 %h1, %cb
+  %na2 = add i32 %h2, %cc
+  %na3 = add i32 %h3, %cd
+  %na4 = add i32 %h4, %ce
+  %na5 = add i32 %h5, %cf
+  %na6 = add i32 %h6, %cg
+  %na7 = add i32 %h7, %chv
+  store i32 %na0, i32* %h,   align 4
+  store i32 %na1, i32* %h1p, align 4
+  store i32 %na2, i32* %h2p, align 4
+  store i32 %na3, i32* %h3p, align 4
+  store i32 %na4, i32* %h4p, align 4
+  store i32 %na5, i32* %h5p, align 4
+  store i32 %na6, i32* %h6p, align 4
+  store i32 %na7, i32* %h7p, align 4
+  ret void
+}
+
+; nv_hash_sha256(s) → i8*  (64-char hex string, caller must free)
+define i8* @nv_hash_sha256(i8* %s) {
+entry:
+  ; Compute padded message length
+  %slen  = call i64 @strlen(i8* %s)
+  %lp72  = add i64 %slen, 72
+  %nblks = udiv i64 %lp72, 64
+  %ml    = mul i64 %nblks, 64
+  ; Allocate and zero-fill padded message
+  %msg   = call i8* @calloc(i64 %ml, i64 1)
+  call i8* @memcpy(i8* noalias %msg, i8* noalias %s, i64 %slen)
+  ; Padding: set 0x80 at msg[slen]
+  %padp  = getelementptr i8, i8* %msg, i64 %slen
+  store i8 -128, i8* %padp, align 1
+  ; Append big-endian 64-bit bit-length at msg[ml-8..ml-1]
+  %bitlen = mul i64 %slen, 8
+  %ml_m8  = sub i64 %ml, 8
+  %blen7  = lshr i64 %bitlen, 56
+  %blen6  = lshr i64 %bitlen, 48
+  %blen5  = lshr i64 %bitlen, 40
+  %blen4  = lshr i64 %bitlen, 32
+  %blen3  = lshr i64 %bitlen, 24
+  %blen2  = lshr i64 %bitlen, 16
+  %blen1  = lshr i64 %bitlen, 8
+  %by7    = trunc i64 %blen7 to i8
+  %by6    = trunc i64 %blen6 to i8
+  %by5    = trunc i64 %blen5 to i8
+  %by4    = trunc i64 %blen4 to i8
+  %by3    = trunc i64 %blen3 to i8
+  %by2    = trunc i64 %blen2 to i8
+  %by1    = trunc i64 %blen1 to i8
+  %by0    = trunc i64 %bitlen to i8
+  %pp7 = getelementptr i8, i8* %msg, i64 %ml_m8
+  %ml_m7 = add i64 %ml_m8, 1
+  %ml_m6 = add i64 %ml_m8, 2
+  %ml_m5 = add i64 %ml_m8, 3
+  %ml_m4 = add i64 %ml_m8, 4
+  %ml_m3 = add i64 %ml_m8, 5
+  %ml_m2 = add i64 %ml_m8, 6
+  %ml_m1 = add i64 %ml_m8, 7
+  %pp6 = getelementptr i8, i8* %msg, i64 %ml_m7
+  %pp5 = getelementptr i8, i8* %msg, i64 %ml_m6
+  %pp4 = getelementptr i8, i8* %msg, i64 %ml_m5
+  %pp3 = getelementptr i8, i8* %msg, i64 %ml_m4
+  %pp2 = getelementptr i8, i8* %msg, i64 %ml_m3
+  %pp1 = getelementptr i8, i8* %msg, i64 %ml_m2
+  %pp0 = getelementptr i8, i8* %msg, i64 %ml_m1
+  store i8 %by7, i8* %pp7, align 1
+  store i8 %by6, i8* %pp6, align 1
+  store i8 %by5, i8* %pp5, align 1
+  store i8 %by4, i8* %pp4, align 1
+  store i8 %by3, i8* %pp3, align 1
+  store i8 %by2, i8* %pp2, align 1
+  store i8 %by1, i8* %pp1, align 1
+  store i8 %by0, i8* %pp0, align 1
+  ; Initialize SHA-256 hash state h[0..7] from @sha256_hinit
+  %hstate = alloca [8 x i32], align 4
+  %hstate_i8 = bitcast [8 x i32]* %hstate to i8*
+  %hinit_p = getelementptr [8 x i32], [8 x i32]* @sha256_hinit, i64 0, i64 0
+  %hinit_i8 = bitcast i32* %hinit_p to i8*
+  call i8* @memcpy(i8* noalias %hstate_i8, i8* noalias %hinit_i8, i64 32)
+  %hptr = getelementptr [8 x i32], [8 x i32]* %hstate, i64 0, i64 0
+  ; Process each 64-byte block
+  br label %blkloop
+blkloop:
+  %blk_i = phi i64 [ 0, %entry ], [ %blk_inc, %blk_body ]
+  %blk_done = icmp eq i64 %blk_i, %nblks
+  br i1 %blk_done, label %output, label %blk_body
+blk_body:
+  %blk_off = mul i64 %blk_i, 64
+  %blk_ptr = getelementptr i8, i8* %msg, i64 %blk_off
+  call void @nv_sha256_block(i32* %hptr, i8* %blk_ptr)
+  %blk_inc = add i64 %blk_i, 1
+  br label %blkloop
+output:
+  call void @free(i8* %msg)
+  %out    = call i8* @malloc(i64 65)
+  %fmtp   = getelementptr [5 x i8], [5 x i8]* @.fmt.hex8, i64 0, i64 0
+  %h0v    = load i32, i32* %hptr, align 4
+  %hp1    = getelementptr i32, i32* %hptr, i64 1
+  %h1v    = load i32, i32* %hp1, align 4
+  %hp2    = getelementptr i32, i32* %hptr, i64 2
+  %h2v    = load i32, i32* %hp2, align 4
+  %hp3    = getelementptr i32, i32* %hptr, i64 3
+  %h3v    = load i32, i32* %hp3, align 4
+  %hp4    = getelementptr i32, i32* %hptr, i64 4
+  %h4v    = load i32, i32* %hp4, align 4
+  %hp5    = getelementptr i32, i32* %hptr, i64 5
+  %h5v    = load i32, i32* %hp5, align 4
+  %hp6    = getelementptr i32, i32* %hptr, i64 6
+  %h6v    = load i32, i32* %hp6, align 4
+  %hp7    = getelementptr i32, i32* %hptr, i64 7
+  %h7v    = load i32, i32* %hp7, align 4
+  %out0   = getelementptr i8, i8* %out, i64 0
+  %out8   = getelementptr i8, i8* %out, i64 8
+  %out16  = getelementptr i8, i8* %out, i64 16
+  %out24  = getelementptr i8, i8* %out, i64 24
+  %out32  = getelementptr i8, i8* %out, i64 32
+  %out40  = getelementptr i8, i8* %out, i64 40
+  %out48  = getelementptr i8, i8* %out, i64 48
+  %out56  = getelementptr i8, i8* %out, i64 56
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out0,  i64 9, i8* %fmtp, i32 %h0v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out8,  i64 9, i8* %fmtp, i32 %h1v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out16, i64 9, i8* %fmtp, i32 %h2v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out24, i64 9, i8* %fmtp, i32 %h3v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out32, i64 9, i8* %fmtp, i32 %h4v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out40, i64 9, i8* %fmtp, i32 %h5v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out48, i64 9, i8* %fmtp, i32 %h6v)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %out56, i64 9, i8* %fmtp, i32 %h7v)
+  %outnul = getelementptr i8, i8* %out, i64 64
+  store i8 0, i8* %outnul, align 1
+  ret i8* %out
+}
+
+; ── MD5 ───────────────────────────────────────────────────────────────────────
+; nv_hash_md5(s) → i8*  (32-char hex string, caller must free)
+; MD5 uses little-endian byte order throughout.
+define i8* @nv_hash_md5(i8* %s) {
+entry:
+  %slen  = call i64 @strlen(i8* %s)
+  %lp72  = add i64 %slen, 72
+  %nblks = udiv i64 %lp72, 64
+  %ml    = mul i64 %nblks, 64
+  %msg   = call i8* @calloc(i64 %ml, i64 1)
+  call i8* @memcpy(i8* noalias %msg, i8* noalias %s, i64 %slen)
+  %padp  = getelementptr i8, i8* %msg, i64 %slen
+  store i8 -128, i8* %padp, align 1
+  ; Append little-endian 64-bit bit-length at msg[ml-8..ml-1]
+  %bitlen  = mul i64 %slen, 8
+  %ml_m8   = sub i64 %ml, 8
+  %by0m    = trunc i64 %bitlen to i8
+  %bl1     = lshr i64 %bitlen, 8
+  %by1m    = trunc i64 %bl1 to i8
+  %bl2     = lshr i64 %bitlen, 16
+  %by2m    = trunc i64 %bl2 to i8
+  %bl3     = lshr i64 %bitlen, 24
+  %by3m    = trunc i64 %bl3 to i8
+  %bl4     = lshr i64 %bitlen, 32
+  %by4m    = trunc i64 %bl4 to i8
+  %bl5     = lshr i64 %bitlen, 40
+  %by5m    = trunc i64 %bl5 to i8
+  %bl6     = lshr i64 %bitlen, 48
+  %by6m    = trunc i64 %bl6 to i8
+  %bl7     = lshr i64 %bitlen, 56
+  %by7m    = trunc i64 %bl7 to i8
+  %mp0 = getelementptr i8, i8* %msg, i64 %ml_m8
+  %ml7 = add i64 %ml_m8, 1
+  %ml6 = add i64 %ml_m8, 2
+  %ml5 = add i64 %ml_m8, 3
+  %ml4 = add i64 %ml_m8, 4
+  %ml3 = add i64 %ml_m8, 5
+  %ml2 = add i64 %ml_m8, 6
+  %ml1 = add i64 %ml_m8, 7
+  %mp1 = getelementptr i8, i8* %msg, i64 %ml7
+  %mp2 = getelementptr i8, i8* %msg, i64 %ml6
+  %mp3 = getelementptr i8, i8* %msg, i64 %ml5
+  %mp4 = getelementptr i8, i8* %msg, i64 %ml4
+  %mp5 = getelementptr i8, i8* %msg, i64 %ml3
+  %mp6 = getelementptr i8, i8* %msg, i64 %ml2
+  %mp7 = getelementptr i8, i8* %msg, i64 %ml1
+  store i8 %by0m, i8* %mp0, align 1
+  store i8 %by1m, i8* %mp1, align 1
+  store i8 %by2m, i8* %mp2, align 1
+  store i8 %by3m, i8* %mp3, align 1
+  store i8 %by4m, i8* %mp4, align 1
+  store i8 %by5m, i8* %mp5, align 1
+  store i8 %by6m, i8* %mp6, align 1
+  store i8 %by7m, i8* %mp7, align 1
+  ; Initial MD5 state
+  %ma0 = alloca i32, align 4
+  %mb0 = alloca i32, align 4
+  %mc0 = alloca i32, align 4
+  %md0 = alloca i32, align 4
+  store i32 1732584193,  i32* %ma0, align 4
+  store i32 -271733879,  i32* %mb0, align 4
+  store i32 -1732584194, i32* %mc0, align 4
+  store i32 271733878,   i32* %md0, align 4
+  br label %md5_blkloop
+md5_blkloop:
+  %mbi  = phi i64 [ 0, %entry ], [ %mbinc, %md5_add_back ]
+  %mbdone = icmp eq i64 %mbi, %nblks
+  br i1 %mbdone, label %md5_output, label %md5_blk_init
+md5_blk_init:
+  ; Load M[0..15] as little-endian i32 from current block
+  %mblk_off = mul i64 %mbi, 64
+  %mblk_ptr = getelementptr i8, i8* %msg, i64 %mblk_off
+  ; Load 16 words (little-endian)
+  %mM = alloca [16 x i32], align 4
+  br label %md5_loadM
+md5_loadM:
+  %mli   = phi i32 [ 0, %md5_blk_init ], [ %mlinc, %md5_loadM_body ]
+  %mldone = icmp eq i32 %mli, 16
+  br i1 %mldone, label %md5_compress_init, label %md5_loadM_body
+md5_loadM_body:
+  %mli64  = zext i32 %mli to i64
+  %mloff  = mul i64 %mli64, 4
+  %ml_p0  = getelementptr i8, i8* %mblk_ptr, i64 %mloff
+  %ml_off1 = add i64 %mloff, 1
+  %ml_off2 = add i64 %mloff, 2
+  %ml_off3 = add i64 %mloff, 3
+  %ml_p1  = getelementptr i8, i8* %mblk_ptr, i64 %ml_off1
+  %ml_p2  = getelementptr i8, i8* %mblk_ptr, i64 %ml_off2
+  %ml_p3  = getelementptr i8, i8* %mblk_ptr, i64 %ml_off3
+  %mlb0   = load i8, i8* %ml_p0, align 1
+  %mlb1   = load i8, i8* %ml_p1, align 1
+  %mlb2   = load i8, i8* %ml_p2, align 1
+  %mlb3   = load i8, i8* %ml_p3, align 1
+  %mlw0   = zext i8 %mlb0 to i32
+  %mlw1   = zext i8 %mlb1 to i32
+  %mlw2   = zext i8 %mlb2 to i32
+  %mlw3   = zext i8 %mlb3 to i32
+  %mlw1s  = shl i32 %mlw1, 8
+  %mlw2s  = shl i32 %mlw2, 16
+  %mlw3s  = shl i32 %mlw3, 24
+  %mlword01 = or i32 %mlw0, %mlw1s
+  %mlword012 = or i32 %mlword01, %mlw2s
+  %mlword = or i32 %mlword012, %mlw3s
+  %mMp    = getelementptr [16 x i32], [16 x i32]* %mM, i64 0, i64 %mli64
+  store i32 %mlword, i32* %mMp, align 4
+  %mlinc  = add i32 %mli, 1
+  br label %md5_loadM
+md5_compress_init:
+  %A0 = load i32, i32* %ma0, align 4
+  %B0 = load i32, i32* %mb0, align 4
+  %C0 = load i32, i32* %mc0, align 4
+  %D0 = load i32, i32* %md0, align 4
+  br label %md5_compress
+md5_compress:
+  %mci  = phi i32 [ 0, %md5_compress_init ], [ %mcinc, %md5_cbody ]
+  %mA   = phi i32 [ %A0, %md5_compress_init ], [ %mD,   %md5_cbody ]
+  %mB   = phi i32 [ %B0, %md5_compress_init ], [ %mnew, %md5_cbody ]
+  %mC   = phi i32 [ %C0, %md5_compress_init ], [ %mB,   %md5_cbody ]
+  %mD   = phi i32 [ %D0, %md5_compress_init ], [ %mC,   %md5_cbody ]
+  %mcdone = icmp eq i32 %mci, 64
+  br i1 %mcdone, label %md5_add_back, label %md5_cbody
+md5_cbody:
+  %mci64 = zext i32 %mci to i64
+  ; Compute F and g based on round
+  ; Round 0-15: F=(B&C)|(~B&D), g=i
+  ; Round 16-31: F=(D&B)|(~D&C), g=(5*i+1)%16
+  ; Round 32-47: F=B^C^D,        g=(3*i+5)%16
+  ; Round 48-63: F=C^(B|~D),     g=(7*i)%16
+  %is_r0  = icmp slt i32 %mci, 16
+  %is_r1  = icmp slt i32 %mci, 32
+  %is_r2  = icmp slt i32 %mci, 48
+  ; F computation
+  %F_r0_bc = and i32 %mB, %mC
+  %F_r0_nd = xor i32 %mB, -1
+  %F_r0_ndc = and i32 %F_r0_nd, %mD
+  %F_r0   = or  i32 %F_r0_bc, %F_r0_ndc
+  %F_r1_db = and i32 %mD, %mB
+  %F_r1_nd2 = xor i32 %mD, -1
+  %F_r1_nc = and i32 %F_r1_nd2, %mC
+  %F_r1   = or  i32 %F_r1_db, %F_r1_nc
+  %F_r2   = xor i32 %mB, %mC
+  %F_r2x  = xor i32 %F_r2, %mD
+  %F_r3_nd = xor i32 %mD, -1
+  %F_r3_bnd = or i32 %mB, %F_r3_nd
+  %F_r3   = xor i32 %mC, %F_r3_bnd
+  %F_01   = select i1 %is_r0, i32 %F_r0, i32 %F_r1
+  %F_23   = select i1 %is_r2, i32 %F_r2x, i32 %F_r3
+  %F_sel  = select i1 %is_r1, i32 %F_01, i32 %F_23
+  ; g index computation
+  ; g_r0 = i, g_r1 = (5*i+1)%16, g_r2 = (3*i+5)%16, g_r3 = (7*i)%16
+  %g_r0   = urem i32 %mci, 16
+  %g5i    = mul  i32 %mci, 5
+  %g5i1   = add  i32 %g5i, 1
+  %g_r1   = urem i32 %g5i1, 16
+  %g3i    = mul  i32 %mci, 3
+  %g3i5   = add  i32 %g3i, 5
+  %g_r2   = urem i32 %g3i5, 16
+  %g7i    = mul  i32 %mci, 7
+  %g_r3   = urem i32 %g7i, 16
+  %g_01   = select i1 %is_r0, i32 %g_r0, i32 %g_r1
+  %g_23   = select i1 %is_r2, i32 %g_r2, i32 %g_r3
+  %g_sel  = select i1 %is_r1, i32 %g_01, i32 %g_23
+  ; Load M[g]
+  %g64    = zext i32 %g_sel to i64
+  %mMgp   = getelementptr [16 x i32], [16 x i32]* %mM, i64 0, i64 %g64
+  %mMg    = load i32, i32* %mMgp, align 4
+  ; Load T[i]
+  %Tp     = getelementptr [64 x i32], [64 x i32]* @md5_T, i64 0, i64 %mci64
+  %Ti     = load i32, i32* %Tp, align 4
+  ; Load shift s[i]
+  %sp     = getelementptr [64 x i8], [64 x i8]* @md5_s, i64 0, i64 %mci64
+  %si8    = load i8, i8* %sp, align 1
+  %si32   = zext i8 %si8 to i32
+  ; temp = A + F + T[i] + M[g]
+  %tmp1   = add i32 %mA, %F_sel
+  %tmp2   = add i32 %tmp1, %Ti
+  %tmp3   = add i32 %tmp2, %mMg
+  ; ROTL(tmp3, s[i])
+  %rotl_l = shl  i32 %tmp3, %si32
+  %shr_n  = sub  i32 32, %si32
+  %rotl_r = lshr i32 %tmp3, %shr_n
+  %rotl   = or   i32 %rotl_l, %rotl_r
+  ; new = B + ROTL(...)
+  %mnew   = add i32 %mB, %rotl
+  %mcinc  = add i32 %mci, 1
+  br label %md5_compress
+md5_add_back:
+  %oA = load i32, i32* %ma0, align 4
+  %oB = load i32, i32* %mb0, align 4
+  %oC = load i32, i32* %mc0, align 4
+  %oD = load i32, i32* %md0, align 4
+  %nA = add i32 %oA, %mA
+  %nB = add i32 %oB, %mB
+  %nC = add i32 %oC, %mC
+  %nD = add i32 %oD, %mD
+  store i32 %nA, i32* %ma0, align 4
+  store i32 %nB, i32* %mb0, align 4
+  store i32 %nC, i32* %mc0, align 4
+  store i32 %nD, i32* %md0, align 4
+  %mbinc = add i64 %mbi, 1
+  br label %md5_blkloop
+md5_output:
+  call void @free(i8* %msg)
+  %out = call i8* @malloc(i64 33)
+  %fmtU8 = getelementptr [5 x i8], [5 x i8]* @.fmt.hexU8, i64 0, i64 0
+  %fA = load i32, i32* %ma0, align 4
+  %fB = load i32, i32* %mb0, align 4
+  %fC = load i32, i32* %mc0, align 4
+  %fD = load i32, i32* %md0, align 4
+  %fAb0 = and i32 %fA, 255
+  %fAb1s = lshr i32 %fA, 8
+  %fAb1 = and i32 %fAb1s, 255
+  %fAb2s = lshr i32 %fA, 16
+  %fAb2 = and i32 %fAb2s, 255
+  %fAb3s = lshr i32 %fA, 24
+  %fAb3 = and i32 %fAb3s, 255
+  %op0  = getelementptr i8, i8* %out, i64 0
+  %op2  = getelementptr i8, i8* %out, i64 2
+  %op4  = getelementptr i8, i8* %out, i64 4
+  %op6  = getelementptr i8, i8* %out, i64 6
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op0,  i64 3, i8* %fmtU8, i32 %fAb0)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op2,  i64 3, i8* %fmtU8, i32 %fAb1)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op4,  i64 3, i8* %fmtU8, i32 %fAb2)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op6,  i64 3, i8* %fmtU8, i32 %fAb3)
+  %fBb0 = and i32 %fB, 255
+  %fBb1s = lshr i32 %fB, 8
+  %fBb1 = and i32 %fBb1s, 255
+  %fBb2s = lshr i32 %fB, 16
+  %fBb2 = and i32 %fBb2s, 255
+  %fBb3s = lshr i32 %fB, 24
+  %fBb3 = and i32 %fBb3s, 255
+  %op8  = getelementptr i8, i8* %out, i64 8
+  %op10 = getelementptr i8, i8* %out, i64 10
+  %op12 = getelementptr i8, i8* %out, i64 12
+  %op14 = getelementptr i8, i8* %out, i64 14
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op8,  i64 3, i8* %fmtU8, i32 %fBb0)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op10, i64 3, i8* %fmtU8, i32 %fBb1)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op12, i64 3, i8* %fmtU8, i32 %fBb2)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op14, i64 3, i8* %fmtU8, i32 %fBb3)
+  %fCb0 = and i32 %fC, 255
+  %fCb1s = lshr i32 %fC, 8
+  %fCb1 = and i32 %fCb1s, 255
+  %fCb2s = lshr i32 %fC, 16
+  %fCb2 = and i32 %fCb2s, 255
+  %fCb3s = lshr i32 %fC, 24
+  %fCb3 = and i32 %fCb3s, 255
+  %op16 = getelementptr i8, i8* %out, i64 16
+  %op18 = getelementptr i8, i8* %out, i64 18
+  %op20 = getelementptr i8, i8* %out, i64 20
+  %op22 = getelementptr i8, i8* %out, i64 22
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op16, i64 3, i8* %fmtU8, i32 %fCb0)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op18, i64 3, i8* %fmtU8, i32 %fCb1)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op20, i64 3, i8* %fmtU8, i32 %fCb2)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op22, i64 3, i8* %fmtU8, i32 %fCb3)
+  %fDb0 = and i32 %fD, 255
+  %fDb1s = lshr i32 %fD, 8
+  %fDb1 = and i32 %fDb1s, 255
+  %fDb2s = lshr i32 %fD, 16
+  %fDb2 = and i32 %fDb2s, 255
+  %fDb3s = lshr i32 %fD, 24
+  %fDb3 = and i32 %fDb3s, 255
+  %op24 = getelementptr i8, i8* %out, i64 24
+  %op26 = getelementptr i8, i8* %out, i64 26
+  %op28 = getelementptr i8, i8* %out, i64 28
+  %op30 = getelementptr i8, i8* %out, i64 30
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op24, i64 3, i8* %fmtU8, i32 %fDb0)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op26, i64 3, i8* %fmtU8, i32 %fDb1)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op28, i64 3, i8* %fmtU8, i32 %fDb2)
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %op30, i64 3, i8* %fmtU8, i32 %fDb3)
+  %opnul = getelementptr i8, i8* %out, i64 32
+  store i8 0, i8* %opnul, align 1
+  ret i8* %out
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase56FmtRuntime() {
+        rtFns.appendLine("""
+; ── nv_fmt_int ───────────────────────────────────────────────────────────────
+define i8* @nv_fmt_int(i64 %n, i64 %width, i8* %padChar, i64 %radix) {
+entry:
+  %buf  = alloca [128 x i8], align 1
+  %bufp = getelementptr [128 x i8], [128 x i8]* %buf, i64 0, i64 0
+  %is10 = icmp eq i64 %radix, 10
+  %is16 = icmp eq i64 %radix, 16
+  %is8  = icmp eq i64 %radix, 8
+  %neg  = icmp slt i64 %n, 0
+  %doneg = and i1 %is10, %neg
+  %neg_n = sub i64 0, %n
+  %absn  = select i1 %doneg, i64 %neg_n, i64 %n
+  %fmtu = getelementptr [5 x i8], [5 x i8]* @.fmt.u64, i64 0, i64 0
+  %fmtx = getelementptr [5 x i8], [5 x i8]* @.fmt.llx, i64 0, i64 0
+  %fmto = getelementptr [5 x i8], [5 x i8]* @.fmt.llo, i64 0, i64 0
+  %fs1  = select i1 %is8,  i8* %fmto, i8* %fmtu
+  %fs2  = select i1 %is16, i8* %fmtx, i8* %fs1
+  %fmt  = select i1 %is10, i8* %fmtu, i8* %fs2
+  %fval = select i1 %is10, i64 %absn, i64 %n
+  %soff = select i1 %doneg, i64 1, i64 0
+  %wrp  = getelementptr i8, i8* %bufp, i64 %soff
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %wrp, i64 127, i8* %fmt, i64 %fval)
+  br i1 %doneg, label %write_sign, label %done_fmt
+write_sign:
+  store i8 45, i8* %bufp, align 1
+  br label %done_fmt
+done_fmt:
+  %numlen = call i64 @strlen(i8* %bufp)
+  %need_pad = icmp sgt i64 %width, %numlen
+  br i1 %need_pad, label %do_pad, label %no_pad
+no_pad:
+  %np_len = add i64 %numlen, 1
+  %np_res = call i8* @malloc(i64 %np_len)
+  call i8* @strcpy(i8* %np_res, i8* %bufp)
+  ret i8* %np_res
+do_pad:
+  %padlen = sub i64 %width, %numlen
+  %reslen = add i64 %width, 1
+  %res = call i8* @malloc(i64 %reslen)
+  %pc  = load i8, i8* %padChar, align 1
+  br label %padloop
+padloop:
+  %pi = phi i64 [ 0, %do_pad ], [ %piinc, %pad_body ]
+  %pldone = icmp eq i64 %pi, %padlen
+  br i1 %pldone, label %padcopy, label %pad_body
+pad_body:
+  %pp = getelementptr i8, i8* %res, i64 %pi
+  store i8 %pc, i8* %pp, align 1
+  %piinc = add i64 %pi, 1
+  br label %padloop
+padcopy:
+  %dst = getelementptr i8, i8* %res, i64 %padlen
+  call i8* @strcpy(i8* %dst, i8* %bufp)
+  ret i8* %res
+}
+
+; ── nv_fmt_float ─────────────────────────────────────────────────────────────
+define i8* @nv_fmt_float(double %x, i64 %precision, i8* %notation) {
+entry:
+  %buf  = call i8* @malloc(i64 128)
+  %nc   = load i8, i8* %notation, align 1
+  %nc32 = sext i8 %nc to i32
+  %is_e = icmp eq i32 %nc32, 101
+  %is_f = icmp eq i32 %nc32, 102
+  %fme  = getelementptr [5 x i8], [5 x i8]* @.fmt.fmtfloat_e, i64 0, i64 0
+  %fmf  = getelementptr [5 x i8], [5 x i8]* @.fmt.fmtfloat_f, i64 0, i64 0
+  %fmg  = getelementptr [5 x i8], [5 x i8]* @.fmt.fmtfloat_g, i64 0, i64 0
+  %fm1  = select i1 %is_f, i8* %fmf, i8* %fmg
+  %fmt  = select i1 %is_e, i8* %fme, i8* %fm1
+  %prec32 = trunc i64 %precision to i32
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 128, i8* %fmt, i32 %prec32, double %x)
+  ret i8* %buf
+}
+
+; ── nv_fmt_truncate ──────────────────────────────────────────────────────────
+define i8* @nv_fmt_truncate(i8* %s, i64 %width, i8* %suffix) {
+entry:
+  %slen = call i64 @strlen(i8* %s)
+  %need = icmp sgt i64 %slen, %width
+  br i1 %need, label %do_trunc, label %no_trunc
+no_trunc:
+  %r1   = add i64 %slen, 1
+  %res0 = call i8* @malloc(i64 %r1)
+  call i8* @strcpy(i8* %res0, i8* %s)
+  ret i8* %res0
+do_trunc:
+  %suflen = call i64 @strlen(i8* %suffix)
+  %keep0  = sub i64 %width, %suflen
+  %kneg   = icmp slt i64 %keep0, 0
+  %keep   = select i1 %kneg, i64 0, i64 %keep0
+  %actsuf = select i1 %kneg, i64 %width, i64 %suflen
+  %reslen = add i64 %width, 1
+  %res    = call i8* @malloc(i64 %reslen)
+  call i8* @memcpy(i8* noalias %res, i8* noalias %s, i64 %keep)
+  %dst    = getelementptr i8, i8* %res, i64 %keep
+  call i8* @memcpy(i8* noalias %dst, i8* noalias %suffix, i64 %actsuf)
+  %nul    = getelementptr i8, i8* %res, i64 %width
+  store i8 0, i8* %nul, align 1
+  ret i8* %res
+}
+
+; ── nv_fmt_file_size ─────────────────────────────────────────────────────────
+define i8* @nv_fmt_file_size(i64 %bytes) {
+entry:
+  %buf = call i8* @malloc(i64 64)
+  %fmb = getelementptr [7 x i8], [7 x i8]* @.fmt.fs_b, i64 0, i64 0
+  %fmf = getelementptr [8 x i8], [8 x i8]* @.fmt.fs_flt, i64 0, i64 0
+  %kb  = getelementptr [3 x i8], [3 x i8]* @.str.kb, i64 0, i64 0
+  %mb  = getelementptr [3 x i8], [3 x i8]* @.str.mb, i64 0, i64 0
+  %gb  = getelementptr [3 x i8], [3 x i8]* @.str.gb, i64 0, i64 0
+  %tb  = getelementptr [3 x i8], [3 x i8]* @.str.tb, i64 0, i64 0
+  %pb  = getelementptr [3 x i8], [3 x i8]* @.str.pb, i64 0, i64 0
+  %is_b  = icmp slt i64 %bytes, 1024
+  %is_kb = icmp slt i64 %bytes, 1048576
+  %is_mb = icmp slt i64 %bytes, 1073741824
+  %is_gb = icmp slt i64 %bytes, 1099511627776
+  %is_tb = icmp slt i64 %bytes, 1125899906842624
+  br i1 %is_b, label %fmt_b, label %try_kb
+fmt_b:
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmb, i64 %bytes)
+  ret i8* %buf
+try_kb:
+  br i1 %is_kb, label %fmt_kb, label %try_mb
+fmt_kb:
+  %fkb = sitofp i64 %bytes to double
+  %fkb2 = fdiv double %fkb, 1024.0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmf, double %fkb2, i8* %kb)
+  ret i8* %buf
+try_mb:
+  br i1 %is_mb, label %fmt_mb, label %try_gb
+fmt_mb:
+  %fmb2 = sitofp i64 %bytes to double
+  %fmb3 = fdiv double %fmb2, 1048576.0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmf, double %fmb3, i8* %mb)
+  ret i8* %buf
+try_gb:
+  br i1 %is_gb, label %fmt_gb, label %try_tb
+fmt_gb:
+  %fgb = sitofp i64 %bytes to double
+  %fgb2 = fdiv double %fgb, 1073741824.0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmf, double %fgb2, i8* %gb)
+  ret i8* %buf
+try_tb:
+  br i1 %is_tb, label %fmt_tb, label %fmt_pb
+fmt_tb:
+  %ftb = sitofp i64 %bytes to double
+  %ftb2 = fdiv double %ftb, 1099511627776.0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmf, double %ftb2, i8* %tb)
+  ret i8* %buf
+fmt_pb:
+  %fpb = sitofp i64 %bytes to double
+  %fpb2 = fdiv double %fpb, 1125899906842624.0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fmf, double %fpb2, i8* %pb)
+  ret i8* %buf
+}
+
+; ── nv_fmt_duration ──────────────────────────────────────────────────────────
+define i8* @nv_fmt_duration(i64 %ms) {
+entry:
+  %buf    = call i8* @malloc(i64 64)
+  %fms    = getelementptr [7 x i8], [7 x i8]* @.fmt.dur_ms, i64 0, i64 0
+  %fs     = getelementptr [6 x i8], [6 x i8]* @.fmt.dur_s, i64 0, i64 0
+  %fms2   = getelementptr [12 x i8], [12 x i8]* @.fmt.dur_ms2, i64 0, i64 0
+  %fhm    = getelementptr [12 x i8], [12 x i8]* @.fmt.dur_hm, i64 0, i64 0
+  %is_ms  = icmp slt i64 %ms, 1000
+  %is_s   = icmp slt i64 %ms, 60000
+  %is_min = icmp slt i64 %ms, 3600000
+  br i1 %is_ms, label %emit_ms, label %try_s
+emit_ms:
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fms, i64 %ms)
+  ret i8* %buf
+try_s:
+  br i1 %is_s, label %emit_s, label %try_min
+emit_s:
+  %sv = sdiv i64 %ms, 1000
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fs, i64 %sv)
+  ret i8* %buf
+try_min:
+  br i1 %is_min, label %emit_min, label %emit_h
+emit_min:
+  %mv    = sdiv i64 %ms, 60000
+  %msrem = srem i64 %ms, 60000
+  %msv   = sdiv i64 %msrem, 1000
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fms2, i64 %mv, i64 %msv)
+  ret i8* %buf
+emit_h:
+  %hv    = sdiv i64 %ms, 3600000
+  %hmrem = srem i64 %ms, 3600000
+  %hmv   = sdiv i64 %hmrem, 60000
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 64, i8* %fhm, i64 %hv, i64 %hmv)
+  ret i8* %buf
+}
+
+; ── nv_fmt_thousands ─────────────────────────────────────────────────────────
+define i8* @nv_fmt_thousands(i64 %n, i8* %sep) {
+entry:
+  %neg    = icmp slt i64 %n, 0
+  %neg_n  = sub i64 0, %n
+  %absn   = select i1 %neg, i64 %neg_n, i64 %n
+  %negext = zext i1 %neg to i64
+  %digits  = alloca [25 x i8], align 1
+  %digitsp = getelementptr [25 x i8], [25 x i8]* %digits, i64 0, i64 0
+  %fmtu   = getelementptr [5 x i8], [5 x i8]* @.fmt.u64, i64 0, i64 0
+  call i32 (i8*, i64, i8*, ...) @snprintf(i8* %digitsp, i64 25, i8* %fmtu, i64 %absn)
+  %len    = call i64 @strlen(i8* %digitsp)
+  %seplen = call i64 @strlen(i8* %sep)
+  %len_m1 = sub i64 %len, 1
+  %nsep   = udiv i64 %len_m1, 3
+  %nssl   = mul i64 %nsep, %seplen
+  %rl0    = add i64 %len, %nssl
+  %rl1    = add i64 %rl0, %negext
+  %reslen = add i64 %rl1, 1
+  %res    = call i8* @malloc(i64 %reslen)
+  %pos0   = select i1 %neg, i64 1, i64 0
+  br i1 %neg, label %wrneg, label %cpyinit
+wrneg:
+  store i8 45, i8* %res, align 1
+  br label %cpyinit
+cpyinit:
+  br label %cpyloop
+cpyloop:
+  %ci  = phi i64 [ 0, %cpyinit ], [ %ciinc, %cpyafter ]
+  %pos = phi i64 [ %pos0, %cpyinit ], [ %posnew, %cpyafter ]
+  %cdone = icmp eq i64 %ci, %len
+  br i1 %cdone, label %cpydone, label %cpy_body
+cpy_body:
+  %dcp = getelementptr i8, i8* %digitsp, i64 %ci
+  %dc  = load i8, i8* %dcp, align 1
+  %rcp = getelementptr i8, i8* %res, i64 %pos
+  store i8 %dc, i8* %rcp, align 1
+  %pos1  = add i64 %pos, 1
+  %rem0  = sub i64 %len, %ci
+  %rem   = sub i64 %rem0, 1
+  %rmgt0 = icmp sgt i64 %rem, 0
+  %rm3   = urem i64 %rem, 3
+  %rm3z  = icmp eq i64 %rm3, 0
+  %dosep = and i1 %rmgt0, %rm3z
+  br i1 %dosep, label %ins_sep, label %no_sep
+ins_sep:
+  %sepdst = getelementptr i8, i8* %res, i64 %pos1
+  call i8* @strcpy(i8* %sepdst, i8* %sep)
+  %pos2 = add i64 %pos1, %seplen
+  br label %cpyafter
+no_sep:
+  br label %cpyafter
+cpyafter:
+  %posnew = phi i64 [ %pos2, %ins_sep ], [ %pos1, %no_sep ]
+  %ciinc  = add i64 %ci, 1
+  br label %cpyloop
+cpydone:
+  %nullp = getelementptr i8, i8* %res, i64 %pos
+  store i8 0, i8* %nullp, align 1
+  ret i8* %res
+}
+""".trimIndent())
+    }
+
+    private fun emitPhase56IterRuntime() {
+        rtFns.appendLine("""
+; ── nv_iter_range ────────────────────────────────────────────────────────────
+define i8* @nv_iter_range(i64 %start, i64 %end) {
+entry:
+  %diff = sub i64 %end, %start
+  %pos  = icmp sgt i64 %diff, 0
+  %cnt  = select i1 %pos, i64 %diff, i64 0
+  %sz0  = mul i64 %cnt, 8
+  %sz   = add i64 %sz0, 8
+  %arr  = call i8* @malloc(i64 %sz)
+  %cntp = bitcast i8* %arr to i64*
+  store i64 %cnt, i64* %cntp, align 8
+  br label %fill
+fill:
+  %fi    = phi i64 [ 0, %entry ], [ %fiinc, %fill_body ]
+  %fdone = icmp eq i64 %fi, %cnt
+  br i1 %fdone, label %done, label %fill_body
+fill_body:
+  %val  = add i64 %start, %fi
+  %eoff = add i64 %fi, 1
+  %ep   = getelementptr i64, i64* %cntp, i64 %eoff
+  store i64 %val, i64* %ep, align 8
+  %fiinc = add i64 %fi, 1
+  br label %fill
+done:
+  ret i8* %arr
+}
+
+; ── nv_iter_range_step ───────────────────────────────────────────────────────
+define i8* @nv_iter_range_step(i64 %start, i64 %end, i64 %step) {
+entry:
+  %sp    = icmp sgt i64 %step, 0
+  %sn    = icmp slt i64 %step, 0
+  %dp    = sub i64 %end, %start
+  %dpos  = icmp sgt i64 %dp, 0
+  %ssp   = select i1 %sp, i64 %step, i64 1
+  %spm1  = sub i64 %ssp, 1
+  %dpr   = add i64 %dp, %spm1
+  %cntpv = sdiv i64 %dpr, %ssp
+  %cnt_p = select i1 %dpos, i64 %cntpv, i64 0
+  %dn    = sub i64 %start, %end
+  %dneg  = icmp sgt i64 %dn, 0
+  %abss  = sub i64 0, %step
+  %ssn   = select i1 %sn, i64 %abss, i64 1
+  %ssnm1 = sub i64 %ssn, 1
+  %dnr   = add i64 %dn, %ssnm1
+  %cntnv = sdiv i64 %dnr, %ssn
+  %cnt_n = select i1 %dneg, i64 %cntnv, i64 0
+  %cnt_s = select i1 %sn, i64 %cnt_n, i64 0
+  %cnt   = select i1 %sp, i64 %cnt_p, i64 %cnt_s
+  %sz0   = mul i64 %cnt, 8
+  %sz    = add i64 %sz0, 8
+  %arr   = call i8* @malloc(i64 %sz)
+  %cntp  = bitcast i8* %arr to i64*
+  store i64 %cnt, i64* %cntp, align 8
+  br label %fill
+fill:
+  %fi   = phi i64 [ 0, %entry ], [ %fiinc, %fill_body ]
+  %val  = phi i64 [ %start, %entry ], [ %vnew, %fill_body ]
+  %fdone = icmp eq i64 %fi, %cnt
+  br i1 %fdone, label %done, label %fill_body
+fill_body:
+  %eoff = add i64 %fi, 1
+  %ep   = getelementptr i64, i64* %cntp, i64 %eoff
+  store i64 %val, i64* %ep, align 8
+  %vnew  = add i64 %val, %step
+  %fiinc = add i64 %fi, 1
+  br label %fill
+done:
+  ret i8* %arr
+}
+""".trimIndent())
+    }
+
+    /*
      * Each variant is represented as a heap-allocated {i64 tag, i64 value} struct (16 bytes).
      * The tag is the variant's 0-based index within the sealed class.
      * The value is the first constructor param coerced to i64 (0 for no-param variants).

@@ -204,6 +204,58 @@ void nv_rc_release(void *ptr);
 /** Return ptr if strong_count > 0, else NULL. Safe for weak-reference loads. */
 void *nv_weak_load(void *ptr);
 
+/* ── Phase 5.6: Hash functions ───────────────────────────────────────────── */
+
+/** FNV-1a hash of s. */
+int64_t nv_hash_fnv1a(const char *s);
+
+/** djb2 hash of s. */
+int64_t nv_hash_djb2(const char *s);
+
+/** MurmurHash3-inspired 64-bit hash of s with seed. */
+int64_t nv_hash_murmur3(const char *s, int64_t seed);
+
+/** CRC-32 of s (IEEE polynomial, bit-by-bit). */
+int64_t nv_hash_crc32(const char *s);
+
+/** Combine two hash values (boost-style). */
+int64_t nv_hash_combine(int64_t h1, int64_t h2);
+
+/** SHA-256 of s; returns 64-char hex string. Caller must free(). */
+char *nv_hash_sha256(const char *s);
+
+/** MD5 of s; returns 32-char hex string. Caller must free(). */
+char *nv_hash_md5(const char *s);
+
+/* ── Phase 5.6: Formatting functions ─────────────────────────────────────── */
+
+/** Format integer n in radix (2/8/10/16), left-padded to width with padChar[0]. Caller must free(). */
+char *nv_fmt_int(int64_t n, int64_t width, const char *padChar, int64_t radix);
+
+/** Format float x with given decimal precision; notation "e"→scientific, "f"→fixed, else %g. Caller must free(). */
+char *nv_fmt_float(double x, int64_t precision, const char *notation);
+
+/** Truncate s to width chars; if longer prepend suffix at end. Returns new string. Caller must free(). */
+char *nv_fmt_truncate(const char *s, int64_t width, const char *suffix);
+
+/** Format byte count as human-readable size ("42 B", "1 KB", "3.2 MB" …). Caller must free(). */
+char *nv_fmt_file_size(int64_t bytes);
+
+/** Format millisecond count as human-readable duration ("500ms", "2s", "1m 5s" …). Caller must free(). */
+char *nv_fmt_duration(int64_t ms);
+
+/** Format integer with thousands separators (sep is typically ","). Caller must free(). */
+char *nv_fmt_thousands(int64_t n, const char *sep);
+
+/* ── Phase 5.6: Iterator / range functions ───────────────────────────────── */
+/* Array layout: {int64_t count, int64_t elements...} */
+
+/** Return int array [start, start+1, …, end-1]. Caller must free(). */
+char *nv_iter_range(int64_t start, int64_t end);
+
+/** Return int array [start, start+step, …] up to (exclusive) end. Caller must free(). */
+char *nv_iter_range_step(int64_t start, int64_t end, int64_t step);
+
 /* ── Concurrency primitives (Phase 2.1) ─────────────────────────────────── */
 
 /**

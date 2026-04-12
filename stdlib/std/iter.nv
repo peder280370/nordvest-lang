@@ -1,12 +1,10 @@
 module std.iter
 
 /** Create a range sequence from start (inclusive) to end (exclusive). */
-pub fn range(start: int, end: int) → Sequence<int>
-    → []
+@extern(fn: "nv_iter_range")      pub fn range(start: int, end: int) → Sequence<int>
 
 /** Create a range sequence with a step. */
-pub fn rangeStep(start: int, end: int, step: int) → Sequence<int>
-    → []
+@extern(fn: "nv_iter_range_step") pub fn rangeStep(start: int, end: int, step: int) → Sequence<int>
 
 /** Create an infinite sequence starting from start, incrementing by step. */
 pub fn count(start: int, step: int) → Sequence<int>
@@ -62,4 +60,4 @@ pub fn fold<T, U>(seq: Sequence<T>, init: U, f: (U, T) → U) → U
 
 /** Collect a sequence into a list. */
 pub fn collect<T>(seq: Sequence<T>) → [T]
-    → []
+    → seq

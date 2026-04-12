@@ -1,37 +1,37 @@
 module std.hash
 
 /** Compute the FNV-1a hash of a string. */
+@extern(fn: "nv_hash_fnv1a")
 pub fn fnv1a(s: str) → int
-    → 0
 
 /** Compute the djb2 hash of a string. */
+@extern(fn: "nv_hash_djb2")
 pub fn djb2(s: str) → int
-    → 0
 
 /** Compute the MurmurHash3 of a string. */
+@extern(fn: "nv_hash_murmur3")
 pub fn murmur3(s: str, seed: int) → int
-    → seed
 
 /** Compute the SHA-256 hash of a string (returns hex string). */
+@extern(fn: "nv_hash_sha256")
 pub fn sha256(s: str) → str
-    → ""
 
 /** Compute the SHA-512 hash of a string (returns hex string). */
 pub fn sha512(s: str) → str
     → ""
 
 /** Compute the MD5 hash of a string (returns hex string). Note: not cryptographically secure. */
+@extern(fn: "nv_hash_md5")
 pub fn md5(s: str) → str
-    → ""
 
 /** Compute the BLAKE3 hash of a string (returns hex string). */
 pub fn blake3(s: str) → str
     → ""
 
 /** Compute the CRC32 of a string. */
+@extern(fn: "nv_hash_crc32")
 pub fn crc32(s: str) → int
-    → 0
 
 /** Combine two hash values. */
+@extern(fn: "nv_hash_combine")
 pub fn hashCombine(h1: int, h2: int) → int
-    → h1 ⊕ h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)

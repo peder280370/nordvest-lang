@@ -843,4 +843,197 @@ class Phase5Test {
         val out = runProgram(ir)
         assertEquals("null ok", out)
     }
+
+    // ── 5.6 std.hash ─────────────────────────────────────────────────────
+
+    @Test fun `stdlib hash module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/hash.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_hash_fnv1a"),   "missing nv_hash_fnv1a @extern")
+        assertTrue(c.contains("nv_hash_djb2"),    "missing nv_hash_djb2 @extern")
+        assertTrue(c.contains("nv_hash_murmur3"), "missing nv_hash_murmur3 @extern")
+        assertTrue(c.contains("nv_hash_crc32"),   "missing nv_hash_crc32 @extern")
+        assertTrue(c.contains("nv_hash_combine"), "missing nv_hash_combine @extern")
+        assertTrue(c.contains("nv_hash_sha256"),  "missing nv_hash_sha256 @extern")
+        assertTrue(c.contains("nv_hash_md5"),     "missing nv_hash_md5 @extern")
+    }
+
+    @Test fun `hash fnv1a and djb2 return non-zero for hello`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_hash_fnv1a") pub fn fnv1a(s: str) → int
+            @extern(fn: "nv_hash_djb2")  pub fn djb2(s: str)  → int
+            fn main()
+                let a = fnv1a("hello")
+                let b = djb2("hello")
+                if a != 0
+                    println("fnv ok")
+                if b != 0
+                    println("djb ok")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("fnv ok\ndjb ok", out)
+    }
+
+    @Test fun `hash crc32 of hello matches known value`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_hash_crc32") pub fn crc32(s: str) → int
+            fn main()
+                let v = crc32("hello")
+                println(v)
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("907060870", out)
+    }
+
+    @Test fun `hash sha256 of hello matches known vector`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_hash_sha256") pub fn sha256(s: str) → str
+            fn main()
+                println(sha256("hello"))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", out)
+    }
+
+    @Test fun `hash md5 of hello matches known vector`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_hash_md5") pub fn md5(s: str) → str
+            fn main()
+                println(md5("hello"))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("5d41402abc4b2a76b9719d911017c592", out)
+    }
+
+    // ── 5.6 std.fmt ──────────────────────────────────────────────────────
+
+    @Test fun `stdlib fmt module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/fmt.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_fmt_int"),       "missing nv_fmt_int @extern")
+        assertTrue(c.contains("nv_fmt_float"),     "missing nv_fmt_float @extern")
+        assertTrue(c.contains("nv_fmt_truncate"),  "missing nv_fmt_truncate @extern")
+        assertTrue(c.contains("nv_fmt_file_size"), "missing nv_fmt_file_size @extern")
+        assertTrue(c.contains("nv_fmt_duration"),  "missing nv_fmt_duration @extern")
+        assertTrue(c.contains("nv_fmt_thousands"), "missing nv_fmt_thousands @extern")
+    }
+
+    @Test fun `fmt formatInt decimal with padding`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fmt_int") pub fn formatInt(n: int, width: int, padChar: str, radix: int) → str
+            fn main()
+                println(formatInt(42, 5, "0", 10))
+                println(formatInt(-7, 0, " ", 10))
+                println(formatInt(255, 0, "0", 16))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("00042\n-7\nff", out)
+    }
+
+    @Test fun `fmt truncate shortens long string`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fmt_truncate") pub fn truncate(s: str, width: int, suffix: str) → str
+            fn main()
+                println(truncate("hello world", 8, "..."))
+                println(truncate("hi", 8, "..."))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("hello...\nhi", out)
+    }
+
+    @Test fun `fmt fileSize formats bytes correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fmt_file_size") pub fn fileSize(bytes: int) → str
+            fn main()
+                println(fileSize(512))
+                println(fileSize(2048))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("512 B\n2.0 KB", out)
+    }
+
+    @Test fun `fmt duration formats milliseconds correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fmt_duration") pub fn duration(ms: int) → str
+            fn main()
+                println(duration(500))
+                println(duration(2000))
+                println(duration(125000))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("500ms\n2s\n2m 5s", out)
+    }
+
+    @Test fun `fmt thousands inserts separators`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_fmt_thousands") pub fn thousands(n: int, sep: str) → str
+            fn main()
+                println(thousands(1234567, ","))
+                println(thousands(1000, ","))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("1,234,567\n1,000", out)
+    }
+
+    // ── 5.6 std.iter ─────────────────────────────────────────────────────
+
+    @Test fun `stdlib iter module has real implementations`() {
+        val f = File(projectDir(), "stdlib/std/iter.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_iter_range"),      "missing nv_iter_range @extern")
+        assertTrue(c.contains("nv_iter_range_step"), "missing nv_iter_range_step @extern")
+    }
+
+    @Test fun `iter range produces correct values`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_iter_range") pub fn range(start: int, end: int) → [int]
+            fn main()
+                let xs = range(0, 5)
+                var i = 0
+                while i < len(xs)
+                    println(xs[i])
+                    i = i + 1
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("0\n1\n2\n3\n4", out)
+    }
+
+    @Test fun `iter rangeStep produces correct values`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_iter_range_step") pub fn rangeStep(start: int, end: int, step: int) → [int]
+            fn main()
+                let xs = rangeStep(0, 10, 3)
+                var i = 0
+                while i < len(xs)
+                    println(xs[i])
+                    i = i + 1
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("0\n3\n6\n9", out)
+    }
 }

@@ -15,8 +15,8 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.4 DONE)
-  Next: PHASE 5.5 (RC reference counting) or PHASE 6 (IDE plugins)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.6 DONE)
+  Next: PHASE 6 (IDE plugins) or Phase 5.7 (remaining stdlib modules)
 
   All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
   - Parser: class body made optional (struct already was); annotation arg parser
@@ -490,6 +490,22 @@
                  mkdir, rename, getcwd, chdir, clock_gettime, nanosleep, getenv, setenv,
                  getpid, popen, pclose
                - Total tests: 710 passing (674 prior + 36 new Phase5Test 5.4 tests)
+
+  [DONE]  5.6  std.hash, std.fmt, std.iter — real implementation
+               - std.hash: nv_hash_fnv1a, nv_hash_djb2, nv_hash_murmur3, nv_hash_crc32,
+                 nv_hash_combine, nv_hash_sha256, nv_hash_md5 — all inline LLVM IR
+               - SHA-256: full block function with W schedule expansion and 64-round
+                 compression; fixed off-by-one in sha256_hinit h[7] (1541325730 →
+                 1541459225); produces correct hash for "hello" test vector
+               - MD5: little-endian 64-round implementation with phi-node state rotation
+               - std.fmt: nv_fmt_int (radix 2/8/10/16, width/pad), nv_fmt_float (e/f/g),
+                 nv_fmt_truncate, nv_fmt_file_size, nv_fmt_duration, nv_fmt_thousands
+               - std.iter: nv_iter_range, nv_iter_range_step (array layout: i64 count header)
+               - stdlib/std/hash.nv, fmt.nv, iter.nv: @extern bindings + Phase 5.6 constants
+               - nv_runtime.h/.c: C reference implementations for all Phase 5.6 functions
+               - Phase5Test.kt: 14 new tests (hash fnv1a/djb2/crc32/sha256/md5, fmt int/
+                 truncate/fileSize/duration/thousands, iter range/rangeStep + module checks)
+               - Total tests: 716 passing (702 prior + 14 new Phase5Test 5.6 tests)
 
   [DONE]  5.5  RC (reference counting) — real implementation
                - nv_rc_retain: atomicrmw add on strong_count in heap header; null-safe
