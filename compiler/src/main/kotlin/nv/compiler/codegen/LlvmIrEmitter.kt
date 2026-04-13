@@ -40,6 +40,7 @@ class LlvmIrEmitter(
     private var fnBody    = StringBuilder()
     private var fnAllocas = StringBuilder()
     private val varAllocas = mutableMapOf<String, Pair<String, String>>()  // name → (reg, llvmType)
+    private val varTypes   = mutableMapOf<String, Type>()                   // name → Nordvest Type (finer than llvmType)
     private var fnReturnType = "void"
     private var isTerminated = false
 
@@ -99,7 +100,15 @@ class LlvmIrEmitter(
         "nv_fmt_int", "nv_fmt_float", "nv_fmt_truncate",
         "nv_fmt_file_size", "nv_fmt_duration", "nv_fmt_thousands",
         // Phase 5.6 — std.iter
-        "nv_iter_range", "nv_iter_range_step"
+        "nv_iter_range", "nv_iter_range_step",
+        "nv_iter_repeat_int", "nv_iter_repeat_str",
+        "nv_iter_chain_int", "nv_iter_chain_str",
+        // Phase 5.6 — collections (new typed ops)
+        "nv_arr_first_i64", "nv_arr_last_i64",
+        "nv_arr_first_str", "nv_arr_last_str",
+        "nv_arr_reverse_i64", "nv_arr_reverse_str",
+        "nv_arr_slice_i64", "nv_arr_slice_str",
+        "nv_arr_sort_i64"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -118,6 +127,9 @@ class LlvmIrEmitter(
 
     // ── Class type registry: names of ClassDecl types (have RC header) ──
     private val classTypeNames = mutableSetOf<String>()
+
+    // ── Method return type registry: "TypeName_methodName" → LLVM type string ──
+    private val methodReturnTypes = mutableMapOf<String, String>()
 
     // ── Sealed class registry: className → decl; variant "ClassName.Variant" → tag index ──
     private val sealedClassDecls = mutableMapOf<String, SealedClassDecl>()
@@ -155,10 +167,56 @@ class LlvmIrEmitter(
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Stdlib extern registry — pre-populated so that `import std.X` works
+    // without requiring the user to re-declare @extern in their source.
+    // User inline @extern declarations (processed below) will override these.
+    // ─────────────────────────────────────────────────────────────────────
+
+    private val stdlibExternRegistry: List<Triple<String, String, Pair<Type, List<Type>>>> = listOf(
+        // std.collections — int list ops
+        Triple("listAppendInt",   "nv_arr_push_i64",      Type.TArray(Type.TInt)  to listOf(Type.TArray(Type.TInt), Type.TInt)),
+        Triple("listContainsInt", "nv_arr_contains_i64",  Type.TBool              to listOf(Type.TArray(Type.TInt), Type.TInt)),
+        Triple("listIndexOfInt",  "nv_arr_index_of_i64",  Type.TInt               to listOf(Type.TArray(Type.TInt), Type.TInt)),
+        Triple("listFirstInt",    "nv_arr_first_i64",     Type.TInt               to listOf(Type.TArray(Type.TInt))),
+        Triple("listLastInt",     "nv_arr_last_i64",      Type.TInt               to listOf(Type.TArray(Type.TInt))),
+        Triple("listReverseInt",  "nv_arr_reverse_i64",   Type.TArray(Type.TInt)  to listOf(Type.TArray(Type.TInt))),
+        Triple("listSliceInt",    "nv_arr_slice_i64",     Type.TArray(Type.TInt)  to listOf(Type.TArray(Type.TInt), Type.TInt, Type.TInt)),
+        Triple("listSortInt",     "nv_arr_sort_i64",      Type.TArray(Type.TInt)  to listOf(Type.TArray(Type.TInt))),
+        // std.collections — str list ops
+        Triple("listAppendStr",   "nv_arr_push_str",      Type.TArray(Type.TStr)  to listOf(Type.TArray(Type.TStr), Type.TStr)),
+        Triple("listContainsStr", "nv_arr_contains_str",  Type.TBool              to listOf(Type.TArray(Type.TStr), Type.TStr)),
+        Triple("listIndexOfStr",  "nv_arr_index_of_str",  Type.TInt               to listOf(Type.TArray(Type.TStr), Type.TStr)),
+        Triple("listFirstStr",    "nv_arr_first_str",     Type.TStr               to listOf(Type.TArray(Type.TStr))),
+        Triple("listLastStr",     "nv_arr_last_str",      Type.TStr               to listOf(Type.TArray(Type.TStr))),
+        Triple("listReverseStr",  "nv_arr_reverse_str",   Type.TArray(Type.TStr)  to listOf(Type.TArray(Type.TStr))),
+        Triple("listSliceStr",    "nv_arr_slice_str",     Type.TArray(Type.TStr)  to listOf(Type.TArray(Type.TStr), Type.TInt, Type.TInt)),
+        // std.collections — map ops
+        Triple("mapNew",  "nv_map_new",     Type.TMap(Type.TStr, Type.TStr) to emptyList()),
+        Triple("mapLen",  "nv_map_len",     Type.TInt                       to listOf(Type.TMap(Type.TStr, Type.TStr))),
+        Triple("mapHas",  "nv_map_has_str", Type.TBool                      to listOf(Type.TMap(Type.TStr, Type.TStr), Type.TStr)),
+        Triple("mapGet",  "nv_map_get_str", Type.TNullable(Type.TStr)       to listOf(Type.TMap(Type.TStr, Type.TStr), Type.TStr)),
+        Triple("mapSet",  "nv_map_set_str", Type.TMap(Type.TStr, Type.TStr) to listOf(Type.TMap(Type.TStr, Type.TStr), Type.TStr, Type.TStr)),
+        // std.iter — range generators
+        Triple("range",      "nv_iter_range",      Type.TArray(Type.TInt)  to listOf(Type.TInt, Type.TInt)),
+        Triple("rangeStep",  "nv_iter_range_step", Type.TArray(Type.TInt)  to listOf(Type.TInt, Type.TInt, Type.TInt)),
+        Triple("repeatInt",  "nv_iter_repeat_int", Type.TArray(Type.TInt)  to listOf(Type.TInt, Type.TInt)),
+        Triple("repeatStr",  "nv_iter_repeat_str", Type.TArray(Type.TStr)  to listOf(Type.TStr, Type.TInt)),
+        Triple("chainInt",   "nv_iter_chain_int",  Type.TArray(Type.TInt)  to listOf(Type.TArray(Type.TInt), Type.TArray(Type.TInt))),
+        Triple("chainStr",   "nv_iter_chain_str",  Type.TArray(Type.TStr)  to listOf(Type.TArray(Type.TStr), Type.TArray(Type.TStr))),
+    )
+
+    // ─────────────────────────────────────────────────────────────────────
     // Declaration info collection (pass 0)
     // ─────────────────────────────────────────────────────────────────────
 
     private fun collectDeclarationInfo() {
+        // Pre-populate with stdlib extern mappings so `import std.X` works
+        // without requiring re-declaration in user code.
+        for ((nvName, cSym, retAndParams) in stdlibExternRegistry) {
+            val (retTy, paramTys) = retAndParams
+            externFunctions[nvName] = ExternInfo(cSym, retTy, paramTys)
+        }
+
         val file = tcModule.resolvedModule.file
         for (decl in file.declarations) {
             when (decl) {
@@ -217,10 +275,11 @@ class LlvmIrEmitter(
         structLayouts[name] = fields
         // Emit struct type definition into globals.
         // Class types get a 16-byte RC header prepended: { i64 strong_count, i8* dtor_fn, ...fields }
-        if (fields.isNotEmpty()) {
+        if (fields.isNotEmpty() || isClass) {
             val fieldTypes = fields.joinToString(", ") { (_, t) -> llvmType(t) }
             if (isClass) {
-                globals.appendLine("%struct.$name = type { i64, i8*, $fieldTypes }")
+                val fieldPart = if (fieldTypes.isNotEmpty()) ", $fieldTypes" else ""
+                globals.appendLine("%struct.$name = type { i64, i8*$fieldPart }")
             } else {
                 globals.appendLine("%struct.$name = type { $fieldTypes }")
             }
@@ -457,8 +516,23 @@ $storeStmt
         if (mapped != null && mapped != Type.TUnknown) return mapped
         // Fallback for pattern-bound or locally-defined variables not in typeMap
         if (expr is IdentExpr) {
+            val nvType = varTypes[expr.name]
+            if (nvType != null) return nvType
             val lt = varAllocas[expr.name]?.second
             if (lt != null) return llvmTypeToType(lt)
+        }
+        // Fallback for call expressions: if the callee is a known @extern stdlib function,
+        // return its declared return type (TypeChecker may have assigned TUnknown for
+        // stdlib functions not re-declared inline in user code).
+        if (expr is CallExpr && expr.callee is IdentExpr) {
+            val ext = externFunctions[(expr.callee as IdentExpr).name]
+            if (ext != null) return ext.retType
+        }
+        // Fallback for index expressions: derive element type from the receiver's array type.
+        if (expr is IndexExpr) {
+            val receiverType = typeOf(expr.receiver)
+            if (receiverType is Type.TArray) return receiverType.element
+            if (receiverType is Type.TStr)   return Type.TChar
         }
         return mapped ?: Type.TUnknown
     }
@@ -676,6 +750,7 @@ $storeStmt
         fnBody    = StringBuilder()
         fnAllocas = StringBuilder()
         varAllocas.clear()
+        varTypes.clear()
         tempIdx   = 0
         labelIdx  = 0
         isTerminated = false
@@ -744,7 +819,9 @@ $storeStmt
 
     private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, isClass: Boolean = false) {
         val fields = structLayouts[name] ?: return
-        if (fields.isEmpty()) return
+        // Structs with no fields have nothing to allocate/initialize — skip.
+        // Classes with no fields still need a no-arg constructor (RC header allocation).
+        if (fields.isEmpty() && !isClass) return
 
         // Constructor function: @nv_Name(field_types...) → i8*
         // Class types prepend a 16-byte RC header: { i64 strong_count, i8* dtor_fn }
@@ -756,6 +833,7 @@ $storeStmt
         fnBody    = StringBuilder()
         fnAllocas = StringBuilder()
         varAllocas.clear()
+        varTypes.clear()
         tempIdx   = 0
         labelIdx  = 0
         isTerminated = false
@@ -848,6 +926,7 @@ $storeStmt
         fnBody    = StringBuilder()
         fnAllocas = StringBuilder()
         varAllocas.clear()
+        varTypes.clear()
         tempIdx   = 0
         labelIdx  = 0
         isTerminated = false
@@ -888,6 +967,9 @@ $storeStmt
             append("i8* %self")
             for (p in fn.params) append(", ${llvmType(resolveTypeNode(p.type))} %param.${p.name}")
         }
+
+        // Register return type for use by call sites
+        methodReturnTypes["${typeName}_${fn.name}"] = fnReturnType
 
         userFns.appendLine("define $fnReturnType $mangledName($paramList) {")
         userFns.appendLine("entry:")
@@ -954,6 +1036,7 @@ $storeStmt
                 val lt = if (llvmType(ty) == "void") "i64" else llvmType(ty)
                 val allocaReg = emitAlloca(name, lt)
                 varAllocas[name] = Pair(allocaReg, lt)
+                if (ty != Type.TUnknown) varTypes[name] = ty
                 if (initReg != null) {
                     emitStore(lt, initReg, allocaReg)
                 }
@@ -1889,7 +1972,11 @@ $storeStmt
         val mangledName = "@nv_$fnName"
         val fnSymType = tcModule.resolvedModule.moduleScope.lookup(fnName)?.resolvedType
         val fnRetType = (fnSymType as? Type.TFun)?.returnType
-        val retLt = fnRetType?.let { llvmType(it) } ?: "i64"
+        // Constructor calls (struct/class names in structLayouts) always return i8*
+        val retLt = when {
+            fnName in structLayouts -> "i8*"
+            else -> fnRetType?.let { llvmType(it) } ?: "i64"
+        }
         val argList = argRegs.zip(argTypes).joinToString(", ") { (r, t) ->
             val lt = llvmType(t); "$lt noundef $r"
         }
@@ -1933,8 +2020,14 @@ $storeStmt
                 append(", ${llvmType(t)} noundef $r")
             }
         }
+        // Look up the actual return type from the method registry; fall back to i64
+        val methodRetLt = methodReturnTypes["${typeName}_$member"] ?: "i64"
+        if (methodRetLt == "void") {
+            emit("  call void $mangledFn($argList)")
+            return "0"
+        }
         val res = fresh("mcall")
-        emit("  $res = call i64 $mangledFn($argList)")
+        emit("  $res = call $methodRetLt $mangledFn($argList)")
         return res
     }
 

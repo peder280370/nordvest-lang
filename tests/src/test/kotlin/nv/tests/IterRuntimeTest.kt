@@ -92,4 +92,49 @@ class IterRuntimeTest {
         val out = runProgram(ir)
         assertEquals("0\n3\n6\n9", out)
     }
+
+    @Test fun `iter repeatInt produces correct values`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.iter
+            fn main()
+                let xs = repeatInt(42, 4)
+                println(len(xs))
+                println(xs[0])
+                println(xs[3])
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("4\n42\n42", out)
+    }
+
+    @Test fun `iter chainInt concatenates two int arrays`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.iter
+            fn main()
+                let c = chainInt([1, 2, 3], [10, 20])
+                println(len(c))
+                println(c[0])
+                println(c[4])
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("5\n1\n20", out)
+    }
+
+    @Test fun `iter range via import std dot iter works`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.iter
+            fn main()
+                let xs = range(1, 6)
+                println(len(xs))
+                println(xs[0])
+                println(xs[4])
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("5\n1\n5", out)
+    }
 }

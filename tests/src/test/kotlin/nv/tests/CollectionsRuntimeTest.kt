@@ -168,4 +168,77 @@ class CollectionsRuntimeTest {
         val out = runProgram(ir)
         assertEquals("2\nhas name\nNordvest\nno missing", out)
     }
+
+    @Test fun `listFirstInt and listLastInt return correct values`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.collections
+            fn main()
+                println(listFirstInt([7, 8, 9]))
+                println(listLastInt([7, 8, 9]))
+                println(listFirstInt([42]))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("7\n9\n42", out)
+    }
+
+    @Test fun `listSortInt returns sorted array`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.collections
+            fn main()
+                let s = listSortInt([5, 1, 4, 2, 3])
+                println(s[0])
+                println(s[4])
+                println(len(s))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("1\n5\n5", out)
+    }
+
+    @Test fun `listReverseInt returns reversed array`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.collections
+            fn main()
+                let r = listReverseInt([1, 2, 3, 4, 5])
+                println(r[0])
+                println(r[4])
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("5\n1", out)
+    }
+
+    @Test fun `listSliceInt returns correct sub-array`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.collections
+            fn main()
+                let sl = listSliceInt([10, 20, 30, 40, 50], 1, 4)
+                println(len(sl))
+                println(sl[0])
+                println(sl[2])
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("3\n20\n40", out)
+    }
+
+    @Test fun `stdlib functions work via import without re-declaration`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            import std.collections
+            fn main()
+                var xs = [1, 2, 3]
+                xs = listAppendInt(xs, 4)
+                println(listContainsInt(xs, 4))
+                println(listIndexOfInt(xs, 2))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("true\n1", out)
+    }
 }

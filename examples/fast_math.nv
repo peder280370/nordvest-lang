@@ -3,9 +3,13 @@
 // Demonstrates inline assembly blocks with architecture-specific fast paths
 // and pure Nordvest fallbacks for portability.
 //
-// NOTE: class codegen is a Phase 2 feature.  This file compiles through the
-// parser and type-checker today.  Use `nv run` once class emission lands.
-// For a runnable demonstration of @asm right now, see tests/golden/asm/asm.nv.
+// STATUS: Compiles and runs (Phase 5).
+//   Class codegen is fully supported.
+//   @asm blocks run as side effects; LLVM does not wire results back to
+//   return registers without output constraints (Phase 2 will add those).
+//   The Nordvest fallback bodies always compute the correct return value.
+//   Do NOT include "ret" in @asm method bodies — the method must let LLVM
+//   emit the epilog, otherwise the stack pointer is corrupted on return.
 
 module examples.fast_math
 
@@ -31,24 +35,20 @@ class FastMath
     // The Nordvest fallback body runs on all other architectures.
     fn abs(x: int) → int
         @asm[arm64]
-            "cmp  x0, #0"
-            "cneg x0, x0, mi"
-            "ret"
+            "cmp  x1, #0"
+            "cneg x1, x1, mi"
         @asm[x86_64]
-            "mov  rax, rdi"
+            "mov  rax, rsi"
             "neg  rax"
-            "cmovns rax, rdi"
-            "ret"
+            "cmovns rax, rsi"
         → if x < 0 then -x else x
 
     // Count leading zeros — useful for fast log2 and bit-width queries.
     fn clz(x: int) → int
         @asm[arm64]
-            "clz x0, x0"
-            "ret"
+            "clz x1, x1"
         @asm[x86_64]
-            "lzcnt rax, rdi"
-            "ret"
+            "lzcnt rsi, rsi"
         // fallback: shift until MSB is consumed
         var n = 64
         var v = x
@@ -60,8 +60,7 @@ class FastMath
     // Bit-reverse a 64-bit word.
     fn rbit(x: int) → int
         @asm[arm64]
-            "rbit x0, x0"
-            "ret"
+            "rbit x1, x1"
         // portable fallback
         var result = 0
         var v = x
@@ -73,14 +72,12 @@ class FastMath
     // Population count (number of set bits).
     fn popcount(x: int) → int
         @asm[arm64]
-            "fmov d0, x0"
+            "fmov d0, x1"
             "cnt  v0.8b, v0.8b"
             "addv b0, v0.8b"
-            "fmov w0, s0"
-            "ret"
+            "fmov w1, s0"
         @asm[x86_64]
-            "popcnt rax, rdi"
-            "ret"
+            "popcnt rsi, rsi"
         // Kernighan's algorithm
         var count = 0
         var v = x

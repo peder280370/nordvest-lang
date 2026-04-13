@@ -135,3 +135,38 @@ pub fn stackPeek<T>(stack: [T]) → T?
 
 /** Insert or update key→val; returns updated map (may be a new pointer). */
 @extern(fn: "nv_map_set_str") pub fn mapSet(map: [str: str], key: str, val: str) → [str: str]
+
+// ── Typed first/last (real implementations via @extern) ───────────────────────
+
+/** Return the first element of an int list, or 0 if empty. */
+@extern(fn: "nv_arr_first_i64") pub fn listFirstInt(list: [int]) → int
+
+/** Return the last element of an int list, or 0 if empty. */
+@extern(fn: "nv_arr_last_i64") pub fn listLastInt(list: [int]) → int
+
+/** Return the first element of a str list, or "" if empty. */
+@extern(fn: "nv_arr_first_str") pub fn listFirstStr(list: [str]) → str
+
+/** Return the last element of a str list, or "" if empty. */
+@extern(fn: "nv_arr_last_str") pub fn listLastStr(list: [str]) → str
+
+// ── Typed reverse (real implementations via @extern) ──────────────────────────
+
+/** Return a new [int] list with elements in reverse order. */
+@extern(fn: "nv_arr_reverse_i64") pub fn listReverseInt(list: [int]) → [int]
+
+/** Return a new [str] list with elements in reverse order. */
+@extern(fn: "nv_arr_reverse_str") pub fn listReverseStr(list: [str]) → [str]
+
+// ── Typed slice (real implementations via @extern) ────────────────────────────
+
+/** Return list[from..to) as a new [int] list. Indices are clamped to valid range. */
+@extern(fn: "nv_arr_slice_i64") pub fn listSliceInt(list: [int], from: int, to: int) → [int]
+
+/** Return list[from..to) as a new [str] list. */
+@extern(fn: "nv_arr_slice_str") pub fn listSliceStr(list: [str], from: int, to: int) → [str]
+
+// ── Typed sort (real implementations via @extern) ─────────────────────────────
+
+/** Return a new [int] list sorted in ascending order. */
+@extern(fn: "nv_arr_sort_i64") pub fn listSortInt(list: [int]) → [int]
