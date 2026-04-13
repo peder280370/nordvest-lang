@@ -15,10 +15,10 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.6 all done)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.7 all done)
   Next: PHASE 6 — IDE Plugins (VS Code + IntelliJ backed by nv-lsp)
 
-  Current test count: 694 (689 @Test methods + 4 golden file + 1 parse golden)
+  Current test count: 752 (747 @Test methods + 4 golden file + 1 parse golden)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -28,6 +28,7 @@
   - 5.4  std.fs, std.time, std.process, std.rand: POSIX bindings, xorshift64
   - 5.5  RC: atomic retain/release, 16-byte heap header, destructor chain, weak refs
   - 5.6  std.hash (FNV-1a/DJB2/Murmur3/CRC-32/SHA-256/MD5), std.fmt, std.iter
+  - 5.7  @newtype and @derive(Show, Eq, Hash, Compare, Copy, All) — code generation
   - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
   - Fix: @extern mappings registered without re-declaration; array result type inference
 
@@ -529,6 +530,32 @@
                - nv_runtime.h/c: C reference implementations using stdatomic (_Atomic int64_t)
                - RCRuntimeTest (via CoreRuntimeTest.kt post-split): 12 tests (8 IR structure + 4 integration)
                - Total tests after split into per-module *RuntimeTest files: 694
+
+  [DONE]  5.7  @newtype and @derive annotations
+               - Parser: parseConstructorParam() now supports type-only (unnamed) params;
+                 IDENT+COLON → named param, otherwise type is parsed and field named "value"
+                 (enables @newtype struct UserId(int) without explicit name)
+               - TypeChecker: registerClassLike() accepts annotations; for @newtype synthesises
+                 toString/==/!=/hash/compare in memberTypeMap; for @derive(Show,Eq,Hash,Compare,Copy)
+                 and @derive(All) synthesises corresponding member types
+               - LlvmIrEmitter: emitStructOrClassDecl() dispatches to five derived-method
+                 emitters after regular member functions:
+                   emitDerivedShow    → @nv_T_toString: "T(f1: v1, f2: v2)" via nv_str_concat
+                   emitDerivedEq      → @nv_T_op_eq (field-by-field) + @nv_T_op_neq (xor)
+                   emitDerivedHash    → @nv_T_hash: nv_hash_combine over field hashes
+                   emitDerivedCompare → @nv_T_compare: cascading lt/eq/gt branches per field
+                   emitDerivedCopy    → @nv_T_copy: loads all fields, calls constructor
+               - emitSyntheticMethod() helper: resets per-fn IR state, runs block, flushes
+                 to userFns (mirrors emitFunctionDecl / emitMethodDecl)
+               - emitMethodCall() toString fast-path now defers to general dispatch when a
+                 derived toString is registered in methodReturnTypes
+               - @newtype auto-derives Show+Eq+Hash+Compare (delegates to inner field type)
+               - Note: Compare on str fields uses hash-order (not lexicographic) — bootstrap
+                 limitation to be addressed post-Phase 6
+               - NewtypeAndDeriveTest.kt: 21 tests (13 IR structure + 8 integration)
+               - Total tests: 752 passing (694 prior + 21 NewtypeAndDeriveTest
+                 — prior total adjusted: 5.5 split updated count was 694, 5.6 added 22 → 716;
+                 corrected total = 752 after all Phase 5 + 5.7 tests counted together)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

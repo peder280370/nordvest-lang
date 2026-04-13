@@ -695,9 +695,9 @@ $storeStmt
                 }
                 // otherwise interface signature — skip
             }
-            is StructDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = false)
-            is ClassDecl  -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = true)
-            is RecordDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, isClass = false)
+            is StructDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, decl.annotations, isClass = false)
+            is ClassDecl  -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, decl.annotations, isClass = true)
+            is RecordDecl -> emitStructOrClassDecl(decl.name, decl.constructorParams, decl.members, decl.annotations, isClass = false)
             else          -> { /* unsupported at top-level */ }
         }
     }
@@ -817,7 +817,7 @@ $storeStmt
         userFns.appendLine()
     }
 
-    private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, isClass: Boolean = false) {
+    private fun emitStructOrClassDecl(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, annotations: List<nv.compiler.parser.Annotation> = emptyList(), isClass: Boolean = false) {
         val fields = structLayouts[name] ?: return
         // Structs with no fields have nothing to allocate/initialize — skip.
         // Classes with no fields still need a no-arg constructor (RC header allocation).
@@ -890,7 +890,274 @@ $storeStmt
                 emitMethodDecl(name, member)
             }
         }
+
+        // Emit @newtype / @derive auto-generated methods
+        val isNewtype = annotations.any { it.name == "newtype" }
+        val deriveAnno = annotations.find { it.name == "derive" }
+        val derivedTraits = mutableSetOf<String>()
+        if (isNewtype) derivedTraits += setOf("Show", "Eq", "Hash", "Compare")
+        if (deriveAnno != null) {
+            val traitNames = deriveAnno.args.mapNotNull { arg ->
+                (arg.value as? AnnotationIdentValue)?.name?.text
+            }
+            derivedTraits += if ("All" in traitNames) setOf("Show", "Eq", "Compare", "Hash", "Copy") else traitNames
+        }
+        if ("Show"    in derivedTraits) emitDerivedShow(name, fields, isClass)
+        if ("Eq"      in derivedTraits) emitDerivedEq(name, fields, isClass)
+        if ("Hash"    in derivedTraits) emitDerivedHash(name, fields, isClass)
+        if ("Compare" in derivedTraits) emitDerivedCompare(name, fields, isClass)
+        if ("Copy"    in derivedTraits) emitDerivedCopy(name, fields, isClass)
     }
+
+    // ─── Derived-method emitters (@newtype / @derive) ─────────────────────
+
+    /**
+     * Sets up per-function IR state, calls [block] to emit IR, then flushes
+     * the result to [userFns].  Mirrors [emitFunctionDecl] / [emitMethodDecl].
+     */
+    private fun emitSyntheticMethod(mangledName: String, paramList: String, retType: String, block: () -> Unit) {
+        fnBody = StringBuilder(); fnAllocas = StringBuilder()
+        varAllocas.clear(); varTypes.clear()
+        tempIdx = 0; labelIdx = 0; isTerminated = false; loopStack.clear()
+        fnReturnType = retType
+        block()
+        if (!isTerminated) {
+            when (retType) {
+                "void"   -> terminate("  ret void")
+                "i64"    -> terminate("  ret i64 0")
+                "i1"     -> terminate("  ret i1 1")   // default true (e.g. zero-field Eq)
+                "double" -> terminate("  ret double 0.0")
+                else     -> terminate("  ret i8* null")
+            }
+        }
+        userFns.appendLine("define $retType $mangledName($paramList) {")
+        userFns.appendLine("entry:")
+        userFns.append(fnAllocas)
+        userFns.append(fnBody)
+        userFns.appendLine("}")
+        userFns.appendLine()
+    }
+
+    /** @derive(Show) / @newtype — emit @nv_TypeName_toString returning "TypeName(f1: v1, f2: v2)". */
+    private fun emitDerivedShow(typeName: String, fields: List<Pair<String, Type>>, isClass: Boolean) {
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        emitSyntheticMethod("@nv_${typeName}_toString", "i8* %self", "i8*") {
+            val castReg = fresh("show.cast")
+            emit("  $castReg = bitcast i8* %self to $structType*")
+            var acc = stringConst("$typeName(")
+            for ((idx, fp) in fields.withIndex()) {
+                val (fname, ft) = fp
+                val gepIdx  = idx + fieldOffset
+                val fieldLt = llvmType(ft)
+                val sep = if (idx == 0) "$fname: " else ", $fname: "
+                val sepC = stringConst(sep)
+                val r1 = fresh("show.sep")
+                emit("  $r1 = call i8* @nv_str_concat(i8* $acc, i8* $sepC)")
+                val fpR = fresh("show.fp"); val fvR = fresh("show.fv")
+                emit("  $fpR = getelementptr $structType, $structType* $castReg, i32 0, i32 $gepIdx")
+                emit("  $fvR = load $fieldLt, $fieldLt* $fpR, align ${llvmTypeAlign(fieldLt)}")
+                val fStr = convertToStr(fvR, ft)
+                val r2 = fresh("show.acc")
+                emit("  $r2 = call i8* @nv_str_concat(i8* $r1, i8* $fStr)")
+                acc = r2
+            }
+            val closeC = stringConst(")")
+            val result = fresh("show.result")
+            emit("  $result = call i8* @nv_str_concat(i8* $acc, i8* $closeC)")
+            terminate("  ret i8* $result")
+        }
+        methodReturnTypes["${typeName}_toString"] = "i8*"
+    }
+
+    /** @derive(Eq) / @newtype — emit @nv_TypeName_op_eq and @nv_TypeName_op_neq. */
+    private fun emitDerivedEq(typeName: String, fields: List<Pair<String, Type>>, isClass: Boolean) {
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        emitSyntheticMethod("@nv_${typeName}_op_eq", "i8* %self, i8* %other", "i1") {
+            if (fields.isEmpty()) { terminate("  ret i1 1"); return@emitSyntheticMethod }
+            val aC = fresh("eq.a"); val bC = fresh("eq.b")
+            emit("  $aC = bitcast i8* %self to $structType*")
+            emit("  $bC = bitcast i8* %other to $structType*")
+            val falseLabel = freshLabel("eq.false")
+            for ((idx, fp) in fields.withIndex()) {
+                val (_, ft) = fp
+                val gepIdx = idx + fieldOffset
+                val fieldLt = llvmType(ft)
+                val apR = fresh("eq.ap"); val bpR = fresh("eq.bp")
+                val avR = fresh("eq.av"); val bvR = fresh("eq.bv")
+                emit("  $apR = getelementptr $structType, $structType* $aC, i32 0, i32 $gepIdx")
+                emit("  $bpR = getelementptr $structType, $structType* $bC, i32 0, i32 $gepIdx")
+                emit("  $avR = load $fieldLt, $fieldLt* $apR, align ${llvmTypeAlign(fieldLt)}")
+                emit("  $bvR = load $fieldLt, $fieldLt* $bpR, align ${llvmTypeAlign(fieldLt)}")
+                val cmpR = fresh("eq.cmp")
+                when (ft) {
+                    Type.TStr              -> emit("  $cmpR = call i1 @nv_str_eq(i8* $avR, i8* $bvR)")
+                    Type.TFloat, Type.TFloat64 -> emit("  $cmpR = fcmp oeq double $avR, $bvR")
+                    Type.TFloat32          -> emit("  $cmpR = fcmp oeq float $avR, $bvR")
+                    Type.TBool             -> emit("  $cmpR = icmp eq i1 $avR, $bvR")
+                    else                   -> emit("  $cmpR = icmp eq $fieldLt $avR, $bvR")
+                }
+                val nextLabel = freshLabel("eq.next$idx")
+                emit("  br i1 $cmpR, label %$nextLabel, label %$falseLabel")
+                emitRaw("$nextLabel:")
+                isTerminated = false
+            }
+            terminate("  ret i1 1")
+            emitRaw("$falseLabel:")
+            isTerminated = false
+            terminate("  ret i1 0")
+        }
+        // != delegates to ==
+        emitSyntheticMethod("@nv_${typeName}_op_neq", "i8* %self, i8* %other", "i1") {
+            val eqR = fresh("neq.eq")
+            emit("  $eqR = call i1 @nv_${typeName}_op_eq(i8* %self, i8* %other)")
+            val notR = fresh("neq.not")
+            emit("  $notR = xor i1 $eqR, 1")
+            terminate("  ret i1 $notR")
+        }
+    }
+
+    /** @derive(Hash) / @newtype — emit @nv_TypeName_hash combining field hashes via nv_hash_combine. */
+    private fun emitDerivedHash(typeName: String, fields: List<Pair<String, Type>>, isClass: Boolean) {
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        emitSyntheticMethod("@nv_${typeName}_hash", "i8* %self", "i64") {
+            if (fields.isEmpty()) { terminate("  ret i64 0"); return@emitSyntheticMethod }
+            val castR = fresh("hash.cast")
+            emit("  $castR = bitcast i8* %self to $structType*")
+            var seed = "0"
+            for ((idx, fp) in fields.withIndex()) {
+                val (_, ft) = fp
+                val gepIdx = idx + fieldOffset
+                val fieldLt = llvmType(ft)
+                val fpR = fresh("hash.fp"); val fvR = fresh("hash.fv")
+                emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+                emit("  $fvR = load $fieldLt, $fieldLt* $fpR, align ${llvmTypeAlign(fieldLt)}")
+                val fhR = fresh("hash.fh")
+                when (ft) {
+                    Type.TStr -> emit("  $fhR = call i64 @nv_hash_fnv1a(i8* $fvR)")
+                    Type.TFloat, Type.TFloat64 -> {
+                        val bcR = fresh("hash.bc")
+                        emit("  $bcR = bitcast double $fvR to i64")
+                        emit("  $fhR = call i64 @nv_hash_combine(i64 0, i64 $bcR)")
+                    }
+                    Type.TFloat32 -> {
+                        val extR = fresh("hash.ext"); val bcR = fresh("hash.bc")
+                        emit("  $extR = fpext float $fvR to double")
+                        emit("  $bcR = bitcast double $extR to i64")
+                        emit("  $fhR = call i64 @nv_hash_combine(i64 0, i64 $bcR)")
+                    }
+                    Type.TBool -> {
+                        val zR = fresh("hash.z")
+                        emit("  $zR = zext i1 $fvR to i64")
+                        emit("  $fhR = call i64 @nv_hash_combine(i64 0, i64 $zR)")
+                    }
+                    else -> emit("  $fhR = call i64 @nv_hash_combine(i64 0, i64 $fvR)")
+                }
+                val newSeed = fresh("hash.seed")
+                emit("  $newSeed = call i64 @nv_hash_combine(i64 $seed, i64 $fhR)")
+                seed = newSeed
+            }
+            terminate("  ret i64 $seed")
+        }
+        methodReturnTypes["${typeName}_hash"] = "i64"
+    }
+
+    /**
+     * @derive(Compare) / @newtype — emit @nv_TypeName_compare returning i64 (-1 / 0 / 1).
+     * Fields are compared lexicographically.  String fields use hash-order (bootstrap limitation).
+     */
+    private fun emitDerivedCompare(typeName: String, fields: List<Pair<String, Type>>, isClass: Boolean) {
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        emitSyntheticMethod("@nv_${typeName}_compare", "i8* %self, i8* %other", "i64") {
+            if (fields.isEmpty()) { terminate("  ret i64 0"); return@emitSyntheticMethod }
+            val aC = fresh("cmp.a"); val bC = fresh("cmp.b")
+            emit("  $aC = bitcast i8* %self to $structType*")
+            emit("  $bC = bitcast i8* %other to $structType*")
+            for ((idx, fp) in fields.withIndex()) {
+                val (_, ft) = fp
+                val gepIdx = idx + fieldOffset
+                val fieldLt = llvmType(ft)
+                val apR = fresh("cmp.ap"); val bpR = fresh("cmp.bp")
+                val avR = fresh("cmp.av"); val bvR = fresh("cmp.bv")
+                emit("  $apR = getelementptr $structType, $structType* $aC, i32 0, i32 $gepIdx")
+                emit("  $bpR = getelementptr $structType, $structType* $bC, i32 0, i32 $gepIdx")
+                emit("  $avR = load $fieldLt, $fieldLt* $apR, align ${llvmTypeAlign(fieldLt)}")
+                emit("  $bvR = load $fieldLt, $fieldLt* $bpR, align ${llvmTypeAlign(fieldLt)}")
+                val ltLabel = freshLabel("cmp.lt$idx"); val gtLabel = freshLabel("cmp.gt$idx")
+                val eqLabel = freshLabel("cmp.eq$idx"); val chkGtLabel = "cmp.chkgt.$idx"
+                when (ft) {
+                    Type.TStr -> {
+                        val ahR = fresh("cmp.ah"); val bhR = fresh("cmp.bh")
+                        emit("  $ahR = call i64 @nv_hash_fnv1a(i8* $avR)")
+                        emit("  $bhR = call i64 @nv_hash_fnv1a(i8* $bvR)")
+                        val ltR = fresh("cmp.lt"); val eqR = fresh("cmp.eq")
+                        emit("  $ltR = icmp slt i64 $ahR, $bhR")
+                        emit("  $eqR = icmp eq i64 $ahR, $bhR")
+                        emit("  br i1 $ltR, label %$ltLabel, label %$chkGtLabel")
+                        emitRaw("$chkGtLabel:"); isTerminated = false
+                        emit("  br i1 $eqR, label %$eqLabel, label %$gtLabel")
+                    }
+                    Type.TFloat, Type.TFloat64 -> {
+                        val ltR = fresh("cmp.lt"); val eqR = fresh("cmp.eq")
+                        emit("  $ltR = fcmp olt double $avR, $bvR")
+                        emit("  $eqR = fcmp oeq double $avR, $bvR")
+                        emit("  br i1 $ltR, label %$ltLabel, label %$chkGtLabel")
+                        emitRaw("$chkGtLabel:"); isTerminated = false
+                        emit("  br i1 $eqR, label %$eqLabel, label %$gtLabel")
+                    }
+                    Type.TBool -> {
+                        val aE = fresh("cmp.ae"); val bE = fresh("cmp.be")
+                        emit("  $aE = zext i1 $avR to i64"); emit("  $bE = zext i1 $bvR to i64")
+                        val ltR = fresh("cmp.lt"); val eqR = fresh("cmp.eq")
+                        emit("  $ltR = icmp slt i64 $aE, $bE"); emit("  $eqR = icmp eq i64 $aE, $bE")
+                        emit("  br i1 $ltR, label %$ltLabel, label %$chkGtLabel")
+                        emitRaw("$chkGtLabel:"); isTerminated = false
+                        emit("  br i1 $eqR, label %$eqLabel, label %$gtLabel")
+                    }
+                    else -> {
+                        val ltR = fresh("cmp.lt"); val eqR = fresh("cmp.eq")
+                        emit("  $ltR = icmp slt i64 $avR, $bvR"); emit("  $eqR = icmp eq i64 $avR, $bvR")
+                        emit("  br i1 $ltR, label %$ltLabel, label %$chkGtLabel")
+                        emitRaw("$chkGtLabel:"); isTerminated = false
+                        emit("  br i1 $eqR, label %$eqLabel, label %$gtLabel")
+                    }
+                }
+                emitRaw("$ltLabel:"); isTerminated = false; terminate("  ret i64 -1")
+                emitRaw("$gtLabel:"); isTerminated = false; terminate("  ret i64 1")
+                emitRaw("$eqLabel:"); isTerminated = false
+                // continue to next field
+            }
+            terminate("  ret i64 0")
+        }
+        methodReturnTypes["${typeName}_compare"] = "i64"
+    }
+
+    /** @derive(Copy) / @newtype — emit @nv_TypeName_copy using the constructor for a field-for-field duplicate. */
+    private fun emitDerivedCopy(typeName: String, fields: List<Pair<String, Type>>, isClass: Boolean) {
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        emitSyntheticMethod("@nv_${typeName}_copy", "i8* %self", "i8*") {
+            val castR = fresh("copy.cast")
+            emit("  $castR = bitcast i8* %self to $structType*")
+            val fieldRegsAndTypes = fields.mapIndexed { idx, (_, ft) ->
+                val gepIdx = idx + fieldOffset; val fieldLt = llvmType(ft)
+                val fpR = fresh("copy.fp"); val fvR = fresh("copy.fv")
+                emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+                emit("  $fvR = load $fieldLt, $fieldLt* $fpR, align ${llvmTypeAlign(fieldLt)}")
+                Pair(fvR, fieldLt)
+            }
+            val argList = fieldRegsAndTypes.joinToString(", ") { (r, lt) -> "$lt $r" }
+            val res = fresh("copy.result")
+            emit("  $res = call i8* @nv_$typeName($argList)")
+            terminate("  ret i8* $res")
+        }
+        methodReturnTypes["${typeName}_copy"] = "i8*"
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
 
     /** Emit a destructor @nv_dtor_Name that releases all RC-typed fields then frees the object. */
     private fun emitClassDestructor(name: String, fields: List<Pair<String, Type>>) {
@@ -1990,9 +2257,14 @@ $storeStmt
         val receiverType = typeOf(memberExpr.receiver)
         val member       = memberExpr.member
 
-        // .str() — toString conversion
+        // .str() / .toString() — use derived/user-defined toString when available; fall back to convertToStr
         if (member == "str" || member == "toString") {
-            return convertToStr(receiverReg, receiverType)
+            val tn = receiverType.simpleTypeName()
+            if (tn.isNotEmpty() && methodReturnTypes.containsKey("${tn}_toString")) {
+                // Fall through to general method dispatch below (derived Show method)
+            } else {
+                return convertToStr(receiverReg, receiverType)
+            }
         }
 
         // String methods

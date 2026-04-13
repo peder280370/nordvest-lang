@@ -984,11 +984,19 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
     private fun parseConstructorParam(): ConstructorParam {
         val start = peek().span
         val vis = parseVisibility()
-        val name = expect(IDENT).text
-        expect(COLON)
-        val type = parseType()
-        val default = if (match(ASSIGN) != null) parseExpr() else null
-        return ConstructorParam(vis, name, type, default, spanFrom(start))
+        // Support @newtype-style type-only params: `UserId(int)` instead of `UserId(value: int)`.
+        // Heuristic: IDENT followed by COLON → named param; anything else → type-only, name = "value".
+        return if (at(IDENT) && at(COLON, 1)) {
+            val name = advance().text   // consume IDENT
+            advance()                   // consume COLON
+            val type = parseType()
+            val default = if (match(ASSIGN) != null) parseExpr() else null
+            ConstructorParam(vis, name, type, default, spanFrom(start))
+        } else {
+            val type = parseType()
+            val default = if (match(ASSIGN) != null) parseExpr() else null
+            ConstructorParam(vis, "value", type, default, spanFrom(start))
+        }
     }
 
     // ── Types ──────────────────────────────────────────────────────────────

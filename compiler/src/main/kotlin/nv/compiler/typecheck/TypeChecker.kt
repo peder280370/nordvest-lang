@@ -115,9 +115,9 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
     private fun registerDecl(decl: Decl) {
         when (decl) {
-            is ClassDecl    -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams)
-            is StructDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams)
-            is RecordDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams)
+            is ClassDecl    -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
+            is StructDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
+            is RecordDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
             is SealedClassDecl -> {
                 val variantNames = decl.variants.map { it.name }
                 sealedVariants[decl.name] = variantNames
@@ -229,6 +229,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
         constructorParams: List<ConstructorParam>,
         members: List<Decl>,
         typeParams: List<TypeParam>,
+        annotations: List<nv.compiler.parser.Annotation> = emptyList(),
     ) {
         withTypeParams(typeParams.map { it.name }.toSet()) {
             val typeArgs = typeParams.map { Type.TVar(it.name) }
@@ -270,6 +271,39 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                             memberTypeMap["$name.${member.name}"] = resolveTypeNode(member.typeAnnotation)
                     else -> {}
                 }
+            }
+
+            // ── @newtype: auto-derive Show, Eq, Hash, Compare from the single inner type ──
+            if (annotations.any { it.name == "newtype" }) {
+                memberTypeMap["$name.toString"] = Type.TFun(emptyList(), Type.TStr)
+                memberTypeMap["$name.=="]       = Type.TFun(listOf(selfType), Type.TBool)
+                memberTypeMap["$name.!="]       = Type.TFun(listOf(selfType), Type.TBool)
+                memberTypeMap["$name.hash"]     = Type.TFun(emptyList(), Type.TInt)
+                memberTypeMap["$name.compare"]  = Type.TFun(listOf(selfType), Type.TInt)
+            }
+
+            // ── @derive(Show, Eq, Hash, Compare, Copy) / @derive(All) ────────────────────
+            val deriveAnno = annotations.find { it.name == "derive" }
+            if (deriveAnno != null) {
+                val traitNames = deriveAnno.args.mapNotNull { arg ->
+                    (arg.value as? AnnotationIdentValue)?.name?.text
+                }
+                val traits = if ("All" in traitNames)
+                    setOf("Show", "Eq", "Compare", "Hash", "Copy")
+                else traitNames.toSet()
+
+                if ("Show" in traits)
+                    memberTypeMap["$name.toString"] = Type.TFun(emptyList(), Type.TStr)
+                if ("Eq" in traits) {
+                    memberTypeMap["$name.=="] = Type.TFun(listOf(selfType), Type.TBool)
+                    memberTypeMap["$name.!="] = Type.TFun(listOf(selfType), Type.TBool)
+                }
+                if ("Hash" in traits)
+                    memberTypeMap["$name.hash"] = Type.TFun(emptyList(), Type.TInt)
+                if ("Compare" in traits)
+                    memberTypeMap["$name.compare"] = Type.TFun(listOf(selfType), Type.TInt)
+                if ("Copy" in traits)
+                    memberTypeMap["$name.copy"] = Type.TFun(emptyList(), selfType)
             }
         }
     }
