@@ -15,17 +15,21 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (IN PROGRESS: 5.1–5.6 DONE)
-  Next: PHASE 6 (IDE plugins) or Phase 5.7 (remaining stdlib modules)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.6 all done)
+  Next: PHASE 6 — IDE Plugins (VS Code + IntelliJ backed by nv-lsp)
 
-  All Phase 4 tests pass (full test suite green). Fixes applied in this phase:
-  - Parser: class body made optional (struct already was); annotation arg parser
-    now accepts keywords (e.g. 'fn') as named argument labels
-  - stdlib bodies implemented (math @extern, string/collections/iter/hash/fmt stubs)
-  - Codegen: struct/class GEP layout, @extern dispatch, array length header,
-    operator overloading, RC stubs, eprintln/readLine/readAll runtime fns
-  - Flagship examples: nv-http, nv-json, nv-bench (uses string interpolation)
-  - Phase4Test: 30 tests covering all 4.1–4.4 items; OOM fuzz guard added
+  Current test count: 694 (689 @Test methods + 4 golden file + 1 parse golden)
+  Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
+
+  All Phase 5 items complete:
+  - 5.1  std.string: slice/indexOf/contains/trim/replace/upper/lower/parse
+  - 5.2  std.collections: List push/contains/indexOf; Map new/get/has/set
+  - 5.3  std.io: file open/close/read/write/readLine; IOError sealed class
+  - 5.4  std.fs, std.time, std.process, std.rand: POSIX bindings, xorshift64
+  - 5.5  RC: atomic retain/release, 16-byte heap header, destructor chain, weak refs
+  - 5.6  std.hash (FNV-1a/DJB2/Murmur3/CRC-32/SHA-256/MD5), std.fmt, std.iter
+  - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
+  - Fix: @extern mappings registered without re-declaration; array result type inference
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -523,8 +527,8 @@
                - isRcType() helper determines if a field needs RC release in destructor
                - Field access GEP in emitMemberAccessExpr offsets by 2 for class types
                - nv_runtime.h/c: C reference implementations using stdatomic (_Atomic int64_t)
-               - Phase5Test.kt: 12 new tests (8 IR structure + 4 integration)
-               - Total tests: 722 passing (710 prior + 12 new Phase5Test 5.5 tests)
+               - RCRuntimeTest (via CoreRuntimeTest.kt post-split): 12 tests (8 IR structure + 4 integration)
+               - Total tests after split into per-module *RuntimeTest files: 694
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

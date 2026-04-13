@@ -2,7 +2,7 @@
 
 A statically typed, compiled language with clean indentation-based syntax, first-class mathematical notation, and a unified toolchain.
 
-> **Status:** Phases 0–4 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and standard library stubs. 654 tests passing. Next: Phase 5 — Self-Hosting.
+> **Status:** Phases 0–5 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and a real standard library. 694 tests passing. Next: Phase 6 — IDE Plugins.
 > See [`IMPL.txt`](IMPL.txt) for current progress and [`PLAN.txt`](PLAN.txt) for the full roadmap.
 
 ---
@@ -102,6 +102,84 @@ examples/   Curated example programs
 
 ---
 
+## How the compiler works
+
+The bootstrap compiler is written entirely in **Kotlin** and compiled to a fat JAR via Gradle. The `nv` shell script invokes that JAR. No LLVM bindings or native code are needed at compile time — the compiler emits LLVM IR as plain text, then hands off to **Clang** (which must be on `PATH`) to produce the final native binary.
+
+### Compilation pipeline
+
+```
+Source (.nv)
+    │
+    ▼
+┌─────────┐   Unicode-aware lexer handles INDENT/DEDENT tokens,
+│  Lexer  │   mathematical symbols (∀ ∃ ∑ …), raw strings, and
+└────┬────┘   all operators. Produces a flat token stream.
+     │
+     ▼
+┌────────┐    Recursive-descent PEG-style parser. Produces a
+│ Parser │    typed AST (sealed Kotlin classes in Ast.kt).
+└────┬───┘    Returns ParseResult.Success / Recovered / Failure.
+     │
+     ▼
+┌──────────┐  Walks the AST and builds a symbol table.
+│ Resolver │  Resolves names to their declaration sites,
+└────┬─────┘  catches use-before-declare and undefined names.
+     │
+     ▼
+┌─────────────┐  Hindley-Milner-style bidirectional type checker.
+│ TypeChecker │  Infers types for let/var bindings, validates
+└──────┬──────┘  calls, checks null safety, Result<T> propagation,
+       │         and match exhaustiveness. Annotates every AST node.
+       │
+       ▼
+┌────────────────┐  Walks the type-annotated AST and emits textual
+│ LlvmIrEmitter  │  LLVM IR (.ll). Uses alloca/load/store for all
+└───────┬────────┘  locals. Runtime helpers (RC, strings, I/O, …)
+        │           are emitted as inline IR functions in the same
+        │           module, so the output only depends on libc.
+        │
+        ▼
+   LLVM IR (.ll)
+        │
+        ▼  clang -o <bin> out.ll  (or  clang -O2  in --release mode)
+        │
+        ▼
+  Native binary
+```
+
+### LLVM IR and Clang
+
+The `LlvmIrEmitter` produces typed-pointer IR compatible with **LLVM/Clang 12+**.  Pointer types are written as `i8*` rather than the newer opaque `ptr` form for broad compatibility across macOS (Apple Clang) and Linux toolchains.
+
+Clang is used as the assembler/linker driver rather than `llc`+`ld` because it handles platform-specific startup code, C runtime linking, and architecture-specific flags automatically. When `nv run` is invoked, the IR is written to a temporary directory, Clang compiles it to a binary, the binary runs, and the temporary files are cleaned up.
+
+`nv build --emit-llvm` writes the `.ll` file to disk so you can inspect it, feed it to `opt`, or cross-compile it yourself.
+
+### Runtime support
+
+There is no separate runtime library to install. All runtime helpers — reference-counted heap allocation (`nv_rc_retain` / `nv_rc_release`), string operations, I/O, collections, hashing, formatting, and more — are emitted as `define` blocks in the same `.ll` module as the user program. The only external dependency is **libc** (always available).
+
+This design means every compiled Nordvest binary is self-contained apart from the C standard library.
+
+### Incremental compilation and caching
+
+`nv build` caches the compiled IR in a `.nv-cache/` directory keyed by a SHA-256 hash of the source file. A file is only re-compiled when its content changes. `nv clean` removes the cache.
+
+### Key source files
+
+| File | Role |
+|---|---|
+| `compiler/…/Lexer.kt` | Tokenises source; synthesises INDENT/DEDENT |
+| `compiler/…/Parser.kt` | Builds the typed AST |
+| `compiler/…/Resolver.kt` | Name resolution and scope analysis |
+| `compiler/…/TypeChecker.kt` | Bidirectional type inference and checking |
+| `compiler/…/LlvmIrEmitter.kt` | AST → LLVM IR text |
+| `compiler/…/codegen/runtime/` | IR-level runtime helpers (one file per stdlib module) |
+| `tools/…/Main.kt` | `nv` CLI — run, build, fmt, test, doc, pkg, lsp |
+
+---
+
 ## Building from source
 
 **Prerequisites:** Java 21+, Git.  Everything else is fetched by the Gradle wrapper.
@@ -146,10 +224,10 @@ cd nordvest-lang
 | **2 — Systems & concurrency** | async/await, channels, C/C++ interop, GPU, stdlib v1 | Done |
 | **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Done |
 | **4 — Language completion** | stdlib bodies, codegen hardening, flagship examples, fuzz testing | Done |
-| **5 — Self-hosting** | Rewrite the compiler in Nordvest | Planned |
+| **5 — Stdlib & production hardening** | Real stdlib implementations, RC, string/collections/I/O/hash/fmt/iter | Done |
+| **6 — IDE plugins** | VS Code extension + IntelliJ plugin backed by nv-lsp | Planned |
 
-The bootstrap compiler is written in **Kotlin** and targets **LLVM IR**.
-Self-hosting is the goal of Phase 4.
+The bootstrap compiler is written in **Kotlin** and targets **LLVM IR**. It is the permanent reference implementation — the language does not self-host.
 
 ---
 
