@@ -1,0 +1,171 @@
+package nv.tests
+
+import nv.compiler.Compiler
+import nv.compiler.CompileResult
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Test
+import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+
+/**
+ * Tests for CollectionsRuntime: std.collections operations (nv_arr_*, nv_map_*).
+ */
+class CollectionsRuntimeTest {
+
+    private fun projectDir(): File =
+        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
+            .let { if (it.name == "tests") it.parentFile else it }
+
+    private fun compileOk(src: String): String {
+        val result = Compiler.compile(src, "<test>")
+        val ir = when (result) {
+            is CompileResult.IrSuccess -> result.llvmIr
+            else -> null
+        }
+        assertNotNull(ir, "Expected IR success: ${(result as? CompileResult.Failure)?.errors?.map { it.message }}")
+        return ir!!
+    }
+
+    private fun clangAvailable(): Boolean {
+        return try {
+            val p = ProcessBuilder("clang", "--version").redirectErrorStream(true).start()
+            p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0
+        } catch (_: Exception) { false }
+    }
+
+    private fun runProgram(ir: String): String {
+        val tmp = Files.createTempDirectory("nv_col_").toFile()
+        return try {
+            val ll  = File(tmp, "out.ll");  ll.writeText(ir)
+            val bin = File(tmp, "out")
+            val cc  = ProcessBuilder("clang", "-o", bin.absolutePath, ll.absolutePath)
+                .redirectErrorStream(true).start()
+            val ccOk = cc.waitFor(60, TimeUnit.SECONDS) && cc.exitValue() == 0
+            assertTrue(ccOk, "clang failed: ${cc.inputStream.bufferedReader().readText()}")
+            val run = ProcessBuilder(bin.absolutePath)
+                .redirectErrorStream(true).start()
+            run.waitFor(10, TimeUnit.SECONDS)
+            run.inputStream.bufferedReader().readText().trimEnd()
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
+    @Test fun `stdlib collections module has typed operations`() {
+        val f = File(projectDir(), "stdlib/std/collections.nv")
+        assertTrue(f.exists())
+        val c = f.readText()
+        assertTrue(c.contains("nv_arr_push_i64"),       "missing nv_arr_push_i64 @extern")
+        assertTrue(c.contains("nv_arr_push_str"),        "missing nv_arr_push_str @extern")
+        assertTrue(c.contains("nv_arr_contains_i64"),    "missing nv_arr_contains_i64 @extern")
+        assertTrue(c.contains("nv_arr_contains_str"),    "missing nv_arr_contains_str @extern")
+        assertTrue(c.contains("nv_arr_index_of_i64"),    "missing nv_arr_index_of_i64 @extern")
+        assertTrue(c.contains("nv_arr_index_of_str"),    "missing nv_arr_index_of_str @extern")
+        assertTrue(c.contains("nv_map_new"),             "missing nv_map_new @extern")
+        assertTrue(c.contains("nv_map_get_str"),         "missing nv_map_get_str @extern")
+        assertTrue(c.contains("nv_map_set_str"),         "missing nv_map_set_str @extern")
+        assertTrue(c.contains("nv_map_has_str"),         "missing nv_map_has_str @extern")
+    }
+
+    @Test fun `collections runtime functions are emitted in IR`() {
+        val ir = compileOk("module test\nfn main()\n    println(\"ok\")")
+        assertTrue(ir.contains("define i8* @nv_arr_push_i64"),     "nv_arr_push_i64 missing")
+        assertTrue(ir.contains("define i8* @nv_arr_push_str"),     "nv_arr_push_str missing")
+        assertTrue(ir.contains("define i1 @nv_arr_contains_i64"),  "nv_arr_contains_i64 missing")
+        assertTrue(ir.contains("define i1 @nv_arr_contains_str"),  "nv_arr_contains_str missing")
+        assertTrue(ir.contains("define i64 @nv_arr_index_of_i64"), "nv_arr_index_of_i64 missing")
+        assertTrue(ir.contains("define i64 @nv_arr_index_of_str"), "nv_arr_index_of_str missing")
+        assertTrue(ir.contains("define i8* @nv_map_new"),          "nv_map_new missing")
+        assertTrue(ir.contains("define i8* @nv_map_get_str"),      "nv_map_get_str missing")
+        assertTrue(ir.contains("define i8* @nv_map_set_str"),      "nv_map_set_str missing")
+        assertTrue(ir.contains("define i1 @nv_map_has_str"),       "nv_map_has_str missing")
+    }
+
+    @Test fun `program with @extern list operations compiles`() {
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_arr_push_i64")      pub fn listPushInt(list: [int], item: int) → [int]
+            @extern(fn: "nv_arr_contains_i64")  pub fn listContainsInt(list: [int], item: int) → bool
+            fn main()
+                var xs = [1, 2, 3]
+                xs = listPushInt(xs, 4)
+                if listContainsInt(xs, 4)
+                    println("found 4")
+        """.trimIndent())
+        assertTrue(ir.contains("@nv_arr_push_i64"))
+        assertTrue(ir.contains("@nv_arr_contains_i64"))
+    }
+
+    @Test fun `list push and contains run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_arr_push_i64")      pub fn listPushInt(list: [int], v: int) → [int]
+            @extern(fn: "nv_arr_contains_i64")  pub fn listHasInt(list: [int], v: int) → bool
+            @extern(fn: "nv_arr_index_of_i64")  pub fn listIdxInt(list: [int], v: int) → int
+            fn main()
+                var xs = [10, 20, 30]
+                xs = listPushInt(xs, 40)
+                if listHasInt(xs, 40)
+                    println("contains 40: yes")
+                else
+                    println("contains 40: no")
+                if listHasInt(xs, 99)
+                    println("contains 99: yes")
+                else
+                    println("contains 99: no")
+                println(listIdxInt(xs, 20))
+                println(listIdxInt(xs, 99))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("contains 40: yes\ncontains 99: no\n1\n-1", out)
+    }
+
+    @Test fun `str list push and contains run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_arr_push_str")      pub fn listPushStr(list: [str], v: str) → [str]
+            @extern(fn: "nv_arr_contains_str")  pub fn listHasStr(list: [str], v: str) → bool
+            @extern(fn: "nv_arr_index_of_str")  pub fn listIdxStr(list: [str], v: str) → int
+            fn main()
+                var ws = ["alpha", "beta"]
+                ws = listPushStr(ws, "gamma")
+                if listHasStr(ws, "gamma")
+                    println("found gamma")
+                println(listIdxStr(ws, "beta"))
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("found gamma\n1", out)
+    }
+
+    @Test fun `map new get set has run correctly`() {
+        assumeTrue(clangAvailable())
+        val ir = compileOk("""
+            module test
+            @extern(fn: "nv_map_new")     pub fn mapNew() → [str: str]
+            @extern(fn: "nv_map_set_str") pub fn mapSet(m: [str: str], k: str, v: str) → [str: str]
+            @extern(fn: "nv_map_get_str") pub fn mapGet(m: [str: str], k: str) → str?
+            @extern(fn: "nv_map_has_str") pub fn mapHas(m: [str: str], k: str) → bool
+            @extern(fn: "nv_map_len")     pub fn mapLen(m: [str: str]) → int
+            fn main()
+                var m = mapNew()
+                m = mapSet(m, "name", "Nordvest")
+                m = mapSet(m, "type", "compiled")
+                println(mapLen(m))
+                if mapHas(m, "name")
+                    println("has name")
+                let v = mapGet(m, "name")
+                if let s = v
+                    println(s)
+                if mapHas(m, "missing")
+                    println("has missing")
+                else
+                    println("no missing")
+        """.trimIndent())
+        val out = runProgram(ir)
+        assertEquals("2\nhas name\nNordvest\nno missing", out)
+    }
+}
