@@ -30,8 +30,12 @@
   - 5.6  std.hash (FNV-1a/DJB2/Murmur3/CRC-32/SHA-256/MD5), std.fmt, std.iter
   - 5.7  @newtype and @derive(Show, Eq, Hash, Compare, Copy, All) — code generation
   - 5.8  @builder annotation — build DSL block (TypeName.build INDENT field=val DEDENT)
+  - 5.9  @lazy fields and `by` delegation — codegen + integration (782 tests passing)
   - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
   - Fix: @extern mappings registered without re-declaration; array result type inference
+  - Fix: parser supports `(T) → T` function type syntax (without `fn` keyword)
+  - Fix: lambda type inference from expected function type in call context
+  - Fix: syncToDeclBoundary DECL_STARTERS as companion constant; parseFile consumes stray DEDENTs
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
@@ -580,6 +584,23 @@
                  IR structure × 3, integration × 3)
                - Total tests: 762 passing (752 prior + 17 BuilderTest — 7 previous tests
                  dropped from count reconciliation)
+
+  [DONE]  5.9  @lazy fields and `by` delegation
+               - LlvmIrEmitter.kt: varTypes["self"] = Type.TNamed(typeName) in emitMethodDecl
+                 so typeOf(IdentExpr("self")) resolves to the class type for self.field access;
+                 lazy field lookup in emitIdentExpr — when identifier not in varAllocas, tries
+                 to load it as a constructor param field from self via GEP (on-demand, not eager)
+               - Parser.kt: syncToDeclBoundary() stops at (not consumes) DEDENT so parseClassMembers
+                 terminates; DECL_STARTERS moved to companion object to avoid per-call allocation;
+                 parseTupleOrFunctionType() handles `(T) → T` syntax (function type without `fn`);
+                 parseFile() consumes stray DEDENT tokens to prevent infinite loop on parse errors
+               - TypeChecker.kt: synthesizeLambda() accepts optional expectedType; when expectedType
+                 is TFun, infers untyped lambda params from the expected function parameter types;
+                 checkCallArgs() calls synthesizeLambda with expected param type for lambda args
+               - LazyAndDelegationTest.kt: 20 tests (17 parser + IR structure, 3 integration skipped
+                 when clang unavailable); renamed `e` → `obj` to avoid ConstEExpr parse collision;
+                 fixed inline method bodies to use indented syntax in parser tests
+               - Total tests: 782 passing
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

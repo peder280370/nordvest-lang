@@ -10,6 +10,13 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
     private var pos: Int = 0
     private val errors: MutableList<ParseError> = mutableListOf()
 
+    companion object {
+        private val DECL_STARTERS = setOf(
+            FN, CLASS, STRUCT, RECORD, INTERFACE, SEALED, ENUM, EXTEND,
+            TYPE, LET, VAR, PUB, AT, WEAK, MODULE, IMPORT,
+        )
+    }
+
     // ── Cursor primitives ─────────────────────────────────────────────────
 
     private fun peek(offset: Int = 0): Token {
@@ -88,11 +95,12 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
     }
 
     private fun syncToDeclBoundary() {
-        val declStarters = setOf(FN, CLASS, STRUCT, RECORD, INTERFACE, SEALED, ENUM, EXTEND, TYPE, LET, VAR, PUB, AT, WEAK, MODULE, IMPORT)
         while (!at(EOF)) {
             val k = peek().kind
-            if (k == DEDENT || k == INDENT || k == NEWLINE) { advance(); continue }
-            if (k in declStarters) break
+            // DEDENT is structural — stop without consuming it so the enclosing scope can terminate.
+            if (k == DEDENT) break
+            if (k == INDENT || k == NEWLINE) { advance(); continue }
+            if (k in DECL_STARTERS) break
             advance()
         }
     }
@@ -173,7 +181,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         }
         val decls = mutableListOf<Decl>()
         while (!at(EOF)) {
-            while (at(NEWLINE)) advance()
+            while (at(NEWLINE) || at(DEDENT)) advance()
             if (at(EOF)) break
             val decl = tryParseTopLevelDecl(docComment = null)
             if (decl != null) decls += decl
@@ -615,12 +623,26 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             expect(RPAREN)
             ps
         } else emptyList()
-        val superTypes = if (at(COLON)) {
+        val superTypes = mutableListOf<TypeNode>()
+        val delegations = mutableListOf<Pair<TypeNode, Expr>>()
+        if (at(COLON)) {
             advance()
-            parseTypeList()
-        } else emptyList()
+            val firstType = parseNamedType()
+            superTypes += firstType
+            if (at(BY)) {
+                advance()
+                delegations += firstType to parseExpr()
+            }
+            while (match(COMMA) != null) {
+                val t = parseNamedType()
+                superTypes += t
+                if (at(BY)) {
+                    advance()
+                    delegations += t to parseExpr()
+                }
+            }
+        }
         val whereClause = if (at(WHERE)) parseWhereClause() else emptyList()
-        val byExpr: Expr? = null // 'by' delegation - not in PEG, skip for now
         expectNewline()
         val members = if (at(INDENT)) {
             advance()
@@ -628,7 +650,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             expectDedent()
             ms
         } else emptyList()
-        return ClassDecl(spanFrom(start), docComment, annotations, vis, name, typeParams, ctorParams, superTypes, whereClause, members)
+        return ClassDecl(spanFrom(start), docComment, annotations, vis, name, typeParams, ctorParams, superTypes, whereClause, members, delegations)
     }
 
     private fun parseStructDecl(docComment: String?, annotations: List<Annotation>, vis: Visibility): Decl {
@@ -1030,7 +1052,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val start = peek().span
         return when {
             at(FN) -> parseFnType()
-            at(LPAREN) -> parseTupleType()
+            at(LPAREN) -> parseTupleOrFunctionType()
             at(LBRACKET) -> parseArrayOrMapType()
             at(IDENT) && peek().text == "ptr" -> parsePtrType()
             at(IDENT) || at(SELF) || at(SUPER) -> parseNamedType()
@@ -1057,6 +1079,29 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         expect(ARROW)
         val returnType = parseType()
         return FnTypeNode(spanFrom(start), paramTypes, returnType)
+    }
+
+    // Parses either a tuple type `(T, U)` or a function type `(T) → U`.
+    // The decision is made after the closing `)`: if `→` follows, it's a function type.
+    private fun parseTupleOrFunctionType(): TypeNode {
+        val start = peek().span
+        expect(LPAREN)
+        val fields = mutableListOf<TupleTypeField>()
+        if (!at(RPAREN)) {
+            fields += parseTupleTypeField()
+            while (match(COMMA) != null) {
+                if (at(RPAREN)) break
+                fields += parseTupleTypeField()
+            }
+        }
+        expect(RPAREN)
+        return if (at(ARROW)) {
+            advance()
+            val returnType = parseType()
+            FnTypeNode(spanFrom(start), fields.map { it.type }, returnType)
+        } else {
+            TupleTypeNode(spanFrom(start), fields)
+        }
     }
 
     private fun parseTupleType(): TypeNode {

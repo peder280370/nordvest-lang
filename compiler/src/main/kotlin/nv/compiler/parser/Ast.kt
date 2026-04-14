@@ -109,6 +109,7 @@ data class ClassDecl(
     val superTypes: List<TypeNode>,
     val whereClause: List<WhereConstraint>,
     val members: List<Decl>,
+    val delegations: List<Pair<TypeNode, Expr>> = emptyList(),
 ) : Decl()
 
 data class StructDecl(

@@ -118,7 +118,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
     private fun registerDecl(decl: Decl) {
         when (decl) {
-            is ClassDecl    -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
+            is ClassDecl    -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations, decl.delegations)
             is StructDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
             is RecordDecl   -> registerClassLike(decl.name, decl.constructorParams, decl.members, decl.typeParams, decl.annotations)
             is SealedClassDecl -> {
@@ -233,6 +233,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
         members: List<Decl>,
         typeParams: List<TypeParam>,
         annotations: List<nv.compiler.parser.Annotation> = emptyList(),
+        delegations: List<Pair<TypeNode, Expr>> = emptyList(),
     ) {
         withTypeParams(typeParams.map { it.name }.toSet()) {
             val typeArgs = typeParams.map { Type.TVar(it.name) }
@@ -313,6 +314,23 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             if (annotations.any { it.name == "builder" }) {
                 val required = constructorParams.filter { it.default == null }.map { it.name }.toSet()
                 builderRequiredFields[name] = required
+            }
+
+            // ── by delegation: propagate interface methods to this class ──────────────────
+            for ((ifaceTypeNode, _) in delegations) {
+                val ifaceName = (ifaceTypeNode as? NamedTypeNode)?.name?.text ?: continue
+                val ifacePrefix = "$ifaceName."
+                val classPrefix = "$name."
+                val toAdd = memberTypeMap.entries
+                    .filter { (k, _) -> k.startsWith(ifacePrefix) }
+                    .mapNotNull { (k, v) ->
+                        val memberName = k.removePrefix(ifacePrefix)
+                        val classKey = "$classPrefix$memberName"
+                        if (!memberTypeMap.containsKey(classKey)) classKey to v else null
+                    }
+                for ((k, v) in toAdd) {
+                    memberTypeMap[k] = v
+                }
             }
         }
     }
@@ -1047,8 +1065,11 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             errors += TypeCheckError.ArityMismatch(paramTypes.size, allArgs.size, callSpan)
         }
         allArgs.forEachIndexed { i, arg ->
-            val argType = synthesize(arg.expr, env)
             val expectedParam = paramTypes.getOrNull(i) ?: paramTypes.lastOrNull() ?: Type.TUnknown
+            val argType = if (arg.expr is LambdaExpr)
+                synthesizeLambda(arg.expr, env, expectedParam)
+            else
+                synthesize(arg.expr, env)
             if (!isAssignable(argType, expectedParam)) {
                 errors += TypeCheckError.TypeMismatch(expectedParam, argType, arg.expr.span)
             }
@@ -1167,16 +1188,20 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
     // ── Lambda ────────────────────────────────────────────────────────────
 
-    private fun synthesizeLambda(expr: LambdaExpr, env: TypeEnv): Type {
+    private fun synthesizeLambda(expr: LambdaExpr, env: TypeEnv, expectedType: Type? = null): Type {
+        val expectedFn = expectedType as? Type.TFun
         val lambdaEnv = env.child()
-        val paramTypes = expr.params.map { param ->
-            val t = param.type?.let { resolveTypeNode(it) } ?: Type.TUnknown
+        val paramTypes = expr.params.mapIndexed { i, param ->
+            val explicit = param.type?.let { resolveTypeNode(it) }
+            val inferred = expectedFn?.params?.getOrNull(i)
+            val t = explicit ?: inferred ?: Type.TUnknown
             lambdaEnv.define(param.name, t)
             t
         }
+        val expectedRet = expectedFn?.returnType
         val retType = when (val body = expr.body) {
             is ExprLambdaBody  -> synthesize(body.expr, lambdaEnv)
-            is BlockLambdaBody -> { checkBody(body.stmts, lambdaEnv, null); Type.TUnknown }
+            is BlockLambdaBody -> { checkBody(body.stmts, lambdaEnv, expectedRet); expectedRet ?: Type.TUnknown }
         }
         return Type.TFun(paramTypes, retType)
     }

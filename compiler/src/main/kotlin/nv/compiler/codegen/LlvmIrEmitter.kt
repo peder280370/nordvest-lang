@@ -123,8 +123,16 @@ class LlvmIrEmitter(
     )
 
     // ── Struct layout registry (name → ordered list of field name+type) ──
-    private val structLayouts     = mutableMapOf<String, List<Pair<String, Type>>>()
+    private val structLayouts      = mutableMapOf<String, List<Pair<String, Type>>>()
     private val structCtorDefaults = mutableMapOf<String, List<Pair<String, Expr?>>>()
+    // Number of fields that are constructor parameters (the rest are body/lazy fields)
+    private val structCtorParamCount = mutableMapOf<String, Int>()
+
+    // ── @lazy field registry: typeName → [(fieldName, fieldType, initExpr)] ──
+    private val lazyFields = mutableMapOf<String, MutableList<Triple<String, Type, Expr>>>()
+
+    // ── by-delegation registry: typeName → [(interfaceName, delegateFieldName, concreteTypeName)] ──
+    private val classDelegations = mutableMapOf<String, MutableList<Triple<String, String, String>>>()
 
     // ── Class type registry: names of ClassDecl types (have RC header) ──
     private val classTypeNames = mutableSetOf<String>()
@@ -238,7 +246,19 @@ class LlvmIrEmitter(
                     }
                 }
                 is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
-                is ClassDecl  -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = true)
+                is ClassDecl  -> {
+                    collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = true)
+                    // Register by-delegations: interface → (delegateFieldName, concreteTypeName)
+                    for ((ifaceTypeNode, delegateExpr) in decl.delegations) {
+                        val ifaceName = (ifaceTypeNode as? NamedTypeNode)?.name?.text ?: continue
+                        val delegateFieldName = (delegateExpr as? IdentExpr)?.name ?: continue
+                        val delegateParam = decl.constructorParams.firstOrNull { it.name == delegateFieldName } ?: continue
+                        val concreteType = resolveTypeNode(delegateParam.type)
+                        val concreteTypeName = (concreteType as? Type.TNamed)?.qualifiedName?.substringAfterLast('.') ?: continue
+                        classDelegations.getOrPut(decl.name) { mutableListOf() }
+                            .add(Triple(ifaceName, delegateFieldName, concreteTypeName))
+                    }
+                }
                 is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
                 is SealedClassDecl -> {
                     sealedClassDecls[decl.name] = decl
@@ -264,9 +284,21 @@ class LlvmIrEmitter(
 
     private fun collectStructLayout(name: String, ctorParams: List<ConstructorParam>, members: List<Decl>, isClass: Boolean = false) {
         val fields = ctorParams.map { cp -> cp.name to resolveTypeNode(cp.type) }.toMutableList()
+        val ctorCount = ctorParams.size
         for (m in members) {
             when (m) {
-                is FieldDecl -> fields += m.name to resolveTypeNode(m.typeAnnotation)
+                is FieldDecl -> {
+                    val fieldType = resolveTypeNode(m.typeAnnotation)
+                    if (m.annotations.any { it.name == "lazy" } && m.initializer != null) {
+                        // Lazy field: prepend an i1 init-flag, then the value slot
+                        fields += "_lazy_${m.name}_init" to Type.TBool
+                        fields += m.name to fieldType
+                        lazyFields.getOrPut(name) { mutableListOf() }
+                            .add(Triple(m.name, fieldType, m.initializer))
+                    } else {
+                        fields += m.name to fieldType
+                    }
+                }
                 is VarDecl   -> if (m.typeAnnotation != null) fields += m.name to resolveTypeNode(m.typeAnnotation)
                 is LetDecl   -> if (m.typeAnnotation != null) fields += m.name to resolveTypeNode(m.typeAnnotation)
                 else -> {}
@@ -274,6 +306,7 @@ class LlvmIrEmitter(
         }
         if (isClass) classTypeNames.add(name)
         structLayouts[name] = fields
+        structCtorParamCount[name] = ctorCount
         structCtorDefaults[name] = ctorParams.map { it.name to it.default }
         // Emit struct type definition into globals.
         // Class types get a 16-byte RC header prepended: { i64 strong_count, i8* dtor_fn, ...fields }
@@ -841,7 +874,9 @@ $storeStmt
         isTerminated = false
         loopStack.clear()
 
-        val paramList = fields.joinToString(", ") { (fname, ft) -> "${llvmType(ft)} %ctor.$fname" }
+        val ctorParamCount = structCtorParamCount[name] ?: fields.size
+        val ctorFields = fields.take(ctorParamCount)
+        val paramList = ctorFields.joinToString(", ") { (fname, ft) -> "${llvmType(ft)} %ctor.$fname" }
 
         val objReg = fresh("obj")
         emit("  $objReg = call i8* @malloc(i64 $allocSize)")
@@ -872,7 +907,9 @@ $storeStmt
             val ptrReg  = fresh("fp")
             val gepIdx  = idx + fieldOffset
             emit("  $ptrReg = getelementptr $structType, $structType* $castReg, i32 0, i32 $gepIdx")
-            emit("  store $fieldLt %ctor.$fname, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
+            // Ctor param fields: store from parameter; body/lazy fields: zero-initialize
+            val valToStore = if (idx < ctorParamCount) "%ctor.$fname" else defaultValue(fieldLt)
+            emit("  store $fieldLt $valToStore, $fieldLt* $ptrReg, align ${llvmTypeAlign(fieldLt)}")
         }
         terminate("  ret i8* $objReg")
 
@@ -909,6 +946,26 @@ $storeStmt
         if ("Hash"    in derivedTraits) emitDerivedHash(name, fields, isClass)
         if ("Compare" in derivedTraits) emitDerivedCompare(name, fields, isClass)
         if ("Copy"    in derivedTraits) emitDerivedCopy(name, fields, isClass)
+
+        // Emit @lazy getter methods
+        val lazyEntries = lazyFields[name] ?: emptyList()
+        for ((fieldName, fieldType, initExpr) in lazyEntries) {
+            emitLazyGetter(name, fieldName, fieldType, initExpr, isClass)
+        }
+
+        // Emit by-delegation forwarding methods
+        val delegationList = classDelegations[name] ?: emptyList()
+        val definedMethods = members.filterIsInstance<FunctionDecl>().map { it.name }.toSet()
+        for ((ifaceName, delegateFieldName, concreteTypeName) in delegationList) {
+            val ifacePrefix = "$ifaceName."
+            for ((key, type) in tcModule.memberTypeMap) {
+                if (!key.startsWith(ifacePrefix)) continue
+                val methodName = key.removePrefix(ifacePrefix)
+                if (methodName in definedMethods) continue  // overridden in class
+                if (type !is Type.TFun) continue
+                emitDelegationForwarder(name, methodName, type, delegateFieldName, concreteTypeName, isClass)
+            }
+        }
     }
 
     // ─── Derived-method emitters (@newtype / @derive) ─────────────────────
@@ -1159,6 +1216,148 @@ $storeStmt
         methodReturnTypes["${typeName}_copy"] = "i8*"
     }
 
+    // ─── @lazy getter emitter ─────────────────────────────────────────────
+
+    /**
+     * Emit `@nv_TypeName_get_fieldName(i8* %self) → T` — checks the init flag,
+     * computes and caches the value on first access, returns the cached value on subsequent calls.
+     */
+    private fun emitLazyGetter(typeName: String, fieldName: String, fieldType: Type, initExpr: Expr, isClass: Boolean) {
+        val retLt      = llvmType(fieldType)
+        val structType = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        val allFields  = structLayouts[typeName] ?: return
+        val ctorCount  = structCtorParamCount[typeName] ?: 0
+
+        val initFlagFieldName = "_lazy_${fieldName}_init"
+        val initFlagIdx = allFields.indexOfFirst { it.first == initFlagFieldName }.let { if (it < 0) return else it } + fieldOffset
+        val valueIdx    = allFields.indexOfFirst { it.first == fieldName }.let { if (it < 0) return else it } + fieldOffset
+
+        emitSyntheticMethod("@nv_${typeName}_get_$fieldName", "i8* %self", retLt) {
+            // Store self param so that member-access expressions resolve correctly
+            val selfAlloca = emitAlloca("self", "i8*")
+            varAllocas["self"] = Pair(selfAlloca, "i8*")
+            emitStore("i8*", "%self", selfAlloca)
+
+            // Cast self to struct pointer
+            val castR = fresh("lz.cast")
+            emit("  $castR = bitcast i8* %self to $structType*")
+
+            // Pre-compute GEP pointers (usable in both branches)
+            val initFlagPtrR = fresh("lz.ifp")
+            emit("  $initFlagPtrR = getelementptr $structType, $structType* $castR, i32 0, i32 $initFlagIdx")
+            val valPtrR = fresh("lz.vp")
+            emit("  $valPtrR = getelementptr $structType, $structType* $castR, i32 0, i32 $valueIdx")
+
+            // Load init flag
+            val initFlagR = fresh("lz.flag")
+            emit("  $initFlagR = load i1, i1* $initFlagPtrR, align 1")
+
+            // Branch: hit (already computed) vs miss (need to compute)
+            val hitLabel  = freshLabel("lz.hit")
+            val missLabel = freshLabel("lz.miss")
+            val retLabel  = freshLabel("lz.ret")
+            emit("  br i1 $initFlagR, label %$hitLabel, label %$missLabel")
+
+            // ── Hit: load cached value ────────────────────────────────────────
+            emitRaw("$hitLabel:")
+            isTerminated = false
+            val cachedR = fresh("lz.cached")
+            emit("  $cachedR = load $retLt, $retLt* $valPtrR, align ${llvmTypeAlign(retLt)}")
+            emit("  br label %$retLabel")
+
+            // ── Miss: evaluate init expression, store result, set flag ────────
+            emitRaw("$missLabel:")
+            isTerminated = false
+
+            // Pre-load all ctor-param fields into varAllocas so the init expression
+            // can reference them by name (e.g. `source` instead of `self.source`).
+            for (i in 0 until ctorCount) {
+                val (fname, ft) = allFields[i]
+                val fldLt  = llvmType(ft)
+                val gepIdx = i + fieldOffset
+                val fpR    = fresh("lz.fp")
+                emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+                val fvR = fresh("lz.fv")
+                emit("  $fvR = load $fldLt, $fldLt* $fpR, align ${llvmTypeAlign(fldLt)}")
+                val allocaR = emitAlloca(fname, fldLt)
+                varAllocas[fname] = Pair(allocaR, fldLt)
+                varTypes[fname]   = ft
+                emitStore(fldLt, fvR, allocaR)
+            }
+
+            // Evaluate the initializer expression
+            val computedR = emitExpr(initExpr)
+
+            // Store computed value and set init flag
+            emit("  store $retLt $computedR, $retLt* $valPtrR, align ${llvmTypeAlign(retLt)}")
+            emit("  store i1 1, i1* $initFlagPtrR, align 1")
+            emit("  br label %$retLabel")
+
+            // ── Return: phi selects cached vs. newly-computed ─────────────────
+            emitRaw("$retLabel:")
+            isTerminated = false
+            val resultR = fresh("lz.result")
+            emit("  $resultR = phi $retLt [ $cachedR, %$hitLabel ], [ $computedR, %$missLabel ]")
+            terminate("  ret $retLt $resultR")
+        }
+        methodReturnTypes["${typeName}_get_$fieldName"] = retLt
+    }
+
+    // ─── by-delegation forwarding emitter ────────────────────────────────
+
+    /**
+     * Emit a forwarding method `@nv_TypeName_methodName` that loads the delegate field
+     * from `self` and calls the corresponding method on the concrete delegate type.
+     */
+    private fun emitDelegationForwarder(
+        typeName: String,
+        methodName: String,
+        methodType: Type.TFun,
+        delegateFieldName: String,
+        concreteTypeName: String,
+        isClass: Boolean,
+    ) {
+        val paramTypes  = methodType.params
+        val retType     = methodType.returnType
+        val retLt       = llvmType(retType)
+        val structType  = "%struct.$typeName"
+        val fieldOffset = if (isClass) 2 else 0
+        val allFields   = structLayouts[typeName] ?: return
+        val delegateIdx = allFields.indexOfFirst { it.first == delegateFieldName }
+        if (delegateIdx < 0) return
+        val gepIdx = delegateIdx + fieldOffset
+
+        val paramList = buildString {
+            append("i8* %self")
+            paramTypes.forEachIndexed { i, t -> append(", ${llvmType(t)} %fwd.p$i") }
+        }
+
+        emitSyntheticMethod("@nv_${typeName}_$methodName", paramList, retLt) {
+            val castR = fresh("fwd.cast")
+            emit("  $castR = bitcast i8* %self to $structType*")
+            val dptrR = fresh("fwd.dptr")
+            emit("  $dptrR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+            val delR = fresh("fwd.del")
+            emit("  $delR = load i8*, i8** $dptrR, align 8")
+
+            val argList = buildString {
+                append("i8* $delR")
+                paramTypes.forEachIndexed { i, t -> append(", ${llvmType(t)} %fwd.p$i") }
+            }
+
+            if (retLt == "void") {
+                emit("  call void @nv_${concreteTypeName}_$methodName($argList)")
+                terminate("  ret void")
+            } else {
+                val res = fresh("fwd.res")
+                emit("  $res = call $retLt @nv_${concreteTypeName}_$methodName($argList)")
+                terminate("  ret $retLt $res")
+            }
+        }
+        methodReturnTypes["${typeName}_$methodName"] = retLt
+    }
+
     // ─────────────────────────────────────────────────────────────────────
 
     /** Emit a destructor @nv_dtor_Name that releases all RC-typed fields then frees the object. */
@@ -1207,6 +1406,7 @@ $storeStmt
         // self as first param (i8*)
         val selfAlloca = emitAlloca("self", "i8*")
         varAllocas["self"] = Pair(selfAlloca, "i8*")
+        varTypes["self"] = Type.TNamed(typeName)
         emitStore("i8*", "%self", selfAlloca)
 
         // Other params
@@ -1840,6 +2040,32 @@ $storeStmt
             if (lt == "void") return "0"
             return emitLoad(lt, allocaReg)
         }
+        // Fallback: if we're inside a method and `self` has a known named type,
+        // try to load the identifier as a constructor param field from self.
+        val selfType = varTypes["self"]
+        if (selfType is Type.TNamed) {
+            val ownerName = selfType.qualifiedName.substringAfterLast('.')
+            val allFields = structLayouts[ownerName]
+            val ctorCount = structCtorParamCount[ownerName] ?: 0
+            if (allFields != null) {
+                val fieldIdx = allFields.indexOfFirst { it.first == name && allFields.indexOf(it) < ctorCount }
+                if (fieldIdx in 0 until ctorCount) {
+                    val (_, ft) = allFields[fieldIdx]
+                    val lt = llvmType(ft)
+                    val fieldOffset = if (ownerName in classTypeNames) 2 else 0
+                    val gepIdx = fieldIdx + fieldOffset
+                    val structType = "%struct.$ownerName"
+                    val selfReg = emitLoad("i8*", varAllocas["self"]!!.first)
+                    val castR = fresh("idf.cast")
+                    emit("  $castR = bitcast i8* $selfReg to $structType*")
+                    val fpR = fresh("idf.fp")
+                    emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+                    val fvR = fresh("idf.fv")
+                    emit("  $fvR = load $lt, $lt* $fpR, align ${llvmTypeAlign(lt)}")
+                    return fvR
+                }
+            }
+        }
         // Check if it's a no-param sealed variant or similar value-typed ident
         val symType = tcModule.resolvedModule.moduleScope.lookup(name)?.resolvedType
         if (symType is Type.TNamed) {
@@ -2429,10 +2655,18 @@ $storeStmt
             }
             expr.member == "str" -> convertToStr(receiverReg, receiverType)
             else -> {
-                // Struct/record/class field access via GEP
+                // Struct/record/class field access via GEP (or lazy getter call)
                 val typeName = if (receiverType is Type.TNamed) receiverType.qualifiedName.substringAfterLast('.') else ""
                 val fields = if (typeName.isNotEmpty()) structLayouts[typeName] else null
                 if (fields != null && receiverType is Type.TNamed) {
+                    // Check if this is a @lazy field — call the getter instead of direct GEP
+                    val lazyForType = lazyFields[typeName]
+                    if (lazyForType != null && lazyForType.any { it.first == expr.member }) {
+                        val getterRetLt = methodReturnTypes["${typeName}_get_${expr.member}"] ?: llvmType(typeOf(expr))
+                        val res = fresh("lzget")
+                        emit("  $res = call $getterRetLt @nv_${typeName}_get_${expr.member}(i8* $receiverReg)")
+                        return res
+                    }
                     val fieldIdx = fields.indexOfFirst { it.first == expr.member }
                     if (fieldIdx >= 0) {
                         val fieldType = fields[fieldIdx].second
@@ -3029,9 +3263,11 @@ $storeStmt
     private fun emitBuilderCallExpr(expr: BuilderCallExpr): String {
         val typeName = expr.typeName
         val fields   = structLayouts[typeName] ?: return "null"
+        val ctorParamCount = structCtorParamCount[typeName] ?: fields.size
         val defaults = structCtorDefaults[typeName] ?: emptyList()
         val assignMap: Map<String, Expr> = expr.assignments.toMap()
-        val argParts = fields.map { (fieldName, fieldType) ->
+        // Only pass ctor-param fields to the constructor (not lazy/body fields)
+        val argParts = fields.take(ctorParamCount).map { (fieldName, fieldType) ->
             val llvmT = llvmType(fieldType)
             val reg = when {
                 assignMap.containsKey(fieldName) -> emitExpr(assignMap[fieldName]!!)

@@ -18,7 +18,7 @@ enum class TokenKind {
     GO, SPAWN, SELECT, FROM, AFTER, DEFAULT,
     ASYNC, AWAIT, YIELD,
     WEAK, UNOWNED, UNSAFE,
-    WHERE, GET, SET,
+    WHERE, GET, SET, BY,
     XOR,    // keyword alias for ⊕
     GUARD,
 
@@ -210,6 +210,7 @@ val KEYWORDS: Map<String, TokenKind> = mapOf(
     "where"     to TokenKind.WHERE,
     "get"       to TokenKind.GET,
     "set"       to TokenKind.SET,
+    "by"        to TokenKind.BY,
     "xor"       to TokenKind.XOR,
     "guard"     to TokenKind.GUARD,
     "pkg"       to TokenKind.PKG,
