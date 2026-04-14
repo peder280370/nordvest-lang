@@ -136,6 +136,22 @@ sealed class TypeCheckError {
     ) : TypeCheckError() {
         override val message get() = "yield is only valid inside a Sequence<T>-returning function"
     }
+
+    data class UnknownBuilderField(
+        val typeName: String,
+        val fieldName: String,
+        override val span: SourceSpan,
+    ) : TypeCheckError() {
+        override val message get() = "unknown field '$fieldName' in @builder for type '$typeName'"
+    }
+
+    data class MissingBuilderField(
+        val typeName: String,
+        val fieldName: String,
+        override val span: SourceSpan,
+    ) : TypeCheckError() {
+        override val message get() = "@builder for '$typeName' requires field '$fieldName' to be set (no default value)"
+    }
 }
 
 fun TypeCheckError.toCompileError(sourcePath: String) =

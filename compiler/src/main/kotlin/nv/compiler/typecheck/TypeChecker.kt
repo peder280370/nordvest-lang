@@ -47,6 +47,9 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     /** Type parameter names in scope (for resolveTypeNode to produce TVar). */
     private var currentTypeParams: Set<String> = emptySet()
 
+    /** @builder classes: typeName → set of required field names (those without defaults). */
+    private val builderRequiredFields = mutableMapOf<String, Set<String>>()
+
     private fun <T> withTypeParams(params: Set<String>, block: () -> T): T {
         val prev = currentTypeParams
         currentTypeParams = currentTypeParams + params
@@ -304,6 +307,12 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                     memberTypeMap["$name.compare"] = Type.TFun(listOf(selfType), Type.TInt)
                 if ("Copy" in traits)
                     memberTypeMap["$name.copy"] = Type.TFun(emptyList(), selfType)
+            }
+
+            // ── @builder: generate build DSL ─────────────────────────────────────────────
+            if (annotations.any { it.name == "builder" }) {
+                val required = constructorParams.filter { it.default == null }.map { it.name }.toSet()
+                builderRequiredFields[name] = required
             }
         }
     }
@@ -811,6 +820,8 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             val inner = synthesize(expr.expr, env)
             Type.TFuture(inner)
         }
+
+        is BuilderCallExpr -> synthesizeBuilderCall(expr, env)
     }
 
     // ── Unary operators ───────────────────────────────────────────────────
@@ -1168,6 +1179,32 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
             is BlockLambdaBody -> { checkBody(body.stmts, lambdaEnv, null); Type.TUnknown }
         }
         return Type.TFun(paramTypes, retType)
+    }
+
+    // ── @builder call synthesis ───────────────────────────────────────────
+
+    private fun synthesizeBuilderCall(expr: BuilderCallExpr, env: TypeEnv): Type {
+        val typeName = expr.typeName
+        val assignedNames = mutableSetOf<String>()
+        for ((fieldName, valueExpr) in expr.assignments) {
+            val expected = memberTypeMap["$typeName.$fieldName"]
+            if (expected == null) {
+                errors += TypeCheckError.UnknownBuilderField(typeName, fieldName, valueExpr.span)
+            } else {
+                val actual = synthesize(valueExpr, env)
+                if (actual != Type.TUnknown && actual != Type.TError && !isAssignable(actual, expected)) {
+                    errors += TypeCheckError.TypeMismatch(expected, actual, valueExpr.span)
+                }
+            }
+            assignedNames += fieldName
+        }
+        val required = builderRequiredFields[typeName] ?: emptySet()
+        for (req in required) {
+            if (req !in assignedNames) {
+                errors += TypeCheckError.MissingBuilderField(typeName, req, expr.span)
+            }
+        }
+        return Type.TNamed(typeName, emptyList())
     }
 
     // ── Match expression / exhaustiveness ─────────────────────────────────

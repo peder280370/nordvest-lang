@@ -6,6 +6,7 @@ import nv.compiler.parser.BytesStmt
 import nv.compiler.parser.CBlockStmt
 import nv.compiler.parser.CppBlockStmt
 import nv.compiler.parser.AwaitExpr
+import nv.compiler.parser.BuilderCallExpr
 import nv.compiler.parser.ArrayLiteralExpr
 import nv.compiler.parser.ArrayTypeNode
 import nv.compiler.parser.AssignStmt
@@ -596,6 +597,7 @@ class Resolver(private val sourcePath: String) {
             is ForceCastExpr -> { resolveExpr(expr.operand, scope); resolveTypeNode(expr.type, scope) }
             is AwaitExpr -> resolveExpr(expr.operand, scope)
             is SpawnExpr -> { val se: SpawnExpr = expr; resolveExpr(se.expr, scope) }
+            is BuilderCallExpr -> expr.assignments.forEach { p -> resolveExpr(p.second, scope) }
             // Leaf nodes — no sub-expressions to resolve
             is IntLitExpr, is FloatLitExpr, is BoolLitExpr, is NilExpr,
             is CharLitExpr, is RawStringExpr, is ConstPiExpr, is ConstInfExpr,

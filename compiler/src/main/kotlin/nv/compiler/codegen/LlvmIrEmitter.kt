@@ -123,7 +123,8 @@ class LlvmIrEmitter(
     )
 
     // ── Struct layout registry (name → ordered list of field name+type) ──
-    private val structLayouts = mutableMapOf<String, List<Pair<String, Type>>>()
+    private val structLayouts     = mutableMapOf<String, List<Pair<String, Type>>>()
+    private val structCtorDefaults = mutableMapOf<String, List<Pair<String, Expr?>>>()
 
     // ── Class type registry: names of ClassDecl types (have RC header) ──
     private val classTypeNames = mutableSetOf<String>()
@@ -273,6 +274,7 @@ class LlvmIrEmitter(
         }
         if (isClass) classTypeNames.add(name)
         structLayouts[name] = fields
+        structCtorDefaults[name] = ctorParams.map { it.name to it.default }
         // Emit struct type definition into globals.
         // Class types get a 16-byte RC header prepended: { i64 strong_count, i8* dtor_fn, ...fields }
         if (fields.isNotEmpty() || isClass) {
@@ -3020,7 +3022,29 @@ $storeStmt
         is ListComprehensionExpr -> "null"
         is AwaitExpr             -> emitAwaitExpr(expr)
         is SpawnExpr             -> emitSpawnExprValue(expr)
+        is BuilderCallExpr       -> emitBuilderCallExpr(expr)
         else                     -> "0"
+    }
+
+    private fun emitBuilderCallExpr(expr: BuilderCallExpr): String {
+        val typeName = expr.typeName
+        val fields   = structLayouts[typeName] ?: return "null"
+        val defaults = structCtorDefaults[typeName] ?: emptyList()
+        val assignMap: Map<String, Expr> = expr.assignments.toMap()
+        val argParts = fields.map { (fieldName, fieldType) ->
+            val llvmT = llvmType(fieldType)
+            val reg = when {
+                assignMap.containsKey(fieldName) -> emitExpr(assignMap[fieldName]!!)
+                else -> {
+                    val defExpr = defaults.firstOrNull { it.first == fieldName }?.second
+                    if (defExpr != null) emitExpr(defExpr) else if (llvmT == "i8*") "null" else "0"
+                }
+            }
+            "$llvmT $reg"
+        }
+        val result = fresh("bld")
+        emit("  $result = call i8* @nv_$typeName(${argParts.joinToString(", ")})")
+        return result
     }
 }
 

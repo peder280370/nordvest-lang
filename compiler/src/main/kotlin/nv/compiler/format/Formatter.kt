@@ -842,6 +842,15 @@ class Formatter(private val asciiMode: Boolean = false) {
         }
 
         is LambdaExpr -> formatLambdaInline(expr)
+
+        is BuilderCallExpr -> {
+            // Format as canonical multi-line builder block
+            val fieldIndent = "$indent    "
+            val lines = expr.assignments.joinToString("\n") { p ->
+                "$fieldIndent${p.first} = ${formatExpr(p.second)}"
+            }
+            "${expr.typeName}.build\n$lines"
+        }
     }
 
     private fun formatLambdaInline(expr: LambdaExpr): String {

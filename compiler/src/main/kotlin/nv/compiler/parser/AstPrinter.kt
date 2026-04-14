@@ -362,6 +362,13 @@ object AstPrinter {
             is SelectStmt -> append("(Select ${node.arms.size} arms)")
             is AwaitExpr -> { append("(Await "); printNode(node.operand, indent + 1); append(")") }
             is SpawnExpr -> { append("(SpawnExpr "); printNode(node.expr, indent + 1); append(")") }
+            is BuilderCallExpr -> {
+                append("(BuilderCall ${q(node.typeName)}")
+                for ((name, expr) in node.assignments) {
+                    append(" $name="); printNode(expr, indent + 1)
+                }
+                append(")")
+            }
             is BreakStmt -> append("(Break${node.label?.let { " @$it" } ?: ""})")
             is ContinueStmt -> append("(Continue${node.label?.let { " @$it" } ?: ""})")
             is YieldStmt -> { append("(Yield "); printNode(node.expr, indent + 1); append(")") }

@@ -53,6 +53,16 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         }
     }
 
+    /**
+     * Like [expectNewline] but skips the check when [expr] is a [BuilderCallExpr].
+     * A builder block already consumed the line terminator (the NEWLINE before its INDENT),
+     * so no additional newline token remains after the DEDENT.
+     */
+    private fun expectNewlineAfter(expr: Expr?) {
+        if (expr is BuilderCallExpr) return
+        expectNewline()
+    }
+
     private fun expectIndent(context: String = "block") {
         if (!at(INDENT)) {
             errors += ParseError.InvalidIndent(context, peek().span)
@@ -1207,7 +1217,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             parseType()
         } else null
         val initializer = if (match(ASSIGN) != null) parseExpr() else null
-        expectNewline()
+        expectNewlineAfter(initializer)
         return LetStmt(spanFrom(start), isWeak, binding, typeAnnotation, initializer)
     }
 
@@ -1221,7 +1231,7 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             parseType()
         } else null
         val initializer = if (match(ASSIGN) != null) parseExpr() else null
-        expectNewline()
+        expectNewlineAfter(initializer)
         return VarStmt(spanFrom(start), isWeak, binding, typeAnnotation, initializer)
     }
 
@@ -1772,10 +1782,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val assignOp = tryParseAssignOp()
         return if (assignOp != null) {
             val value = parseExpr()
-            expectNewline()
+            expectNewlineAfter(value)
             AssignStmt(spanFrom(start), expr, assignOp, value)
         } else {
-            expectNewline()
+            expectNewlineAfter(expr)
             ExprStmt(spanFrom(start), expr)
         }
     }
@@ -2099,7 +2109,25 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
                 at(DOT) && at(IDENT, 1) -> {
                     advance() // .
                     val member = advance().text
-                    MemberAccessExpr(spanFrom(start), expr, member)
+                    // @builder DSL: TypeName.build followed by an indented assignment block
+                    if (member == "build" && expr is IdentExpr && at(NEWLINE) && at(INDENT, 1)) {
+                        advance() // NEWLINE
+                        advance() // INDENT
+                        val assignments = mutableListOf<Pair<String, Expr>>()
+                        while (!at(DEDENT) && !at(EOF)) {
+                            while (at(NEWLINE)) advance()
+                            if (at(DEDENT) || at(EOF)) break
+                            val fieldName = expect(IDENT).text
+                            expect(ASSIGN)
+                            val value = parseExpr()
+                            if (at(NEWLINE)) advance()
+                            assignments += fieldName to value
+                        }
+                        if (at(DEDENT)) advance()
+                        BuilderCallExpr(spanFrom(start), expr.name, assignments)
+                    } else {
+                        MemberAccessExpr(spanFrom(start), expr, member)
+                    }
                 }
                 at(DOT_QUEST) -> {
                     advance() // ?.

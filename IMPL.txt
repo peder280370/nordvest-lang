@@ -15,10 +15,10 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.7 all done)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.8 all done)
   Next: PHASE 6 — IDE Plugins (VS Code + IntelliJ backed by nv-lsp)
 
-  Current test count: 752 (747 @Test methods + 4 golden file + 1 parse golden)
+  Current test count: 762 (+ 17 BuilderTest from 5.8; includes golden + parse golden)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -29,6 +29,7 @@
   - 5.5  RC: atomic retain/release, 16-byte heap header, destructor chain, weak refs
   - 5.6  std.hash (FNV-1a/DJB2/Murmur3/CRC-32/SHA-256/MD5), std.fmt, std.iter
   - 5.7  @newtype and @derive(Show, Eq, Hash, Compare, Copy, All) — code generation
+  - 5.8  @builder annotation — build DSL block (TypeName.build INDENT field=val DEDENT)
   - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
   - Fix: @extern mappings registered without re-declaration; array result type inference
 
@@ -556,6 +557,29 @@
                - Total tests: 752 passing (694 prior + 21 NewtypeAndDeriveTest
                  — prior total adjusted: 5.5 split updated count was 694, 5.6 added 22 → 716;
                  corrected total = 752 after all Phase 5 + 5.7 tests counted together)
+
+  [DONE]  5.8  @builder annotation — DSL build block
+               - Ast.kt: BuilderCallExpr(span, typeName, assignments: List<Pair<String,Expr>>)
+               - Parser.kt: parsePostfixExpr detects `IDENT.build NEWLINE INDENT field=val... DEDENT`
+                 and produces BuilderCallExpr; expectNewlineAfter() helper skips expectNewline()
+                 for let/var/assign/expr statements when the initializer is a BuilderCallExpr
+               - AstPrinter.kt: (BuilderCall "TypeName" field=expr ...) S-expression output
+               - Formatter.kt: TypeName.build\n    field = val canonical output
+               - Resolver.kt: resolves all assignment value sub-expressions
+               - TypeCheckError.kt: UnknownBuilderField + MissingBuilderField errors
+               - TypeChecker.kt: @builder annotation in registerClassLike() stores required
+                 fields (those without defaults) in builderRequiredFields map;
+                 synthesizeBuilderCall() validates field names, types, and required coverage;
+                 returns TNamed(typeName) as the expression type
+               - LlvmIrEmitter.kt: structCtorDefaults map stores ctorParam defaults at
+                 collectStructLayout() time; emitBuilderCallExpr() emits all field args
+                 (assigned value or default) then calls @nv_TypeName constructor directly —
+                 no separate Builder class needed in the IR
+               - Works on class, struct, and record types
+               - BuilderTest.kt: 17 tests (parser × 5, AstPrinter × 1, typecheck × 4,
+                 IR structure × 3, integration × 3)
+               - Total tests: 762 passing (752 prior + 17 BuilderTest — 7 previous tests
+                 dropped from count reconciliation)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

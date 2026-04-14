@@ -458,6 +458,13 @@ data class SpawnStmt(override val span: SourceSpan, val expr: Expr) : Stmt()
 data class AwaitExpr(override val span: SourceSpan, val operand: Expr) : Expr()
 data class SpawnExpr(override val span: SourceSpan, val expr: Expr) : Expr()
 
+// @builder DSL — TypeName.build NEWLINE INDENT field = value ... DEDENT
+data class BuilderCallExpr(
+    override val span: SourceSpan,
+    val typeName: String,
+    val assignments: List<Pair<String, Expr>>,
+) : Expr()
+
 enum class DurationUnit { MS, S, M, H }
 data class DurationLit(val amount: Long, val unit: DurationUnit, val span: SourceSpan)
 
