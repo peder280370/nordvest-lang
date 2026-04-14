@@ -1015,6 +1015,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
 
     private fun parseConstructorParam(): ConstructorParam {
         val start = peek().span
+        // Parse optional field-level annotations (e.g. @env("DATABASE_URL"))
+        // Newlines inside parens are suppressed by the lexer, so @env on its own line works.
+        val annos = mutableListOf<Annotation>()
+        while (at(AT)) annos += parseAnnotation()
         val vis = parseVisibility()
         // Support @newtype-style type-only params: `UserId(int)` instead of `UserId(value: int)`.
         // Heuristic: IDENT followed by COLON → named param; anything else → type-only, name = "value".
@@ -1023,11 +1027,11 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             advance()                   // consume COLON
             val type = parseType()
             val default = if (match(ASSIGN) != null) parseExpr() else null
-            ConstructorParam(vis, name, type, default, spanFrom(start))
+            ConstructorParam(vis, name, type, default, spanFrom(start), annos)
         } else {
             val type = parseType()
             val default = if (match(ASSIGN) != null) parseExpr() else null
-            ConstructorParam(vis, "value", type, default, spanFrom(start))
+            ConstructorParam(vis, "value", type, default, spanFrom(start), annos)
         }
     }
 

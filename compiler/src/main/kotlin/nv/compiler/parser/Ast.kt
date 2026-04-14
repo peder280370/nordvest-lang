@@ -28,7 +28,7 @@ enum class Visibility { PUBLIC, PACKAGE, FILE_PRIVATE }
 data class TypeParam(val name: String, val bound: TypeNode?, val span: SourceSpan)
 data class WhereConstraint(val typeName: QualifiedName, val bound: TypeNode, val span: SourceSpan)
 data class Param(val name: String, val type: TypeNode, val default: Expr?, val isVariadic: Boolean, val span: SourceSpan)
-data class ConstructorParam(val visibility: Visibility, val name: String, val type: TypeNode, val default: Expr?, val span: SourceSpan)
+data class ConstructorParam(val visibility: Visibility, val name: String, val type: TypeNode, val default: Expr?, val span: SourceSpan, val annotations: List<Annotation> = emptyList())
 
 sealed class Binding : Node()
 data class IdentBinding(override val span: SourceSpan, val name: String) : Binding()

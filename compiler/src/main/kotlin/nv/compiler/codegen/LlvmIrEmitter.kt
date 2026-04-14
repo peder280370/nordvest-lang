@@ -134,6 +134,10 @@ class LlvmIrEmitter(
     // ── by-delegation registry: typeName → [(interfaceName, delegateFieldName, concreteTypeName)] ──
     private val classDelegations = mutableMapOf<String, MutableList<Triple<String, String, String>>>()
 
+    // ── @config registry: typeName → prefix; typeName → [(fieldName, envVarOverride or null)] ──
+    private val configPrefixes      = mutableMapOf<String, String>()
+    private val configEnvOverrides  = mutableMapOf<String, List<Pair<String, String?>>>()
+
     // ── Class type registry: names of ClassDecl types (have RC header) ──
     private val classTypeNames = mutableSetOf<String>()
 
@@ -245,9 +249,13 @@ class LlvmIrEmitter(
                         externFunctions[decl.name] = ExternInfo(csym, retTy, paramTys)
                     }
                 }
-                is StructDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
+                is StructDecl -> {
+                    collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
+                    collectConfigInfo(decl.name, decl.annotations, decl.constructorParams)
+                }
                 is ClassDecl  -> {
                     collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = true)
+                    collectConfigInfo(decl.name, decl.annotations, decl.constructorParams)
                     // Register by-delegations: interface → (delegateFieldName, concreteTypeName)
                     for ((ifaceTypeNode, delegateExpr) in decl.delegations) {
                         val ifaceName = (ifaceTypeNode as? NamedTypeNode)?.name?.text ?: continue
@@ -259,7 +267,10 @@ class LlvmIrEmitter(
                             .add(Triple(ifaceName, delegateFieldName, concreteTypeName))
                     }
                 }
-                is RecordDecl -> collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
+                is RecordDecl -> {
+                    collectStructLayout(decl.name, decl.constructorParams, decl.members, isClass = false)
+                    collectConfigInfo(decl.name, decl.annotations, decl.constructorParams)
+                }
                 is SealedClassDecl -> {
                     sealedClassDecls[decl.name] = decl
                     for ((idx, variant) in decl.variants.withIndex()) {
@@ -318,6 +329,23 @@ class LlvmIrEmitter(
             } else {
                 globals.appendLine("%struct.$name = type { $fieldTypes }")
             }
+        }
+    }
+
+    /** Populate @config/@env registries from a type declaration's annotations and constructor params. */
+    private fun collectConfigInfo(
+        typeName: String,
+        annos: List<nv.compiler.parser.Annotation>,
+        ctorParams: List<ConstructorParam>
+    ) {
+        val configAnno = annos.find { it.name == "config" } ?: return
+        val prefix = (configAnno.args.firstOrNull()?.value as? AnnotationStrValue)?.value ?: typeName
+        configPrefixes[typeName] = prefix
+        configEnvOverrides[typeName] = ctorParams.map { param ->
+            val envAnno = param.annotations.find { it.name == "env" }
+            val explicitVar = (envAnno?.args?.firstOrNull { it.name == null || it.name == "name" }
+                ?.value as? AnnotationStrValue)?.value
+            param.name to explicitVar
         }
     }
 
@@ -422,6 +450,8 @@ declare i64    @strtoll(i8*, i8**, i32)
 declare double @strtod(i8*, i8**)
 declare i32    @sscanf(i8*, i8*, ...)
 declare i32    @atoi(i8*)
+declare i64    @atoll(i8*)
+declare double @atof(i8*)
 declare i32    @getchar()
 declare i32    @toupper(i32)
 declare i32    @tolower(i32)
@@ -568,6 +598,18 @@ $storeStmt
             val receiverType = typeOf(expr.receiver)
             if (receiverType is Type.TArray) return receiverType.element
             if (receiverType is Type.TStr)   return Type.TChar
+        }
+        // Fallback for member access: look up field type from struct layout.
+        if (expr is MemberAccessExpr) {
+            val receiverType = typeOf(expr.receiver)
+            val typeName = when (receiverType) {
+                is Type.TNamed -> receiverType.qualifiedName.substringAfterLast('.')
+                else -> null
+            }
+            if (typeName != null) {
+                val fieldType = structLayouts[typeName]?.find { it.first == expr.member }?.second
+                if (fieldType != null) return fieldType
+            }
         }
         return mapped ?: Type.TUnknown
     }
@@ -953,6 +995,12 @@ $storeStmt
             emitLazyGetter(name, fieldName, fieldType, initExpr, isClass)
         }
 
+        // Emit @config load function
+        if (annotations.any { it.name == "config" }) {
+            val ctorParamCount = structCtorParamCount[name] ?: fields.size
+            emitConfigLoad(name, fields.take(ctorParamCount), isClass)
+        }
+
         // Emit by-delegation forwarding methods
         val delegationList = classDelegations[name] ?: emptyList()
         val definedMethods = members.filterIsInstance<FunctionDecl>().map { it.name }.toSet()
@@ -1214,6 +1262,123 @@ $storeStmt
             terminate("  ret i8* $res")
         }
         methodReturnTypes["${typeName}_copy"] = "i8*"
+    }
+
+    // ─── @config load emitter ─────────────────────────────────────────────
+
+    /**
+     * Emit `@nv_TypeName_config_load() → Result<T>` for a `@config("prefix")` annotated type.
+     *
+     * For each constructor parameter:
+     *  - Reads the env var `PREFIX_FIELDNAME` (or the explicit `@env("VAR")` name).
+     *  - Required fields (no default): returns `Err("ConfigError: missing…")` if absent.
+     *  - Optional fields (has default or is nullable): falls back to the default value.
+     * Returns `Ok(TypeName(…))` when all required fields are present.
+     */
+    private fun emitConfigLoad(typeName: String, ctorFields: List<Pair<String, Type>>, isClass: Boolean) {
+        val prefix       = configPrefixes[typeName] ?: typeName
+        val envOverrides = configEnvOverrides[typeName] ?: ctorFields.map { (n, _) -> n to null }
+        val defaults     = structCtorDefaults[typeName] ?: emptyList()
+
+        emitSyntheticMethod("@nv_${typeName}_config_load", "", "i8*") {
+            val fieldRegs = mutableListOf<Pair<String, String>>()  // (reg, llvmType)
+
+            for ((idx, fieldPair) in ctorFields.withIndex()) {
+                val (fieldName, fieldType) = fieldPair
+                val llvmT    = llvmType(fieldType)
+                val envName  = envOverrides.getOrNull(idx)?.second
+                    ?: "${toUpperSnake(prefix)}_${toUpperSnake(fieldName)}"
+                val defaultExpr = defaults.firstOrNull { it.first == fieldName }?.second
+                val hasDefault  = defaultExpr != null || fieldType is Type.TNullable
+
+                // Read env var
+                val envNameReg = stringConst(envName)
+                val rawReg     = fresh("cfg.raw")
+                emit("  $rawReg = call i8* @getenv(i8* $envNameReg)")
+                val isNullReg  = fresh("cfg.null")
+                emit("  $isNullReg = icmp eq i8* $rawReg, null")
+
+                if (!hasDefault) {
+                    // Required: error if absent
+                    val missLabel = freshLabel("cfg.miss")
+                    val okLabel   = freshLabel("cfg.ok")
+                    emit("  br i1 $isNullReg, label %$missLabel, label %$okLabel")
+                    emitRaw("$missLabel:"); isTerminated = false
+                    val errMsgReg = stringConst("ConfigError: missing required field '$fieldName' (env: $envName)")
+                    val errReg = fresh("cfg.err")
+                    emit("  $errReg = call i8* @nv_Err(i8* $errMsgReg)")
+                    terminate("  ret i8* $errReg")
+                    emitRaw("$okLabel:"); isTerminated = false
+                    fieldRegs.add(parseEnvValue(rawReg, fieldType) to llvmT)
+                } else {
+                    // Optional: phi between parsed value and default
+                    val parseLabel = freshLabel("cfg.prs")
+                    val defLabel   = freshLabel("cfg.def")
+                    val doneLabel  = freshLabel("cfg.done")
+                    emit("  br i1 $isNullReg, label %$defLabel, label %$parseLabel")
+
+                    emitRaw("$parseLabel:"); isTerminated = false
+                    val parsedReg = parseEnvValue(rawReg, fieldType)
+                    emit("  br label %$doneLabel")
+
+                    emitRaw("$defLabel:"); isTerminated = false
+                    val defReg = when {
+                        defaultExpr != null -> emitExpr(defaultExpr)
+                        fieldType is Type.TNullable -> "null"
+                        else -> nullConstant(llvmT)
+                    }
+                    emit("  br label %$doneLabel")
+
+                    emitRaw("$doneLabel:"); isTerminated = false
+                    val phiReg = fresh("cfg.v")
+                    emit("  $phiReg = phi $llvmT [ $parsedReg, %$parseLabel ], [ $defReg, %$defLabel ]")
+                    fieldRegs.add(phiReg to llvmT)
+                }
+            }
+
+            // Construct the type and wrap in Ok
+            val argList = fieldRegs.joinToString(", ") { (r, lt) -> "$lt $r" }
+            val objReg  = fresh("cfg.obj")
+            emit("  $objReg = call i8* @nv_$typeName($argList)")
+            val okReg = fresh("cfg.ok")
+            emit("  $okReg = call i8* @nv_Ok(i8* $objReg)")
+            terminate("  ret i8* $okReg")
+        }
+        methodReturnTypes["${typeName}_config_load"] = "i8*"
+    }
+
+    /**
+     * Parse a raw env-var string into the target LLVM type.
+     * Called inside an `emitSyntheticMethod` block where `emit()` targets `fnBody`.
+     */
+    private fun parseEnvValue(rawReg: String, fieldType: Type): String = when (fieldType) {
+        Type.TStr -> rawReg
+        Type.TInt, Type.TInt64 -> {
+            val r = fresh("cfg.int"); emit("  $r = call i64 @atoll(i8* $rawReg)"); r
+        }
+        Type.TFloat, Type.TFloat64 -> {
+            val r = fresh("cfg.flt"); emit("  $r = call double @atof(i8* $rawReg)"); r
+        }
+        Type.TBool -> {
+            val trueReg = stringConst("true")
+            val cmpReg  = fresh("cfg.bcmp")
+            emit("  $cmpReg = call i64 @nv_str_eq(i8* $rawReg, i8* $trueReg)")
+            val boolReg = fresh("cfg.bool")
+            emit("  $boolReg = icmp ne i64 $cmpReg, 0")
+            boolReg
+        }
+        is Type.TNullable -> rawReg   // nullable str: pass raw string (may be null — handled by caller)
+        else -> rawReg
+    }
+
+    /** Convert a camelCase or lowercase string to UPPER_SNAKE_CASE for env var names. */
+    private fun toUpperSnake(s: String): String {
+        val sb = StringBuilder()
+        for ((i, c) in s.withIndex()) {
+            if (c.isUpperCase() && i > 0 && s[i - 1].isLowerCase()) sb.append('_')
+            sb.append(c.uppercaseChar())
+        }
+        return sb.toString()
     }
 
     // ─── @lazy getter emitter ─────────────────────────────────────────────
@@ -1538,6 +1703,8 @@ $storeStmt
                            valueType == Type.TUnit ||
                            (stmt.value is TupleLiteralExpr && (stmt.value as TupleLiteralExpr).elements.isEmpty())
         if (isUnitReturn) {
+            // Still emit the expression for its side effects (e.g. `→ println(...)` in a match arm)
+            if (stmt.value != null && stmt.value !is TupleLiteralExpr) emitExpr(stmt.value)
             if (fnReturnType == "i32") terminate("  ret i32 0")
             else terminate("  ret void")
             return
@@ -2495,6 +2662,16 @@ $storeStmt
             }
         }
 
+        // @config generated loader: static-style call, ignore receiver.
+        // Use the receiver IdentExpr name directly because StructSym.resolvedType is TUnknown.
+        if (member == "configLoad") {
+            val typeName = (memberExpr.receiver as? IdentExpr)?.name
+                ?: receiverType.simpleTypeName()
+            val res = fresh("cfgld")
+            emit("  $res = call i8* @nv_${typeName}_config_load()")
+            return res
+        }
+
         // String methods
         if (receiverType == Type.TStr) {
             when (member) {
@@ -3019,6 +3196,13 @@ $storeStmt
                     val allocaReg = emitAlloca(subPat.name, paramLt)
                     varAllocas[subPat.name] = Pair(allocaReg, paramLt)
                     emitStore(paramLt, extractedReg, allocaReg)
+                    // Record Nordvest type so field access (cfg.host) can resolve the struct layout
+                    val innerNvType: Type? = when {
+                        subjectType is Type.TResult && variantName == "Ok" -> subjectType.okType
+                        payloadParamType != null -> payloadParamType
+                        else -> null
+                    }
+                    if (innerNvType != null) varTypes[subPat.name] = innerNvType
                 }
             }
         }

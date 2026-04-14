@@ -316,6 +316,12 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 builderRequiredFields[name] = required
             }
 
+            // ── @config: generate static configLoad() → Result<T> ────────────────────────
+            if (annotations.any { it.name == "config" }) {
+                val resultType = Type.TResult(selfType, Type.TStr)
+                memberTypeMap["$name.configLoad"] = Type.TFun(emptyList(), resultType)
+            }
+
             // ── by delegation: propagate interface methods to this class ──────────────────
             for ((ifaceTypeNode, _) in delegations) {
                 val ifaceName = (ifaceTypeNode as? NamedTypeNode)?.name?.text ?: continue
@@ -987,6 +993,14 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 else -> Type.TUnknown
             }
             is Type.TNamed -> receiverType.qualifiedName
+            // Constructor function type (e.g. `ServerConfig` has type TFun → TNamed("ServerConfig")).
+            // Allow accessing members of the return type for "static-style" calls like ServerConfig.configLoad().
+            is Type.TFun -> {
+                val retName = (receiverType.returnType as? Type.TNamed)
+                    ?.qualifiedName?.substringAfterLast('.') ?: ""
+                return if (retName.isNotEmpty()) memberTypeMap["$retName.$member"] ?: Type.TUnknown
+                else Type.TUnknown
+            }
             is Type.TArray -> when (member) {
                 "length", "size", "count" -> return Type.TInt
                 "isEmpty"                 -> return Type.TBool
