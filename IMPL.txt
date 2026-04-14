@@ -15,10 +15,10 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.8 all done)
+  Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.10 all done)
   Next: PHASE 6 — IDE Plugins (VS Code + IntelliJ backed by nv-lsp)
 
-  Current test count: 762 (+ 17 BuilderTest from 5.8; includes golden + parse golden)
+  Current test count: 800 (782 after 5.9 + 18 ConfigAnnotationTest from 5.10)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -31,6 +31,7 @@
   - 5.7  @newtype and @derive(Show, Eq, Hash, Compare, Copy, All) — code generation
   - 5.8  @builder annotation — build DSL block (TypeName.build INDENT field=val DEDENT)
   - 5.9  @lazy fields and `by` delegation — codegen + integration (782 tests passing)
+  - 5.10 @config and @env annotations — TypeName.configLoad() → Result<T, str> (800 tests)
   - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
   - Fix: @extern mappings registered without re-declaration; array result type inference
   - Fix: parser supports `(T) → T` function type syntax (without `fn` keyword)
@@ -601,6 +602,25 @@
                  when clang unavailable); renamed `e` → `obj` to avoid ConstEExpr parse collision;
                  fixed inline method bodies to use indented syntax in parser tests
                - Total tests: 782 passing
+
+  [DONE]  5.10 @config and @env annotations — generated configLoad()
+               - Ast.kt: ConstructorParam carries `annotations` list so @env can appear
+                 directly on individual constructor params (e.g. @env("DATABASE_URL") url: str)
+               - Parser.kt: parseConstructorParams() reads leading annotations per param
+               - TypeChecker.kt: @config annotation on struct/class/record registers
+                 `TypeName.configLoad` with return type Result<T, str>; handles TFun receiver
+                 in resolveTypeMember for static-style method calls
+               - LlvmIrEmitter.kt: emitConfigLoadFn() generates nv_TypeName_config_load():
+                 - auto-derives UPPER_SNAKE env var names: PREFIX_FIELDNAME
+                 - @env("VAR") override wins over auto-derived name
+                 - optional fields (have default / nullable): phi i64/i8* to select env or default
+                 - required fields (no default, non-nullable): nv_Err("ConfigError: missing...") path
+                 - int fields: atoll coercion; bool fields: strcmp("true") comparison
+                 - Bug fix: varTypes set for Ok(cfg) pattern-bound variables so cfg.field works
+                 - Bug fix: typeOf() falls back to structLayouts for MemberAccessExpr when typeMap misses
+                 - Bug fix: emitReturnStmt evaluates expression for side effects even on unit returns
+               - ConfigAnnotationTest.kt: 18 tests (4 parser, 8 IR structure, 6 integration)
+               - Total tests: 800 passing
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

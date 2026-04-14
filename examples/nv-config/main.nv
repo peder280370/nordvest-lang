@@ -1,17 +1,15 @@
 // nv-config — @config struct bindings and ConfigLoader
 //
-// Demonstrates: @config annotation, @env field overrides, sensitive masking,
-// ConfigLoader.default() merge strategy, cfg.bind<T>(), and validation.
+// Demonstrates: @config annotation, @env field overrides,
+// TypeName.configLoad() generated static method, and validation.
 //
-// STATUS: Compiles and runs (Phase 1 demo portion).
-//   Known Phase 1 constraints:
-//   - @env(...) field annotations inside struct bodies cause parser errors —
-//     they are shown in comments below; the structs use plain fields.
-//   - @config codegen and ConfigLoader runtime are Phase 2 / std.config.
-//   - Result<unit> → using Result<str>; Ok(()) → Ok("ok").
-//   - Void user-defined functions have LLVM bug — use → str return type.
-//   - `if let` on nullable struct fields works today.
-//   The demo simulates config loading with hardcoded values.
+// STATUS: @config and @env implemented in Phase 5.10.
+//   @config("prefix") on a struct/class/record generates a static
+//   TypeName.configLoad() → Result<T, str> method that reads env vars.
+//   Auto-derived env var names: UPPER_SNAKE(prefix)_UPPER_SNAKE(field)
+//   @env("VAR_NAME") on a constructor param overrides the auto-derived name.
+//
+//   ConfigLoader.default() (TOML file merging, hot-reload) is Phase 2.
 //   nv run examples/nv-config/main.nv
 
 module examples.config
@@ -21,6 +19,9 @@ module examples.config
 // @config("prefix") binds a TOML subtree to a typed struct.
 // Auto-derived env var names: UPPER_SNAKE(prefix)_UPPER_SNAKE(field)
 // e.g. @config("server") + field `port` → env var SERVER_PORT
+//
+// @env("VAR_NAME") on a constructor param overrides the auto-derived name.
+// @env("VAR_NAME", sensitive: true) masks the value in Show/logs.
 
 @config("server")
 struct ServerConfig(
@@ -32,26 +33,19 @@ struct ServerConfig(
 
 @config("database")
 struct DatabaseConfig(
-    // NOTE: @env("DATABASE_URL") field annotation is Phase 2.
-    // When Phase 2 ships, add: @env("DATABASE_URL") before url
-    url:         str,                // required — no default; env: DATABASE_URL
-    poolSize:    int  = 10,          // env: DATABASE_POOL_SIZE
-    password:    str  = "",          // @env("DB_PASSWORD", sensitive: true) — Phase 2; "" = not set
-    maxIdleTime: int  = 300          // env: DATABASE_MAX_IDLE_TIME
+    @env("DATABASE_URL")
+    url:         str,                                       // required; overrides DB_URL
+    poolSize:    int  = 10,                                 // env: DATABASE_POOL_SIZE
+    @env("DB_PASSWORD", sensitive: true)
+    password:    str? = nil,                                // optional; masked in logs
+    maxIdleTime: int  = 300                                 // env: DATABASE_MAX_IDLE_TIME
 )
 
 @config("cache")
 struct CacheConfig(
     enabled: bool = true,
-    ttl:     int  = 3600,   // seconds; env: CACHE_TTL
-    maxSize: int  = 1000    // entries; env: CACHE_MAX_SIZE
-)
-
-// Nested: application aggregates all sub-configs
-struct AppConfig(
-    server:   ServerConfig,
-    database: DatabaseConfig,
-    cache:    CacheConfig
+    ttl:     int  = 3600,   // env: CACHE_TTL
+    maxSize: int  = 1000    // env: CACHE_MAX_SIZE
 )
 
 // ─── Config validation ────────────────────────────────────────────────────────
@@ -84,8 +78,6 @@ fn printDatabaseConfig(cfg: DatabaseConfig) → str
     println("database:")
     println("  url         = {cfg.url}")
     println("  poolSize    = {cfg.poolSize}")
-    if cfg.password != ""
-        println("  password    = *** (sensitive, set)")
     println("  maxIdleTime = {cfg.maxIdleTime}s")
     → "ok"
 
@@ -97,55 +89,42 @@ fn printCacheConfig(cfg: CacheConfig) → str
     → "ok"
 
 fn main()
-    // Simulate config values (hardcoded for demo — no TOML/env yet)
-    let server = ServerConfig(
-        host:    "0.0.0.0",
-        port:    8443,
-        tls:     true,
-        workers: 8
-    )
-    let database = DatabaseConfig(
-        url:         "postgres://localhost:5432/myapp",
-        poolSize:    20,
-        password:    "s3cr3t",
-        maxIdleTime: 300
-    )
-    let cache = CacheConfig(enabled: true, ttl: 600, maxSize: 5000)
-
     println("=== Application Configuration ===")
-    printServerConfig(server)
-    printDatabaseConfig(database)
-    printCacheConfig(cache)
 
-    // Validation
+    // Load server config from env vars — falls back to defaults if unset.
+    // Try: SERVER_PORT=9443 SERVER_TLS=true nv run examples/nv-config/main.nv
+    match ServerConfig.configLoad()
+        Ok(server):
+            printServerConfig(server)
+            match validateServer(server)
+                Ok(_):     → println("  [validation: OK]")
+                Err(msg1): → println("  [validation: INVALID - {msg1}]")
+        Err(e1): → println("server config error: {e1}")
+
+    // Load database config — DATABASE_URL is required; returns Err if absent.
+    // Try: DATABASE_URL=postgres://localhost/myapp nv run examples/nv-config/main.nv
+    match DatabaseConfig.configLoad()
+        Ok(db):
+            printDatabaseConfig(db)
+            match validateDatabase(db)
+                Ok(_):     → println("  [validation: OK]")
+                Err(msg2): → println("  [validation: INVALID - {msg2}]")
+        Err(e2): → println("database config error: {e2} (set DATABASE_URL to fix)")
+
+    // Load cache config — all fields have defaults, always succeeds.
+    match CacheConfig.configLoad()
+        Ok(cache):
+            printCacheConfig(cache)
+        Err(e3): → println("cache config error: {e3}")
+
     println("")
-    println("=== Validation ===")
-    match validateServer(server)
-        Ok(_):    → println("server config: OK")
-        Err(msg1): → println("server config: INVALID - {msg1}")
-
-    match validateDatabase(database)
-        Ok(_):    → println("database config: OK")
-        Err(msg2): → println("database config: INVALID - {msg2}")
-
-    // Test invalid config
-    let badServer = ServerConfig(host: "localhost", port: 99999, tls: false, workers: 0)
-    match validateServer(badServer)
-        Ok(_):    → println("bad server: OK (unexpected)")
-        Err(msg3): → println("bad server: INVALID - {msg3}")
-
-    let emptyDbUrl = DatabaseConfig(url: "", poolSize: 5, password: "", maxIdleTime: 60)
-    match validateDatabase(emptyDbUrl)
-        Ok(_):    → println("empty-url db: OK (unexpected)")
-        Err(msg4): → println("empty-url db: INVALID - {msg4}")
-
-    println("")
-    // Phase 2: ConfigLoader runtime example
-    println("// Phase 2: ConfigLoader runtime")
+    // Phase 2: ConfigLoader.default() merges env vars > config.local.toml >
+    // config.{NV_ENV}.toml > config.toml > defaults. Not yet implemented.
+    println("// Phase 2: ConfigLoader with TOML merging")
     println("// let loader = ConfigLoader.default()")
     println("// let cfg    = loader.load()?")
     println("// let srv    = cfg.bind<ServerConfig>()?")
     println("// let db     = cfg.bind<DatabaseConfig>()?")
 
     println("")
-    println("Config demo complete (ConfigLoader runtime pending Phase 2).")
+    println("Config demo complete.")

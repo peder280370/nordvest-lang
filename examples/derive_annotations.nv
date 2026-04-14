@@ -2,10 +2,12 @@
 //
 // Demonstrates: @derive(Show, Eq, Compare, Hash, Copy) auto-generation,
 // .copy() shallow copy, @newtype zero-cost wrappers,
-// and the still-pending @builder/@lazy/by-delegation features.
+// @builder DSL block, @lazy fields, and by-delegation.
 //
-// STATUS: @derive and @newtype codegen shipped in Phase 5.7.
-//   @builder, @lazy, and by-delegation are Phase 2 items.
+// STATUS: All features implemented.
+//   @derive and @newtype — Phase 5.7
+//   @builder             — Phase 5.8
+//   @lazy and by         — Phase 5.9
 //   nv run examples/derive_annotations.nv
 
 module examples.derive_annotations
@@ -14,7 +16,7 @@ module examples.derive_annotations
 //
 // @derive(All) is shorthand for @derive(Show, Eq, Compare, Hash, Copy).
 // .copy() produces a shallow duplicate of the struct/class.
-// .copy(field: newVal) named-field override is Phase 2.
+// .copy(field: newVal) named-field override also requires Copy or All.
 
 @derive(All)
 struct Point(x: float, y: float)
@@ -34,46 +36,58 @@ class Node(pub value: int)
 // @newtype struct T(U) is distinct from U at the type level but has zero
 // runtime overhead. .value unwraps to the inner type. Auto-derives
 // Show, Eq, Hash, and Compare from the inner type.
-//
-// Field name is always 'value'; type-only parameter form (no label needed):
 
 @newtype struct UserId(int)
 @newtype struct Seconds(float)
 @newtype struct Meters(float)
 
-// ─── @builder — DSL block for complex construction — Phase 2 ─────────────────
+// ─── @builder — DSL block for complex construction ────────────────────────────
 //
-// @builder generates a Builder class and static .build { } DSL.
-//
-// @builder
-// class HttpRequest(
-//     url:     str,
-//     method:  str = "GET",
-//     timeout: int = 30
-// )
-//
-// Usage once Phase 2 ships:
-//   let req = HttpRequest.build
-//       url    = "https://api.example.com"
-//       method = "POST"
+// @builder generates a .build { } DSL block on the type.
+// Required fields (no default) must be supplied; optional fields use defaults.
 
-// ─── @lazy fields — Phase 2 ──────────────────────────────────────────────────
-//
-// @lazy val field = expr — computed once on first access
-// @lazy var field = expr — recomputed when reset to nil
-//
-// class Parser(source: str)
-//     @lazy val tokens: [str] = tokenize(source)
-//     fn tokenCount() → int → self.tokens.length
+@builder
+class HttpRequest(
+    url:     str,
+    method:  str = "GET",
+    timeout: int = 30
+)
 
-// ─── by delegation — Phase 2 ─────────────────────────────────────────────────
+// ─── @lazy fields ────────────────────────────────────────────────────────────
+//
+// @lazy val field = expr — computed once on first access (cached).
+// @lazy var field = expr — recomputed after nil assignment (resettable).
+// Body-only; cannot be a constructor param.
+
+class Stats(n: int)
+    @lazy let doubled: int = n + n
+    @lazy let tripled: int = n + n + n
+
+// ─── by delegation ────────────────────────────────────────────────────────────
 //
 // class C : I by expr  delegates all methods of interface I to expr.
-//
-// class LoggingList<T>(inner: MutableList<T>) : MutableList<T> by inner
-//     override fn add(item: T)
-//         println("[log] add {item}")
-//         inner.add(item)
+// C may override any method individually; static dispatch.
+
+interface Greeter
+    fn greet() → str
+
+class FrenchGreeter : Greeter
+    fn greet() → str
+        → "Bonjour!"
+
+class Delegator(g: FrenchGreeter) : Greeter by g
+
+interface Shape
+    fn area() → int
+    fn perimeter() → int
+
+class Square(side: int) : Shape
+    fn area() → int
+        → side * side
+    fn perimeter() → int
+        → side * 4
+
+class ShapeWrapper(s: Square) : Shape by s
 
 // ─── Runnable demo ────────────────────────────────────────────────────────────
 
@@ -118,4 +132,30 @@ fn main()
     println("Distance: {dist.value}m")
 
     println("")
-    println("Derive/newtype demo complete.")
+    // @builder — DSL block construction; required fields validated at build time
+    let req = HttpRequest.build
+        url    = "https://api.example.com"
+        method = "POST"
+    println("url:     {req.url}")
+    println("method:  {req.method}")
+    println("timeout: {req.timeout}s")
+
+    println("")
+    // @lazy — computed once on first access, then cached
+    let s = Stats(10)
+    println("doubled: {s.doubled}")   // computed here
+    println("tripled: {s.tripled}")   // computed here
+    println("doubled: {s.doubled}")   // returned from cache
+
+    println("")
+    // by delegation — Delegator forwards greet() to FrenchGreeter
+    let d = Delegator(FrenchGreeter())
+    println(d.greet())
+
+    // by delegation — ShapeWrapper forwards area() and perimeter() to Square
+    let w = ShapeWrapper(Square(5))
+    println("area:      {w.area()}")
+    println("perimeter: {w.perimeter()}")
+
+    println("")
+    println("Derive/newtype/builder/lazy/delegation demo complete.")
