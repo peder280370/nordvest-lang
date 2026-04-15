@@ -1,9 +1,22 @@
 module std.process
 
+/** Get an environment variable value. */
 @extern(fn: "nv_process_getenv")  pub fn env(name: str) → str?
+
+/** Set an environment variable. */
 @extern(fn: "nv_process_setenv")  pub fn setEnv(name: str, value: str)
+
+/** Exit the process with the given exit code. */
 @extern(fn: "nv_process_exit")    pub fn exit(code: int)
+
+/** Get the current process ID. */
 @extern(fn: "nv_process_pid")     pub fn pid() → int
+
+/** Get the current working directory. */
 @extern(fn: "nv_process_cwd")     pub fn cwd() → str
+
+/** Change the current working directory. Returns 0 on success. */
 @extern(fn: "nv_process_chdir")   pub fn chdir(path: str) → int
+
+/** Run a subprocess and capture stdout as a string. */
 @extern(fn: "nv_process_capture") pub fn capture(cmd: str) → str

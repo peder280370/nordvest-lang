@@ -1,8 +1,19 @@
 module std.rand
 
+/** Seed the global random number generator. */
 @extern(fn: "nv_rand_seed")  pub fn seed(s: int)
+
+/** Initialize the random number generator with a random seed. */
 @extern(fn: "nv_rand_init")  pub fn init()
+
+/** Generate a random float in [0, 1). */
 @extern(fn: "nv_rand_float") pub fn float() → float
+
+/** Generate a random integer in [lo, hi). */
 @extern(fn: "nv_rand_int")   pub fn int(lo: int, hi: int) → int
+
+/** Generate a random boolean. */
 @extern(fn: "nv_rand_bool")  pub fn bool() → bool
+
+/** Generate the next raw random integer. */
 @extern(fn: "nv_rand_next")  pub fn next() → int

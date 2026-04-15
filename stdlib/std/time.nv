@@ -1,6 +1,13 @@
 module std.time
 
+/** Unix timestamp in milliseconds since epoch. */
 @extern(fn: "nv_time_now_ms")       pub fn nowMs() → int
+
+/** Unix timestamp in seconds since epoch. */
 @extern(fn: "nv_time_now_float")    pub fn now() → float
+
+/** Get the monotonic clock value in nanoseconds (for benchmarking). */
 @extern(fn: "nv_time_monotonic_ns") pub fn monotonicNs() → int
+
+/** Sleep for the given number of milliseconds. */
 @extern(fn: "nv_time_sleep_ms")     pub fn sleepMs(ms: int)
