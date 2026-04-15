@@ -40,6 +40,97 @@
   - Fix: syncToDeclBoundary DECL_STARTERS as companion constant; parseFile consumes stray DEDENTs
 
 ────────────────────────────────────────────────────────────────────────────────
+  UNIMPLEMENTED FEATURES — OVERVIEW TABLE
+────────────────────────────────────────────────────────────────────────────────
+
+  Legend — Status:
+    STUB    parser + type-checker done; codegen emits a placeholder only
+    TODO    not started at any layer
+    PARTIAL some codegen exists but feature is incomplete
+
+  Legend — Priority:
+    P1  blocking: real programs cannot be written without this
+    P2  high: commonly needed; unblocks a class of programs
+    P3  medium: useful but programs work around it
+    P4  low: niche or experimental; deferred until language is stable
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │  LANGUAGE FEATURES                                                          │
+  ├──────────────────────────────────────────┬────────┬──────┬──────────────────┤
+  │  Feature                                 │ Status │ Prio │ Notes            │
+  ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
+  │  Async/await — coroutine frame emission  │ STUB   │  P1  │ setjmp/ucontext  │
+  │  go / spawn goroutine dispatch           │ STUB   │  P1  │ pthreads planned │
+  │  Channel<T> send/recv/close/iter         │ STUB   │  P1  │ MPSC queue       │
+  │  select statement multi-channel          │ STUB   │  P2  │ depends on Chan  │
+  │  TaskGroup structured concurrency        │ TODO   │  P2  │ cancel + errors  │
+  │  Future<T> + .all/.any/.race             │ TODO   │  P2  │ depends on spawn │
+  │  Lazy sequences — yield state machine    │ STUB   │  P1  │ coroutine frame  │
+  │  Iterator protocol for-in (.iter/next)   │ STUB   │  P1  │ Iterable<T> iface│
+  │  Operator overloading — codegen          │ PARTIAL│  P1  │ 3 bugs; see plan │
+  │  str comparison lexicographic (not hash) │ PARTIAL│  P2  │ Compare on str   │
+  │  Pattern matching — or-patterns          │ PARTIAL│  P2  │ A(_) | B(_) arm  │
+  │  Pattern matching — nested patterns      │ PARTIAL│  P2  │ Ok(Some(x))      │
+  │  Pattern matching — named-field destruct │ PARTIAL│  P2  │ Point(x:, y:)    │
+  │  Tuple named fields + destructuring      │ PARTIAL│  P2  │ (x: int, y: int) │
+  │  2D matrices [[T]] with A[r,c] indexing  │ STUB   │  P3  │ row/col slice    │
+  │  @if conditional compilation             │ PARTIAL│  P3  │ parsed; codegen? │
+  │  @extern(cxx:) C++ name-mangled interop  │ TODO   │  P3  │ demangling needed│
+  │  @include("header.h") C header import    │ TODO   │  P3  │ clang pass-thru  │
+  │  ptr<T> raw pointer type (unsafe)        │ TODO   │  P3  │ unsafe block req │
+  │  DWARF debug info emission               │ TODO   │  P3  │ -g via LLVM      │
+  │  LSP: inlay hints (inferred types)       │ TODO   │  P3  │ let bindings     │
+  │  LSP: semantic token highlighting        │ TODO   │  P3  │ richer than TM   │
+  │  LSP: call/type hierarchy                │ TODO   │  P4  │ stretch goal     │
+  │  GPU kernels @gpu / @gpu(block)          │ STUB   │  P4  │ NVVM/MSL/SPIR-V  │
+  │  @gpu.local shared memory                │ TODO   │  P4  │ depends on @gpu  │
+  └──────────────────────────────────────────┴────────┴──────┴──────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │  STDLIB MODULES                                                             │
+  ├──────────────────────────────────────────┬────────┬──────┬──────────────────┤
+  │  Module                                  │ Status │ Prio │ Notes            │
+  ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
+  │  std.test   — @test runner integration   │ STUB   │  P1  │ nv test depends  │
+  │  std.json   — parse/serialize JSON       │ STUB   │  P1  │ ubiquitous format│
+  │  std.regex  — pattern matching           │ STUB   │  P1  │ string work horse│
+  │  std.net.http — HTTP client + server     │ STUB   │  P2  │ depends on net   │
+  │  std.concurrent — Channel/Mutex/RwLock   │ STUB   │  P2  │ tied to 2.1 done │
+  │  std.signal — OS signal handling         │ STUB   │  P2  │ async delivery   │
+  │  std.bytes  — byte slices / buffers      │ STUB   │  P2  │ I/O complement   │
+  │  std.encoding — base64/hex/utf8          │ STUB   │  P2  │ protocol work    │
+  │  std.crypto — HMAC/AES/RSA/TLS           │ STUB   │  P2  │ security work    │
+  │  std.net    — TCP/UDP sockets            │ STUB   │  P2  │ depends on async │
+  │  std.cli    — argument parsing           │ STUB   │  P2  │ every CLI tool   │
+  │  std.toml   — TOML v1.0 (nv.pkg uses)    │ STUB   │  P2  │ parse nv.pkg     │
+  │  std.unicode — NFC/grapheme/codepoints   │ STUB   │  P2  │ string correctness│
+  │  std.debug  — stack traces / profiling   │ STUB   │  P3  │ dev tooling      │
+  │  std.uuid   — RFC 4122 UUID              │ STUB   │  P3  │ common utility   │
+  │  std.compress — gzip/zstd streams        │ STUB   │  P3  │ archive dep      │
+  │  std.sql    — driver-independent SQL     │ STUB   │  P3  │ SQLite bundled   │
+  │  std.csv    — CSV/TSV read/write         │ STUB   │  P3  │ data tooling     │
+  │  std.stats  — mean/stddev/percentile     │ STUB   │  P3  │ nv-bench needs   │
+  │  std.template — text/HTML templating     │ STUB   │  P3  │ web use cases    │
+  │  std.html   — HTML5 parse + query        │ STUB   │  P3  │ scraping/gen     │
+  │  std.xml    — DOM/SAX XML parsing        │ STUB   │  P4  │ legacy interop   │
+  │  std.mime   — type detection             │ STUB   │  P4  │ HTTP complement  │
+  │  std.bignum — arbitrary precision int    │ STUB   │  P4  │ finance/crypto   │
+  │  std.archive — zip/tar read/write        │ STUB   │  P4  │ depends on compr │
+  │  std.ffi    — complete @extern wrappers  │PARTIAL │  P4  │ @extern works    │
+  │  std.gpu    — GPU buffer / kernel API    │ STUB   │  P4  │ depends on @gpu  │
+  └──────────────────────────────────────────┴────────┴──────┴──────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │  IDE PLUGINS  (Phase 6)                                                     │
+  ├──────────────────────────────────────────┬────────┬──────┬──────────────────┤
+  │  Item                                    │ Status │ Prio │ Notes            │
+  ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
+  │  VS Code extension (6.1)                 │ TODO   │  P1  │ TextMate + LSP   │
+  │  IntelliJ plugin Tier 1 — LSP4IJ (6.2)   │ TODO   │  P2  │ run configs too  │
+  │  IntelliJ plugin Tier 2 — PSI (6.3)      │ TODO   │  P4  │ stretch goal     │
+  └──────────────────────────────────────────┴────────┴──────┴──────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
   PHASE 0 — FOUNDATION  (Milestone M0 "Scaffolding")
 ────────────────────────────────────────────────────────────────────────────────
 
