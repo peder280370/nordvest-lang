@@ -71,6 +71,45 @@ fn process(raw: [float]) → [float]
         |> map(_, x → x.round(4))
 ```
 
+```
+// Mathematical interval notation in match
+fn grade(score: int) → str
+    match score
+        [90, 100]: → "A"
+        [80, 90[:  → "B"
+        [70, 80[:  → "C"
+        _:         → "F"
+```
+
+```
+// Value types with derive and copy-with-override
+@derive(All)
+struct Point(x: float, y: float)
+
+let origin = Point(0.0, 0.0)
+let moved  = origin.copy(x: 3.0)          // Point(3.0, 0.0)
+let dist   = (moved.x^2 + moved.y^2)^0.5  // uses ^ for exponentiation
+```
+
+```
+// guard let — early exit on nil, no nesting
+fn display(user: User?) → str
+    guard let u = user else → "No user"
+    → "{u.name} <{u.email}>"
+```
+
+```
+// Lazy infinite sequence — yield produces a generator
+fn fibonacci() → Sequence<int>
+    var a = 0
+    var b = 1
+    while true
+        yield a
+        a, b = b, a + b
+
+let first10 = fibonacci().take(10).toList()
+```
+
 More examples in [`EXAMPLE.txt`](EXAMPLE.txt) and [`examples/`](examples/).
 
 ---
