@@ -111,7 +111,9 @@ class LlvmIrEmitter(
         "nv_arr_sort_i64",
         // std.log
         "nv_log_debug", "nv_log_info", "nv_log_warn", "nv_log_error",
-        "nv_log_fatal", "nv_log_set_level", "nv_log_flush"
+        "nv_log_fatal", "nv_log_set_level", "nv_log_flush",
+        "nv_log_warnWith", "nv_log_errorWith", "nv_log_fatalWith",
+        "nv_log_set_trace_enabled", "nv_log_do_trace"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -489,6 +491,8 @@ declare i32  @setenv(i8*, i8*, i32)
 declare i32  @getpid()
 declare i8*  @popen(i8*, i8*)
 declare i32  @pclose(i8*)
+declare i32  @backtrace(i8**, i32)
+declare i8** @backtrace_symbols(i8**, i32)
 """.trimIndent())
     }
 

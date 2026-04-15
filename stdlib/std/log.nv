@@ -21,6 +21,18 @@ module std.log
 /** Flush all log output buffers. */
 @extern(fn: "nv_log_flush")     pub fn flush()
 
+/** Log a warning with an attached cause string (printed as "msg: cause"). */
+@extern(fn: "nv_log_warnWith")  pub fn warnWith(msg: str, cause: str)
+
+/** Log an error with an attached cause string (printed as "msg: cause"). */
+@extern(fn: "nv_log_errorWith") pub fn errorWith(msg: str, cause: str)
+
+/** Log a fatal message with an attached cause string and exit with code 1. Always prints + traces. */
+@extern(fn: "nv_log_fatalWith") pub fn fatalWith(msg: str, cause: str)
+
+/** Enable or disable stack traces for warn/error (fatalWith always traces). Default is false. */
+@extern(fn: "nv_log_set_trace_enabled") pub fn setTraceEnabled(enabled: bool)
+
 /** Set the log output to a file (no-op stub; file redirection not yet implemented). */
 pub fn setOutput(path: str)
 
