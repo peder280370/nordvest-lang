@@ -1361,10 +1361,8 @@ $storeStmt
         }
         Type.TBool -> {
             val trueReg = stringConst("true")
-            val cmpReg  = fresh("cfg.bcmp")
-            emit("  $cmpReg = call i64 @nv_str_eq(i8* $rawReg, i8* $trueReg)")
             val boolReg = fresh("cfg.bool")
-            emit("  $boolReg = icmp ne i64 $cmpReg, 0")
+            emit("  $boolReg = call i1 @nv_str_eq(i8* $rawReg, i8* $trueReg)")
             boolReg
         }
         is Type.TNullable -> rawReg   // nullable str: pass raw string (may be null — handled by caller)
