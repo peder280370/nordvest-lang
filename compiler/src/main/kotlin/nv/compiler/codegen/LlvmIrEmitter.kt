@@ -108,7 +108,10 @@ class LlvmIrEmitter(
         "nv_arr_first_str", "nv_arr_last_str",
         "nv_arr_reverse_i64", "nv_arr_reverse_str",
         "nv_arr_slice_i64", "nv_arr_slice_str",
-        "nv_arr_sort_i64"
+        "nv_arr_sort_i64",
+        // std.log
+        "nv_log_debug", "nv_log_info", "nv_log_warn", "nv_log_error",
+        "nv_log_fatal", "nv_log_set_level", "nv_log_flush"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -505,6 +508,7 @@ declare i32  @pclose(i8*)
         HashRuntime.emit(rtFns)
         FmtRuntime.emit(rtFns)
         IterRuntime.emit(rtFns)
+        LogRuntime.emit(rtFns)
     }
 
     /*

@@ -1,28 +1,28 @@
 module std.log
 
-/** Log a debug message. */
-pub fn debug(msg: str)
+/** Log a debug message (suppressed unless level is "debug"). */
+@extern(fn: "nv_log_debug")     pub fn debug(msg: str)
 
-/** Log an info message. */
-pub fn info(msg: str)
+/** Log an info message (suppressed if level is "warn" or "error"). */
+@extern(fn: "nv_log_info")      pub fn info(msg: str)
 
-/** Log a warning message. */
-pub fn warn(msg: str)
+/** Log a warning message (suppressed if level is "error"). */
+@extern(fn: "nv_log_warn")      pub fn warn(msg: str)
 
 /** Log an error message. */
-pub fn error(msg: str)
+@extern(fn: "nv_log_error")     pub fn error(msg: str)
 
-/** Log a fatal message and exit. */
-pub fn fatal(msg: str)
+/** Log a fatal message and exit with code 1. Always prints regardless of level. */
+@extern(fn: "nv_log_fatal")     pub fn fatal(msg: str)
 
-/** Set the minimum log level. */
-pub fn setLevel(level: str)
+/** Set the minimum log level: "debug", "info", "warn", or "error". Default is "info". */
+@extern(fn: "nv_log_set_level") pub fn setLevel(level: str)
 
-/** Set the log output to a file. */
-pub fn setOutput(path: str) throws IOError
+/** Flush all log output buffers. */
+@extern(fn: "nv_log_flush")     pub fn flush()
 
-/** Add a structured field to all subsequent log messages. */
+/** Set the log output to a file (no-op stub; file redirection not yet implemented). */
+pub fn setOutput(path: str)
+
+/** Add a structured field to all subsequent log messages (no-op stub). */
 pub fn withField(key: str, value: str)
-
-/** Flush the log buffer. */
-pub fn flush()

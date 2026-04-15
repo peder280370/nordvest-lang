@@ -18,7 +18,7 @@
   Phase: PHASE 5 — Stdlib & Production Hardening  (COMPLETE: 5.1–5.10 all done)
   Next: PHASE 6 — IDE Plugins (VS Code + IntelliJ backed by nv-lsp)
 
-  Current test count: 800 (782 after 5.9 + 18 ConfigAnnotationTest from 5.10)
+  Current test count: 807 (800 after 5.10 + 7 LogRuntimeTest)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -32,6 +32,7 @@
   - 5.8  @builder annotation — build DSL block (TypeName.build INDENT field=val DEDENT)
   - 5.9  @lazy fields and `by` delegation — codegen + integration (782 tests passing)
   - 5.10 @config and @env annotations — TypeName.configLoad() → Result<T, str> (800 tests)
+  - 5.11 std.log: level-filtered logging (nv_log_debug/info/warn/error/fatal/setLevel/flush) (807 tests)
   - LlvmIrEmitter runtime split into subclasses (one per stdlib module)
   - Fix: @extern mappings registered without re-declaration; array result type inference
   - Fix: parser supports `(T) → T` function type syntax (without `fn` keyword)
