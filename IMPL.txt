@@ -334,6 +334,9 @@
                Target: tools/src/main/kotlin/nv/tools/Main.kt
                - nv run <file>: compile → temp .ll → clang → exec (inheritIO)
                - nv build <file> [-o output] [--emit-llvm]: compile → clang → binary
+               - Limitation: nv build requires exactly one <file.nv>; cross-file user
+                 imports are not resolved and multi-file project builds are not
+                 supported. Project-wide compilation is planned for Phase 7.
                - Compiler fallback: tries clang, cc, gcc in order
                - 60-second subprocess timeout
                - --emit-llvm flag writes raw .ll file instead of native binary
@@ -755,3 +758,49 @@
                  "Convert ASCII operator to Unicode"
                - Quick-fixes: add missing sealed variants, add ? propagation
                - Debugger: DWARF debug info via LLVM; XDebugger integration
+
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 7 — MULTI-FILE COMPILATION & LIBRARY LINKING  (Milestone M7)
+────────────────────────────────────────────────────────────────────────────────
+
+  [TODO]  7.1  Module collector and import graph
+               Target: compiler/src/main/kotlin/nv/compiler/ModuleCollector.kt (new)
+               - Walk package root (directory containing nv.pkg); discover all .nv files
+               - Parse module declaration from first non-comment line of each file
+               - Files without a module declaration → implicit root module (package name)
+               - Build directed import graph; detect and report cycles as compile errors
+               - Produce topological sort order (leaf modules compiled first)
+
+  [TODO]  7.2  Per-module incremental compilation
+               Target: compiler/src/main/kotlin/nv/compiler/ModuleCompiler.kt (new)
+               - Compile each module (files sharing a module declaration) → .ll in .nv-cache/
+               - Cache key: SHA-256 of all source files in the module + imported module
+                 interface hashes; downstream modules invalidated when exported API changes
+               - Unify with existing Phase 3.4 single-file cache (.nv-cache/<sha256>.ll)
+               - nv build <file.nv> (single-file form) continues to use same cache layout
+
+  [TODO]  7.3  Multi-module linking via llvm-link
+               Target: tools/src/main/kotlin/nv/tools/Main.kt (extend cmdBuild)
+               - Collect all per-module .ll files (fresh + cached) after compilation pass
+               - Invoke llvm-link to merge into a single IR module
+               - Pass merged .ll to clang → native binary
+               - Runtime helpers (nv_print, nv_rc_retain, etc.): emitted as definitions
+                 only in the root module's .ll; all other modules emit declare stubs
+                 (requires LlvmIrEmitter.kt refactor: add runtimeMode: DEFINE | DECLARE)
+
+  [TODO]  7.4  nv link subcommand
+               Target: tools/src/main/kotlin/nv/tools/Main.kt (new cmdLink)
+               - nv link [options] <file.ll>... -o <output>
+               - Invokes llvm-link to merge inputs, then clang to produce binary
+               - Options: -o, --release (-O2), --debug, --static, --emit-ll, --link-rt
+               - nv build --link-ll <extra.ll>: inject extra .ll into the merge step
+               - nv build --lib --emit-llvm: compile library module to standalone .ll
+
+  [TODO]  7.5  Module interface files (.nvi)
+               Target: compiler/src/main/kotlin/nv/compiler/ModuleInterface.kt (new)
+               - Write .nvi alongside each .ll: JSON snapshot of exported types, fn
+                 signatures, and constants for the compiled module
+               - Type checker reads .nvi for imported modules instead of re-parsing source
+               - Format: human-readable JSON; includes schema version for cache invalidation
+               - nv build project mode: pass imported .nvi files to TypeChecker before
+                 compiling each dependent module

@@ -626,6 +626,86 @@ Milestone: M6 "Editor-Ready"
     - Both plugins installable from their respective marketplaces.
     - Unicode input helper covers all math operators used in EXAMPLE.txt.
 
+────────────────────────────────────────────────────────────────────────────────
+  PHASE 7 — MULTI-FILE COMPILATION & LIBRARY LINKING
+  Goal: nv build without a file arg; nv link; per-module .ll caching
+────────────────────────────────────────────────────────────────────────────────
+
+Milestone: M7 "Real Projects"
+
+  Rationale: The bootstrap compiler (Phases 1–5) requires all application code
+  to live in a single .nv file because it compiles one file at a time and emits
+  all runtime helpers inline into that module. Real programs — and the flagship
+  examples in examples/ — need multi-file module support. Phase 7 implements
+  project-wide compilation as a distinct pipeline stage on top of the existing
+  per-file compiler, without requiring changes to the type checker or codegen.
+
+  7.1  Module collector and import graph
+       - Walk the package root (directory containing nv.pkg) and discover all
+         .nv files recursively.
+       - Parse the module declaration from the first non-comment line of each
+         file to assign it to a module. Files without a module declaration
+         belong to the implicit root module (same as the package name).
+       - Build a directed import graph: each module node points to the modules
+         it imports. Detect and report import cycles as compile errors.
+       - Produce a topological sort order; modules are compiled leaf-first so
+         that every dependency's type information is available before its
+         dependents are type-checked.
+
+  7.2  Per-module incremental compilation
+       - Each module (set of .nv files sharing a module declaration) is
+         compiled independently to a .ll file in .nv-cache/.
+       - The cache key is the SHA-256 of the concatenated source content of
+         all files in the module, plus the set of imported module interface
+         hashes (so downstream modules are invalidated when an API changes).
+       - On a clean build every module is compiled. On an incremental build
+         only modules whose cache key has changed are recompiled.
+       - The existing Phase 3.4 single-file cache is unified with this system;
+         nv build <file.nv> continues to work and uses the same cache layout.
+
+  7.3  Multi-module linking via llvm-link
+       - After per-module compilation, collect all .ll files (fresh + cached).
+       - Invoke llvm-link to merge them into a single IR module.
+       - Pass the merged module to clang to produce the final binary.
+       - The inline runtime helpers (nv_print, nv_rc_retain, etc.) are emitted
+         only by the root module's .ll; all other modules emit declare stubs.
+         llvm-link resolves them from the single definition at link time.
+         (This requires a one-time refactor of LlvmIrEmitter to separate
+         "runtime definition" from "runtime declare" emission.)
+
+  7.4  nv link subcommand
+       - Expose the llvm-link + clang pipeline as a first-class nv link command
+         (see Section 6.8 for the full CLI spec).
+       - nv build --emit-llvm compiles a module to a standalone .ll artifact.
+       - nv build --link-ll <file> injects an extra .ll into the merge step.
+       - Library packages may ship .ll artifacts alongside .nv source; nv pkg
+         install will compile .nv sources to .ll on install (nv build --lib
+         --emit-llvm), and subsequent builds link the cached .ll directly.
+
+  7.5  Cross-module type visibility
+       - The type checker currently processes one file at a time with an
+         in-memory symbol table. For multi-module builds it must be able to
+         load the exported interface of a compiled dependency module without
+         re-parsing its source.
+       - Implement a lightweight module interface file (.nvi) written alongside
+         each .ll: a JSON/TOML snapshot of the module's exported types, function
+         signatures, and constants. The type checker reads .nvi files for
+         imported modules rather than re-compiling them from source.
+       - Format: human-readable; versioned with a schema version field so
+         interface evolution is detectable and old caches are invalidated.
+
+  Phase 7 success criteria:
+    - nv build (no file arg) from a project root compiles all .nv files and
+      produces a working binary.
+    - examples/nv-http, examples/nv-json, examples/nv-bench are split into
+      multi-file modules and all compile successfully via project build.
+    - Incremental rebuild after touching one file recompiles only the affected
+      module and its dependents.
+    - nv link foo.ll bar.ll -o myapp produces a working binary.
+    - A library package can be pre-compiled to .ll (nv build --lib --emit-llvm)
+      and consumed by another project via nv build --link-ll.
+    - All existing 800+ single-file tests continue to pass unchanged.
+
 
 ================================================================================
   3. FORMAL SYNTAX SPECIFICATION
@@ -3258,22 +3338,43 @@ during Phase 4.
   6.2  nv build — Compile to Binary
 ────────────────────────────────────────────────────────────────────────────────
 
-  Usage:  nv build [options] <file.nv>
+  Usage:
+    nv build [options] <file.nv>     single-file build (Phase 1–5, current)
+    nv build [options]               project build     (Phase 7, planned)
 
-  Behavior:
-    - Compiles to a native binary (default output name: stem of input file).
-    - Equivalent to nv run --no-exec but places output in the current directory.
+  Single-file behavior (current):
+    - Compiles <file.nv> and all transitive stdlib imports to a native binary.
+    - Default output name: stem of input file.
+    - Limitation: cross-file user imports are not resolved; all application
+      code must live in one file. Multi-file project builds are Phase 7.
 
-  Options:
+  Project build behavior (Phase 7, planned):
+    - Walks up from the current directory to find nv.pkg; errors if not found.
+    - Collects all .nv files in the package root and sub-modules (subdirectories
+      sharing a module declaration hierarchy). Files sharing the same module
+      declaration form one module; subdirectories are sub-modules.
+    - Resolves the full import graph across all modules; reports cycle errors.
+    - Compiles each module to .ll in .nv-cache/; skips modules whose source
+      hash is unchanged (incremental, reusing Phase 3.4 per-file cache).
+    - Merges all .ll outputs via llvm-link into a single IR module, then passes
+      the merged module to clang to produce the final native binary.
+    - Entry point: the unique fn main() found among all compiled files.
+    - Default output name: name field from nv.pkg; falls back to directory name.
+    - Sub-module .ll files may optionally be cached as pre-linked .ll libraries
+      (see nv link, section 6.8) for faster incremental rebuilds.
+
+  Options (both forms):
     -o <output>         Output binary name.
     --release           Optimized build (-O2, strip debug info).
     --debug             Debug build with DWARF info and sanitizers.
     --target <triple>   Cross-compile.
     --gpu-target <t>    GPU backend.
     --static            Statically link the runtime.
-    --emit-llvm         Emit .ll file instead of binary.
+    --emit-llvm         Emit merged .ll file instead of binary.
     --emit-asm          Emit .s assembly instead of binary.
     --lib               Compile as a shared library (.so / .dylib / .dll).
+    --link-ll <file>    Link an additional pre-compiled .ll file into the build.
+                        May be repeated. Applied after module compilation.
 
 ────────────────────────────────────────────────────────────────────────────────
   6.3  nv test — Run Tests
@@ -3445,6 +3546,54 @@ during Phase 4.
     --bin               Executable project (default).
     --gpu               GPU compute project (adds @gpu example).
     --http              HTTP service project (adds std.net.http example).
+
+────────────────────────────────────────────────────────────────────────────────
+  6.8  nv link — Link LLVM IR Libraries (Phase 7, planned)
+────────────────────────────────────────────────────────────────────────────────
+
+  Usage:  nv link [options] <file.ll>... -o <output>
+
+  Rationale:
+    LLVM IR (.ll) is the portable, platform-independent intermediate
+    representation produced by every nv build --emit-llvm invocation.
+    nv link provides a first-class way to combine multiple .ll modules —
+    whether produced by nv, by hand, or by a third-party compiler — into a
+    single native binary. This enables:
+
+      - Pre-compiling large, stable sub-modules to .ll and caching them
+        independently of the application code (faster incremental builds).
+      - Distributing library packages as .ll artifacts alongside .nv sources
+        (allows faster install-time builds; .ll is already type-checked).
+      - FFI glue: hand-authored LLVM IR optimizations or intrinsics that
+        cannot be expressed in Nordvest can be slotted in via nv link.
+      - Hermetic builds: vendor/ directories can contain .ll snapshots that
+        reproduce exactly without recompiling dependencies from source.
+
+  Behavior:
+    - Invokes llvm-link to merge all input .ll files into a single IR module.
+    - Passes the merged module to clang to produce the final native binary.
+    - The Nordvest runtime (inline IR functions) is expected to already be
+      present in at least one of the input files, or linked via --link-rt.
+    - Equivalent pipeline:
+        llvm-link <files...> -o merged.ll
+        clang -x ir merged.ll -o <output> [-O2] [-g] [-static]
+
+  Options:
+    -o <output>         Output binary name (required).
+    --release           Pass -O2 to clang.
+    --debug             Debug build with DWARF info.
+    --static            Statically link the runtime.
+    --emit-ll           Emit merged .ll only; do not invoke clang.
+    --link-rt           Inject the Nordvest runtime IR before merging (for
+                        .ll files produced outside of nv build).
+
+  Integration with nv build:
+    - nv build --emit-llvm -o foo.ll compiles a single module to .ll.
+    - nv build --lib --emit-llvm -o libfoo.ll compiles a library to .ll.
+    - nv link libfoo.ll libbar.ll main.ll -o myapp combines them.
+    - The --link-ll flag on nv build is syntactic sugar for this pipeline:
+        nv build main.nv --link-ll extra.ll -o myapp
+      compiles main.nv to IR, merges extra.ll, then links.
 
 
 ================================================================================
