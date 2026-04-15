@@ -10,10 +10,6 @@ import java.io.File
  */
 class FsRuntimeTest : NvCompilerTestBase() {
 
-    private fun projectDir(): File =
-        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
-            .let { if (it.name == "tests") it.parentFile else it }
-
     @Test fun `stdlib fs module has real implementations`() {
         val f = File(projectDir(), "stdlib/std/fs.nv")
         assertTrue(f.exists())

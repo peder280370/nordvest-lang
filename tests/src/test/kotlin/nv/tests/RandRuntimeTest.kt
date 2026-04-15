@@ -10,9 +10,6 @@ import java.io.File
  */
 class RandRuntimeTest : NvCompilerTestBase() {
 
-    private fun projectDir(): File =
-        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
-            .let { if (it.name == "tests") it.parentFile else it }
 
     @Test fun `stdlib rand module has real implementations`() {
         val f = File(projectDir(), "stdlib/std/rand.nv")

@@ -21,7 +21,7 @@ internal object LogRuntime {
 @.log.warn_s     = private unnamed_addr constant [5 x i8]  c"warn\00",     align 1
 @.log.error_s    = private unnamed_addr constant [6 x i8]  c"error\00",    align 1
 
-; nv_log_debug(msg) — prints if level <= 0
+; nv_log_debug(msg: i8*)  (prints if @nv_log_level <= 0)
 define void @nv_log_debug(i8* %msg) {
 entry:
   %lv = load i64, i64* @nv_log_level, align 8
@@ -36,7 +36,7 @@ skip:
   ret void
 }
 
-; nv_log_info(msg) — prints if level <= 1
+; nv_log_info(msg: i8*)  (prints if @nv_log_level <= 1)
 define void @nv_log_info(i8* %msg) {
 entry:
   %lv = load i64, i64* @nv_log_level, align 8
@@ -51,7 +51,7 @@ skip:
   ret void
 }
 
-; nv_log_warn(msg) — prints if level <= 2
+; nv_log_warn(msg: i8*)  (prints if @nv_log_level <= 2)
 define void @nv_log_warn(i8* %msg) {
 entry:
   %lv = load i64, i64* @nv_log_level, align 8
@@ -66,7 +66,7 @@ skip:
   ret void
 }
 
-; nv_log_error(msg) — prints if level <= 3
+; nv_log_error(msg: i8*)  (prints if @nv_log_level <= 3)
 define void @nv_log_error(i8* %msg) {
 entry:
   %lv = load i64, i64* @nv_log_level, align 8
@@ -81,7 +81,7 @@ skip:
   ret void
 }
 
-; nv_log_fatal(msg) — always prints then exits with code 1
+; nv_log_fatal(msg: i8*)  (always prints then exits with code 1)
 define void @nv_log_fatal(i8* %msg) {
 entry:
   %fmt = getelementptr [6 x i8], [6 x i8]* @.log.fmt, i64 0, i64 0
@@ -91,7 +91,7 @@ entry:
   unreachable
 }
 
-; nv_log_set_level(level) — accepts "debug", "info", "warn", "error"
+; nv_log_set_level(level: i8*)  (accepts "debug"=0 "info"=1 "warn"=2 "error"=3; unknown → no-op)
 define void @nv_log_set_level(i8* %level) {
 entry:
   %ds = getelementptr [6 x i8], [6 x i8]* @.log.debug_s, i64 0, i64 0
@@ -129,7 +129,7 @@ done:
   ret void
 }
 
-; nv_log_flush() — flush all stdio buffers
+; nv_log_flush()  (fflush(NULL) — flushes all open stdio streams)
 define void @nv_log_flush() {
 entry:
   call i32 @fflush(i8* null)

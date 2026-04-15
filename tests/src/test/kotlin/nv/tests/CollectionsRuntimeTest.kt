@@ -10,9 +10,6 @@ import java.io.File
  */
 class CollectionsRuntimeTest : NvCompilerTestBase() {
 
-    private fun projectDir(): File =
-        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
-            .let { if (it.name == "tests") it.parentFile else it }
 
     @Test fun `stdlib collections module has typed operations`() {
         val f = File(projectDir(), "stdlib/std/collections.nv")

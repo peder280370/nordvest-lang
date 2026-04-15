@@ -76,6 +76,11 @@ open class NvCompilerTestBase {
         }
     }
 
+    /** Resolve the repo root regardless of whether tests run from the repo root or the `tests/` subproject. */
+    fun projectDir(): File =
+        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
+            .let { if (it.name == "tests") it.parentFile else it }
+
     /** Convenience: skip the test if clang is not available, then run the program. */
     fun runProgramOrSkip(
         ir: String,

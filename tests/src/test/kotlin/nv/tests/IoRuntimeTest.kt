@@ -10,10 +10,6 @@ import java.io.File
  */
 class IoRuntimeTest : NvCompilerTestBase() {
 
-    private fun projectDir(): File =
-        File(System.getProperty("projectDir", System.getProperty("user.dir", ".")))
-            .let { if (it.name == "tests") it.parentFile else it }
-
     @Test fun `stdlib io module has IOError and File operations`() {
         val f = File(projectDir(), "stdlib/std/io.nv")
         assertTrue(f.exists())
