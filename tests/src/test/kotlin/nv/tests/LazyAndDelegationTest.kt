@@ -1,15 +1,10 @@
 package nv.tests
 
-import nv.compiler.Compiler
-import nv.compiler.CompileResult
 import nv.compiler.lexer.Lexer
 import nv.compiler.parser.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
-import java.io.File
-import java.nio.file.Files
-import java.util.concurrent.TimeUnit
 
 /**
  * Tests for @lazy fields and `by` interface delegation.
@@ -19,59 +14,7 @@ import java.util.concurrent.TimeUnit
  *  - IR structure:     verify getter methods and forwarding methods are emitted.
  *  - Integration:      compile + run with clang and check stdout.
  */
-class LazyAndDelegationTest {
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun parse(src: String): SourceFile {
-        val tokens = Lexer(src.trimIndent()).tokenize()
-        return when (val result = Parser(tokens, "<test>").parse()) {
-            is ParseResult.Success   -> result.file
-            is ParseResult.Recovered -> result.file
-            is ParseResult.Failure   -> fail("Parse failed: ${result.errors.first().message}")
-        }
-    }
-
-    private fun compileOk(src: String): String {
-        val result = Compiler.compile(src.trimIndent(), "<test>")
-        val ir = when (result) {
-            is CompileResult.IrSuccess -> result.llvmIr
-            else -> null
-        }
-        assertNotNull(ir, "Expected IR success but got: ${(result as? CompileResult.Failure)?.errors?.map { it.message }}")
-        return ir!!
-    }
-
-    private fun compileErrors(src: String): List<String> {
-        val result = Compiler.compile(src.trimIndent(), "<test>")
-        return when (result) {
-            is CompileResult.Failure -> result.errors.map { it.message }
-            else -> emptyList()
-        }
-    }
-
-    private fun clangAvailable(): Boolean = try {
-        val p = ProcessBuilder("clang", "--version").redirectErrorStream(true).start()
-        p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0
-    } catch (_: Exception) { false }
-
-    private fun runProgram(ir: String, tmpPrefix: String = "nv_lazy_"): String {
-        val tmp = Files.createTempDirectory(tmpPrefix).toFile()
-        return try {
-            val ll  = File(tmp, "out.ll");  ll.writeText(ir)
-            val bin = File(tmp, "out")
-            val cc  = ProcessBuilder("clang", "-o", bin.absolutePath, ll.absolutePath)
-                .redirectErrorStream(true).start()
-            val ccOut = cc.inputStream.bufferedReader().readText()
-            val ccOk  = cc.waitFor(60, TimeUnit.SECONDS) && cc.exitValue() == 0
-            assertTrue(ccOk, "clang failed:\n$ccOut")
-            val run = ProcessBuilder(bin.absolutePath).redirectErrorStream(true).start()
-            run.waitFor(10, TimeUnit.SECONDS)
-            run.inputStream.bufferedReader().readText().trimEnd()
-        } finally {
-            tmp.deleteRecursively()
-        }
-    }
+class LazyAndDelegationTest : NvCompilerTestBase() {
 
     // ── @lazy — Parser tests ──────────────────────────────────────────────────
 
