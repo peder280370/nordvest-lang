@@ -39,7 +39,7 @@ private fun printUsage() {
 
         Usage:
           nv run   <file.nv>              compile and run a Nordvest program
-          nv build <file.nv> [--release]  compile to a native binary
+          nv build <file.nv> [-o <output>] [--release] [--emit-llvm]  compile to a native binary
           nv fmt   <file.nv> [--check] [--stdout] [--ascii]  format source
           nv test  [path]                 run .nv files, emit TAP output
           nv doc   [path] [--html]        generate documentation
