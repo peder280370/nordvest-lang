@@ -2,7 +2,7 @@
 
 A statically typed, compiled language with clean indentation-based syntax, first-class mathematical notation, and a unified toolchain.
 
-> **Status:** Phases 0–5 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and a real standard library. 694 tests passing. Next: Phase 6 — IDE Plugins.
+> **Status:** Phases 0–5 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and a real standard library. 807 tests passing. Next: Phase 6 — IDE Plugins.
 > See [`IMPL.txt`](IMPL.txt) for current progress and [`PLAN.txt`](PLAN.txt) for the full roadmap.
 
 ---
@@ -117,12 +117,17 @@ More examples in [`EXAMPLE.txt`](EXAMPLE.txt) and [`examples/`](examples/).
 ## `nv` toolchain
 
 ```
-nv run   <file.nv>   compile and run
-nv build <file.nv>   compile to native binary
-nv fmt   <file.nv>   format source (canonical style)
-nv test              run tests
-nv doc               generate documentation
-nv pkg <cmd>         package management
+nv run   <file.nv>                              compile and run
+nv build <file.nv> [-o <output>] [--release]    compile to native binary
+         [--emit-llvm]                          emit .ll file instead of binary
+nv fmt   <file.nv> [--check] [--stdout]         format source (canonical style)
+         [--ascii]                              use ASCII-only output
+nv test  [path]                                 run tests, emit TAP output
+nv doc   [path] [--html]                        generate documentation
+nv pkg   init | new <name> | add <pkg[@ver]>    package management
+         install | list
+nv lsp                                          start LSP server (stdio)
+nv clean                                        remove .nv-cache/
 ```
 
 ---
@@ -193,7 +198,7 @@ The `LlvmIrEmitter` produces typed-pointer IR compatible with **LLVM/Clang 12+**
 
 Clang is used as the assembler/linker driver rather than `llc`+`ld` because it handles platform-specific startup code, C runtime linking, and architecture-specific flags automatically. When `nv run` is invoked, the IR is written to a temporary directory, Clang compiles it to a binary, the binary runs, and the temporary files are cleaned up.
 
-`nv build --emit-llvm` writes the `.ll` file to disk so you can inspect it, feed it to `opt`, or cross-compile it yourself.
+`nv build --emit-llvm` writes the `.ll` file to disk so you can inspect it, feed it to `opt`, or cross-compile it yourself. Use `-o <output>` to control the output binary name; without it the name is derived from the source file. `--release` passes `-O2` to Clang.
 
 ### Runtime support
 
@@ -249,8 +254,9 @@ cd nordvest-lang
 |---|---|
 | [`EXAMPLE.txt`](EXAMPLE.txt) | Annotated examples covering all language features |
 | [`PLAN.txt`](PLAN.txt) | Phased implementation roadmap and formal grammar outline |
-| [`spec/nv.peg`](spec/nv.peg) | PEG grammar (stub, expanded in Phase 1) |
-| [`IMPL.txt`](IMPL.txt) | Implementation progress tracker |
+| [`spec/language.md`](spec/language.md) | Prose language specification |
+| [`spec/nv.peg`](spec/nv.peg) | PEG grammar |
+| [`IMPL.txt`](IMPL.txt) | Implementation progress tracker (authoritative status) |
 
 ---
 
@@ -263,7 +269,7 @@ cd nordvest-lang
 | **2 — Systems & concurrency** | async/await, channels, C/C++ interop, GPU, stdlib v1 | Done |
 | **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Done |
 | **4 — Language completion** | stdlib bodies, codegen hardening, flagship examples, fuzz testing | Done |
-| **5 — Stdlib & production hardening** | Real stdlib implementations, RC, string/collections/I/O/hash/fmt/iter | Done |
+| **5 — Stdlib & production hardening** | Real stdlib implementations, RC, string/collections/I/O/hash/fmt/iter/log; `@newtype`, `@derive`, `@builder`, `@lazy`, `by`, `@config`/`@env` | Done |
 | **6 — IDE plugins** | VS Code extension + IntelliJ plugin backed by nv-lsp | Planned |
 
 The bootstrap compiler is written in **Kotlin** and targets **LLVM IR**. It is the permanent reference implementation — the language does not self-host.
