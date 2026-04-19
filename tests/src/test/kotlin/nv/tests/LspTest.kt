@@ -273,7 +273,7 @@ class LspTest {
             val outputStream2 = ByteArrayOutputStream()
 
             val server = LspServer(
-                input = inputStream2.bufferedReader(Charsets.UTF_8),
+                rawInput = inputStream2,
                 output = outputStream2,
                 err = errStream,
             )
