@@ -15,8 +15,12 @@
   CURRENT FOCUS
 ────────────────────────────────────────────────────────────────────────────────
 
-  Phase: PHASE 6 — IDE Plugins  (IntelliJ Tier 1 is the active focus)
-  Next: 6.2 IntelliJ plugin — Tier 1 (LSP4IJ + math symbol input + run configs)
+  Phase: PHASE 7 — Multi-file compilation & library linking
+  Next: 7.1 Module collector and import graph
+
+  Phase 6 complete:
+  - 6.2  IntelliJ plugin Tier 1: syntax highlighting, math symbol input (3 mechanisms),
+         LSP4IJ wiring, run/test configurations, gutter icons, settings, Enter handler
 
   Current test count: 807 (800 after 5.10 + 7 LogRuntimeTest)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
@@ -126,7 +130,7 @@
   │  Item                                    │ Status │ Prio │ Notes            │
   ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
   │  VS Code extension (6.1)                 │DEFERRED│  P4  │ after IntelliJ   │
-  │  IntelliJ plugin Tier 1 — LSP4IJ (6.2)   │ TODO   │  P1  │ local run first  │
+  │  IntelliJ plugin Tier 1 — LSP4IJ (6.2)   │  DONE  │  P1  │ runIde works     │
   │  IntelliJ plugin Tier 2 — PSI (6.3)      │ TODO   │  P4  │ stretch goal     │
   └──────────────────────────────────────────┴────────┴──────┴──────────────────┘
 
@@ -723,7 +727,7 @@
 
   [DEFERRED] 6.1  VS Code extension — deferred until IntelliJ plugin is complete.
 
-  [IN PROGRESS] 6.2  IntelliJ plugin — Tier 1  (directory: ide/nv-intellij/, Kotlin)
+  [DONE]  6.2  IntelliJ plugin — Tier 1  (directory: ide/nv-intellij/, Kotlin)
                Goal: plugin runs locally in a sandboxed IntelliJ via `./gradlew runIde`.
                No marketplace submission required at this stage.
 
@@ -734,13 +738,15 @@
                - `./gradlew runIde` — launches sandboxed IDE with plugin loaded
                - `./gradlew buildPlugin` — produces .zip for "Install from disk"
 
-               Project layout
+               Project layout (all files implemented)
                ide/nv-intellij/
                  src/main/kotlin/nv/intellij/
                    lang/
                      NordvestLanguage.kt         — Language singleton
                      NordvestFileType.kt         — .nv extension, MIME type, icon
                      NordvestIcons.kt            — load icons/nordvest.svg
+                     NordvestFile.kt             — PsiFile subtype
+                     NordvestParserDefinition.kt — stub parser for Tier 1 PSI tree
                    lexer/
                      NordvestLexer.kt            — IntelliJ Lexer wrapping compiler Lexer.kt
                      NordvestTokenTypes.kt       — IElementType constants for each token kind
@@ -750,20 +756,22 @@
                    editor/
                      NordvestBraceMatcher.kt     — (), [], [[]], {} matching
                      NordvestCommenter.kt        — line comment via //
-                     NordvestEnterHandler.kt     — preserve indentation on Enter
+                     NordvestEnterHandler.kt     — indentation-aware Enter (EnterHandlerDelegate)
                      MathSymbolTypedHandler.kt   — \forall→∀ live substitution
+                     MathSymbolCompletionContributor.kt — \<prefix> completion popup
                      MathSymbolInsertAction.kt   — "Insert Math Symbol" popup palette
                      MathSymbolTable.kt          — full symbol name→codepoint table
                    lsp/
-                     NordvestLspServerSupportProvider.kt — LSP4IJ: LanguageServerWrapper
-                     NordvestLspClientFeatures.kt        — which LSP capabilities to enable
+                     NordvestLspServerDefinition.kt — LanguageServerFactory; keepServerAlive;
+                                                      nv binary auto-detection with notification
                    run/
                      NordvestRunConfigurationType.kt
                      NordvestRunConfiguration.kt
-                     NordvestRunConfigurationFactory.kt
+                     NordvestRunConfigurationFactory.kt (NordvestRun + NordvestTest factories)
                      NordvestRunState.kt
                      NordvestRunConfigurationEditor.kt   — UI form: file path, args
-                     NordvestRunLineMarkerProvider.kt    — gutter ▶ next to fn main() / @test fn
+                     NordvestRunLineMarkerProvider.kt    — gutter ▶ next to fn main() / @test fn;
+                                                           creates/reuses run config and executes it
                    settings/
                      NordvestSettings.kt         — PersistentStateComponent (nv binary path)
                      NordvestSettingsConfigurable.kt
@@ -775,8 +783,11 @@
                6.2-A  Language + file type registration
                - NordvestLanguage (Language("Nordvest")), NordvestFileType (.nv, icon)
                - plugin.xml: <fileType>, <lang.syntaxHighlighterFactory>,
-                 <colorSettingsPage>, <lang.braceMatcher>, <lang.commenter>,
-                 <typedHandler>, <actions>
+                 <colorSettingsPage>, <lang.parserDefinition>, <lang.braceMatcher>,
+                 <lang.commenter>, <enterHandlerDelegate>, <typedHandler>,
+                 <completion.contributor>, <configurationType>,
+                 <runLineMarkerContributor>, <applicationConfigurable>,
+                 <applicationService>, <notificationGroup>, <actions>
 
                6.2-B  Syntax highlighting
                - NordvestLexer wraps compiler Lexer; adapts INDENT/DEDENT → whitespace
@@ -785,13 +796,12 @@
                - NordvestColorSettingsPage: demo text shows Unicode operators, sealed
                  class, annotations, string interpolation
 
-               6.2-C  Mathematical symbol input  (two complementary mechanisms)
+               6.2-C  Mathematical symbol input  (three complementary mechanisms)
 
                  Mechanism 1 — Live substitution (MathSymbolTypedHandler)
                  A TypedHandlerDelegate fires on every keypress. When the caret is
                  immediately after a `\`-prefixed identifier (e.g. `\forall`), typing
                  Space or Tab replaces the escape + trigger key with the Unicode symbol.
-                 Typing Escape cancels without substitution.
                  Example: user types `\forall<Space>` → editor inserts `∀ ` in-place.
 
                  The full escape table (MathSymbolTable.kt):
@@ -803,7 +813,7 @@
                    \delta   → δ    \epsilon→ ε    \theta → θ    \sigma → σ
                    \omega   → ω    \mu     → μ    \tau   → τ    \rho   → ρ
 
-                 Mechanism 2 — Completion popup (CompletionContributor)
+                 Mechanism 2 — Completion popup (MathSymbolCompletionContributor)
                  A custom CompletionContributor activates inside .nv files when the
                  prefix starts with `\`. It injects LookupElements for all matching
                  symbols; each shows the symbol glyph + escape name in the popup.
@@ -812,26 +822,28 @@
 
                  Mechanism 3 — Insert Symbol action
                  "Nordvest: Insert Math Symbol" action (Alt+Backslash default shortcut)
-                 opens a searchable symbol picker dialog (similar to IntelliJ's "Insert
-                 Special Character"). Shows all symbols in a grid with name and
-                 codepoint; double-click or Enter inserts at caret.
+                 opens a searchable symbol picker dialog. Shows all symbols in a grid
+                 with name and codepoint; double-click or Enter inserts at caret.
 
                6.2-D  LSP4IJ wiring
-               - NordvestLspServerSupportProvider extends
-                 com.redhat.devtools.lsp4ij.LanguageServerSupport
+               - NordvestLspServerDefinition implements LanguageServerFactory
                - Server command: ["nv", "lsp"] (discovered via settings nv path)
-               - Mapped to .nv files via <lsp.serverSupport> extension point
-               - Enabled LSP capabilities: diagnostics, completion, hover,
-                 definition, references, formatting, rename
-               - Disabled: inlay hints (unstable), semantic tokens (not yet in nv-lsp)
+               - Mapped to .nv files via <fileTypeMapping serverId="nordvest-lsp">
+               - keepServerAlive() = true — server stays warm between file switches
+               - nv binary auto-detection: explicit setting > common PATH locations >
+                 fallback "nv" + user notification to configure in Settings
+               - LSP capabilities negotiated automatically via LSP initialize handshake
 
                6.2-E  Run configurations
-               - NordvestRunConfigurationType: "Nordvest" category with "nv run" icon
-               - NordvestRunConfiguration: fields for file path and extra args
-               - NordvestRunState: builds GeneralCommandLine(nvPath, "run", filePath)
-               - NordvestRunLineMarkerProvider: shows ▶ gutter icon on lines containing
-                 `fn main(` or `@test fn `; click produces a run configuration
-               - NordvestTestRunConfiguration: `nv test [filter]` variant
+               - NordvestRunConfigurationType: "Nordvest" category, two factories:
+                   NordvestRunConfigurationFactory (id "NordvestRun")
+                   NordvestTestConfigurationFactory (id "NordvestTest")
+               - NordvestRunConfiguration: filePath + extraArgs + isTest fields;
+                   XML persistence via writeExternal/readExternal
+               - NordvestRunState: builds GeneralCommandLine(nvPath, "run"/"test", filePath)
+               - NordvestRunLineMarkerProvider: shows ▶ gutter icon on `fn main(` and
+                   `@test fn` lines; creates/reuses run config and executes it
+               - NordvestRunConfigurationEditor: JPanel form (file chooser + args field)
 
                6.2-F  Settings
                - Preferences › Tools › Nordvest:
@@ -844,35 +856,17 @@
                - NordvestBraceMatcher: pairs (), [], {}, [[]] (double-bracket for matrix)
                - NordvestCommenter: line comment `//`, no block comment
 
-  [TODO]  6.1  VS Code extension  (new repo: nordvest-lang/nv-vscode, TypeScript)
-               - Register .nv file type and "nordvest" language ID
-               - TextMate grammar: syntaxes/nordvest.tmLanguage.json
-                 (keywords, annotations, built-in types, Unicode math operators,
-                  bracket pairs, indentation rules)
-               - Shared grammar repo: nordvest-lang/nv-textmate-grammar
-                 (consumed by VS Code and Linguist/GitHub)
-               - LSP client via vscode-languageclient: launch nv-lsp subprocess;
-                 locate via PATH, bundled binary, or user config;
-                 "Nordvest: Restart Server" command + status bar
-               - Unicode input helper: \forall→∀, \sum→∑, \->→→, etc.
-               - Format on save (delegates to nv-lsp)
-               - Run current file: Cmd+F5 / Ctrl+F5 → nv run ${file} in terminal
-               - Snippets: fn, class, sealed, match, if let, guard let, async fn
-               - Platform vsix bundles with pre-built nv-lsp:
-                 linux-x64, linux-arm64, darwin-arm64, darwin-x64
+               6.2-H  Enter handler (indentation-aware)
+               - NordvestEnterHandler (EnterHandlerDelegate) preserves current line's
+                 leading whitespace on Enter; adds 4-space indent after lines ending in `:`
+                 (fn body, if/else, for, while, match, class, etc.)
+               - Inline `//` comments stripped before checking line terminator
+               - Registered with order="first" so it runs before IntelliJ's defaults
 
-  [TODO]  6.2  IntelliJ plugin — Tier 1  (new repo: nordvest-lang/nv-intellij, Kotlin)
-               - NordvestFileType (.nv) + NordvestLanguage registration
-               - Hand-rolled IntelliJ Lexer for syntax highlighting
-                 (token types mirror VS Code TextMate scopes;
-                  brace/bracket matching: (), [], [[]], {})
-               - LSP4IJ integration: wire nv-lsp for diagnostics, completion,
-                 go-to-definition, hover, formatting, rename
-               - Run configurations: NordvestRunConfigurationType (nv run <file>)
-                 and NordvestTestRunConfigurationType (nv test [filter])
-               - Run gutter icons next to fn main() and fn test*()
-               - SDK settings: detect nv binary via PATH or project-level config
-               - File watcher: invoke nv fmt on save (opt-in, off by default)
+  [DEFERRED] 6.1  VS Code extension  (new repo: nordvest-lang/nv-vscode, TypeScript)
+               - Deferred until after Phase 7 (multi-file compilation)
+               - Plan: TextMate grammar, LSP client via vscode-languageclient,
+                 Unicode input helper, run current file, snippets, platform vsix bundles
 
   [TODO]  6.3  IntelliJ plugin — Tier 2 PSI  (stretch goal)
                - Full PSI tree replacing LSP4IJ

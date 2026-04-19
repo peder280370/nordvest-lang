@@ -50,6 +50,11 @@
             language="Nordvest"
             implementationClass="nv.intellij.editor.NordvestCommenter"/>
 
+        <!-- ── Indentation-aware Enter handler ───────────────────────────── -->
+        <enterHandlerDelegate
+            implementation="nv.intellij.editor.NordvestEnterHandler"
+            order="first"/>
+
         <!-- ── Mathematical symbol input ──────────────────────────────────── -->
         <!--
             Priority higher than default so the handler fires before IntelliJ's

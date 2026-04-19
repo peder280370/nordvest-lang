@@ -3442,12 +3442,166 @@ $storeStmt
         is LambdaExpr            -> "null"
         is WildcardExpr          -> "0"
         is IndexExpr             -> emitIndexExpr(expr)
-        is QuantifierExpr        -> "0"
+        is QuantifierExpr        -> emitQuantifierExpr(expr)
         is ListComprehensionExpr -> "null"
         is AwaitExpr             -> emitAwaitExpr(expr)
         is SpawnExpr             -> emitSpawnExprValue(expr)
         is BuilderCallExpr       -> emitBuilderCallExpr(expr)
         else                     -> "0"
+    }
+
+    private fun emitQuantifierExpr(expr: QuantifierExpr): String {
+        val iterableExpr = expr.iterable ?: return when (expr.op) {
+            QuantifierOp.FORALL, QuantifierOp.EXISTS -> "0"
+            QuantifierOp.SUM, QuantifierOp.PRODUCT   -> "0"
+        }
+        val bodyExpr = when (val b = expr.body) {
+            is InlineQuantifierBody -> b.expr
+            else -> return "0"  // block/bare bodies not yet lowered
+        }
+        val bindName = when (val bind = expr.binding) {
+            is IdentBinding -> bind.name
+            is TupleBinding -> bind.names.firstOrNull() ?: "_"
+            null -> "_"
+        }
+
+        // Determine element type from the iterable
+        val iterableType = typeOf(iterableExpr)
+        val elemType = when (iterableType) {
+            is Type.TArray -> iterableType.element
+            Type.TStr      -> Type.TChar
+            else           -> Type.TUnknown
+        }
+        val elemLt   = llvmType(elemType)
+        val elemSize = llvmTypeSize(elemLt).coerceAtLeast(1).toLong()
+
+        // Emit the iterable and load array count
+        val arrReg   = emitExpr(iterableExpr)
+        val hdrPtr   = fresh("q.hdr")
+        emit("  $hdrPtr = bitcast i8* $arrReg to i64*")
+        val countReg = fresh("q.count")
+        emit("  $countReg = load i64, i64* $hdrPtr, align 8")
+
+        // Labels
+        val condLabel = freshLabel("q.cond")
+        val bodyLabel = freshLabel("q.body")
+        val endLabel  = freshLabel("q.end")
+
+        // Accumulator / result alloca
+        val isBoolean = expr.op == QuantifierOp.FORALL || expr.op == QuantifierOp.EXISTS
+        val accLt     = if (isBoolean) "i1" else elemLt
+        val accReg    = emitAlloca("q.acc.${labelIdx}", accLt)
+        val initVal   = when (expr.op) {
+            QuantifierOp.FORALL  -> "1"   // true until proven false
+            QuantifierOp.EXISTS  -> "0"   // false until proven true
+            QuantifierOp.SUM     -> if (accLt == "double") "0.0" else "0"
+            QuantifierOp.PRODUCT -> if (accLt == "double") "1.0" else "1"
+        }
+        emitStore(accLt, initVal, accReg)
+
+        // Index alloca
+        val idxReg = emitAlloca("q.idx.${labelIdx}", "i64")
+        emitStore("i64", "0", idxReg)
+        emit("  br label %$condLabel")
+
+        emitRaw("$condLabel:")
+        isTerminated = false
+        val curIdx = fresh("q.i")
+        emit("  $curIdx = load i64, i64* $idxReg, align 8")
+        val loopCond = fresh("q.cond")
+        emit("  $loopCond = icmp slt i64 $curIdx, $countReg")
+
+        // For FORALL/EXISTS we can short-circuit: check accumulator too
+        if (expr.op == QuantifierOp.FORALL || expr.op == QuantifierOp.EXISTS) {
+            val continueLabel = freshLabel("q.cont")
+            emit("  br i1 $loopCond, label %$continueLabel, label %$endLabel")
+            emitRaw("$continueLabel:")
+            isTerminated = false
+            // Also check accumulator to allow short-circuit
+            val accVal    = emitLoad(accLt, accReg, "q.acc.cur")
+            val keepGoing = fresh("q.keep")
+            if (expr.op == QuantifierOp.FORALL) {
+                // Keep going while acc is still true
+                emit("  $keepGoing = icmp eq i1 $accVal, 1")
+            } else {
+                // Keep going while acc is still false
+                emit("  $keepGoing = icmp eq i1 $accVal, 0")
+            }
+            emit("  br i1 $keepGoing, label %$bodyLabel, label %$endLabel")
+        } else {
+            emit("  br i1 $loopCond, label %$bodyLabel, label %$endLabel")
+        }
+
+        emitRaw("$bodyLabel:")
+        isTerminated = false
+
+        // Load element
+        val dataStart = fresh("q.data")
+        emit("  $dataStart = getelementptr i8, i8* $arrReg, i64 8")
+        val elemValReg = if (elemLt == "i8") {
+            val ptrReg = fresh("q.eptr")
+            emit("  $ptrReg = getelementptr i8, i8* $dataStart, i64 $curIdx")
+            val r = fresh("q.eval")
+            emit("  $r = load i8, i8* $ptrReg, align 1")
+            r
+        } else {
+            val castReg = fresh("q.ecast")
+            emit("  $castReg = bitcast i8* $dataStart to ${llvmPtrType(elemLt)}")
+            val ptrReg = fresh("q.eptr")
+            emit("  $ptrReg = getelementptr $elemLt, ${llvmPtrType(elemLt)} $castReg, i64 $curIdx")
+            val r = fresh("q.eval")
+            emit("  $r = load $elemLt, ${llvmPtrType(elemLt)} $ptrReg, align $elemSize")
+            r
+        }
+
+        // Bind loop variable so body expression can use it
+        if (bindName != "_") {
+            val bindAlloca = emitAlloca(bindName, elemLt)
+            varAllocas[bindName] = Pair(bindAlloca, elemLt)
+            if (elemType != Type.TUnknown) varTypes[bindName] = elemType
+            emitStore(elemLt, elemValReg, bindAlloca)
+        }
+
+        // Evaluate body and update accumulator
+        val bodyVal = emitExpr(bodyExpr)
+        val accCur  = emitLoad(accLt, accReg, "q.acc.prev")
+        val accNew  = fresh("q.acc.new")
+        when (expr.op) {
+            QuantifierOp.FORALL -> {
+                val condI1 = coerceToI1(bodyVal, typeOf(bodyExpr))
+                emit("  $accNew = and i1 $accCur, $condI1")
+                emitStore(accLt, accNew, accReg)
+            }
+            QuantifierOp.EXISTS -> {
+                val condI1 = coerceToI1(bodyVal, typeOf(bodyExpr))
+                emit("  $accNew = or i1 $accCur, $condI1")
+                emitStore(accLt, accNew, accReg)
+            }
+            QuantifierOp.SUM -> {
+                val bodyCoerced = coerceToType(bodyVal, typeOf(bodyExpr), accLt)
+                val addOp = if (accLt == "double" || accLt == "float") "fadd" else "add"
+                emit("  $accNew = $addOp $accLt $accCur, $bodyCoerced")
+                emitStore(accLt, accNew, accReg)
+            }
+            QuantifierOp.PRODUCT -> {
+                val bodyCoerced = coerceToType(bodyVal, typeOf(bodyExpr), accLt)
+                val mulOp = if (accLt == "double" || accLt == "float") "fmul" else "mul"
+                emit("  $accNew = $mulOp $accLt $accCur, $bodyCoerced")
+                emitStore(accLt, accNew, accReg)
+            }
+        }
+
+        // Increment index and loop back
+        if (!isTerminated) {
+            val nextIdx = fresh("q.next")
+            emit("  $nextIdx = add i64 $curIdx, 1")
+            emitStore("i64", nextIdx, idxReg)
+            emit("  br label %$condLabel")
+        }
+
+        emitRaw("$endLabel:")
+        isTerminated = false
+        return emitLoad(accLt, accReg, "q.result")
     }
 
     private fun emitBuilderCallExpr(expr: BuilderCallExpr): String {
