@@ -259,7 +259,7 @@ private val MATH_COMPLETIONS = listOf(
 internal class LspExitException(val code: Int) : Exception()
 
 class LspServer(
-    private val input: BufferedReader = System.`in`.bufferedReader(),
+    private val rawInput: java.io.InputStream = System.`in`,
     private val output: OutputStream = System.out,
     private val err: PrintStream = System.err,
 ) {
@@ -275,14 +275,20 @@ class LspServer(
     fun run(): Int {
         try {
             while (true) {
-                val message = readMessage() ?: break
+                val message = try {
+                    readMessage() ?: break
+                } catch (e: java.io.IOException) {
+                    // Pipe closed or broken — client disconnected; clean exit.
+                    err.println("[nv lsp] I/O error reading from client: ${e.message}")
+                    break
+                }
                 try {
                     val parsed = parseJson(message).asMap() ?: continue
                     val response = handleMessage(parsed)
                     if (response != null) writeMessage(response)
                 } catch (e: LspExitException) {
                     return e.code
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     err.println("[nv lsp] error handling message: ${e.message}")
                 }
             }
@@ -294,25 +300,43 @@ class LspServer(
 
     // ── I/O ──────────────────────────────────────────────────────────────────
 
+    // LSP framing: headers are ASCII (Content-Length is in UTF-8 bytes), body
+    // must be read as raw bytes then decoded.  Using a BufferedReader for the
+    // body is wrong because it counts *characters* not bytes, causing stream
+    // corruption whenever the document contains multi-byte Unicode (e.g. ∀).
     private fun readMessage(): String? {
+        // Read header lines byte-by-byte so no characters are buffered past
+        // the header/body boundary.
         var contentLength = -1
-        // Read headers
+        val lineBuf = StringBuilder()
+        var prevCr = false
         while (true) {
-            val line = input.readLine() ?: return null
-            if (line.isBlank()) break
-            if (line.startsWith("Content-Length:", ignoreCase = true)) {
-                contentLength = line.substringAfter(":").trim().toIntOrNull() ?: -1
+            val b = rawInput.read()
+            if (b < 0) return null        // EOF
+            val ch = b.toChar()
+            if (ch == '\n') {
+                val line = if (prevCr) lineBuf.dropLast(1).toString() else lineBuf.toString()
+                lineBuf.clear()
+                prevCr = false
+                if (line.isBlank()) break   // blank line = end of headers
+                if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                    contentLength = line.substringAfter(":").trim().toIntOrNull() ?: -1
+                }
+            } else {
+                prevCr = (ch == '\r')
+                lineBuf.append(ch)
             }
         }
         if (contentLength <= 0) return null
-        val buf = CharArray(contentLength)
+        // Read exactly contentLength *bytes*, then decode as UTF-8.
+        val buf = ByteArray(contentLength)
         var read = 0
         while (read < contentLength) {
-            val n = input.read(buf, read, contentLength - read)
+            val n = rawInput.read(buf, read, contentLength - read)
             if (n < 0) return null
             read += n
         }
-        return String(buf)
+        return String(buf, Charsets.UTF_8)
     }
 
     private fun writeMessage(json: String) {
@@ -335,12 +359,15 @@ class LspServer(
         // Notifications have no id and need no response
         val isNotification = id == null
 
+        // Handle exit before entering the generic try/catch so LspExitException
+        // propagates to the caller rather than being swallowed as a generic error.
+        if (method == "exit") throw LspExitException(if (shutdownRequested) 0 else 1)
+
         val result: Any? = try {
             when (method) {
                 "initialize"                    -> handleInitialize(params)
                 "initialized"                   -> { initialized = true; null }
                 "shutdown"                      -> { shutdownRequested = true; null }
-                "exit"                          -> throw LspExitException(if (shutdownRequested) 0 else 1)
                 "textDocument/didOpen"          -> { handleDidOpen(params); null }
                 "textDocument/didChange"        -> { handleDidChange(params); null }
                 "textDocument/didClose"         -> null
@@ -352,7 +379,7 @@ class LspServer(
                 "$/cancelRequest"               -> null
                 else                            -> if (isNotification) null else errorResponse(-32601, "Method not found: $method")
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             err.println("[nv lsp] exception in $method: ${e.message}")
             if (isNotification) null else errorResponse(-32603, "Internal error: ${e.message}")
         }
@@ -397,8 +424,8 @@ class LspServer(
     private fun handleInitialize(params: Map<String, Any?>): String = buildJson {
         obj("capabilities") {
             obj("textDocumentSync") {
-                num("openClose", 1)
-                num("change", 1)   // 1 = full text sync
+                bool("openClose", true)
+                num("change", 1)   // 1 = Full text sync (TextDocumentSyncKind)
             }
             bool("hoverProvider", true)
             bool("definitionProvider", true)
@@ -595,13 +622,13 @@ class LspServer(
         val source = store.get(uri) ?: return "[]"
         val path   = uriToPath(uri)
 
-        val tokens = try { Lexer(source).tokenize() } catch (_: LexerError) { return "[]" }
-        val file = when (val r = Parser(tokens, path).parse()) {
+        val tokens = try { Lexer(source).tokenize() } catch (_: Throwable) { return "[]" }
+        val file = when (val r = try { Parser(tokens, path).parse() } catch (_: Throwable) { return "[]" }) {
             is ParseResult.Success   -> r.file
             is ParseResult.Recovered -> r.file
             is ParseResult.Failure   -> return "[]"
         }
-        val formatted = nv.compiler.format.Formatter().format(file)
+        val formatted = try { nv.compiler.format.Formatter().format(file) } catch (_: Throwable) { return "[]" }
         if (formatted == source) return "[]"
 
         // Return a single full-text replacement edit
@@ -636,7 +663,7 @@ class LspServer(
 
     private fun typeCheckSource(source: String, path: String): nv.compiler.typecheck.TypeCheckedModule? {
         return try {
-            val tokens = try { Lexer(source).tokenize() } catch (_: LexerError) { return null }
+            val tokens = try { Lexer(source).tokenize() } catch (_: Throwable) { return null }
             val file = when (val r = Parser(tokens, path).parse()) {
                 is ParseResult.Success   -> r.file
                 is ParseResult.Recovered -> r.file
@@ -652,12 +679,12 @@ class LspServer(
                 is TypeCheckResult.Recovered -> r.module
                 is TypeCheckResult.Failure   -> null
             }
-        } catch (_: Exception) { null }
+        } catch (_: Throwable) { null }
     }
 
     private fun resolveSource(source: String, path: String): nv.compiler.resolve.ResolvedModule? {
         return try {
-            val tokens = try { Lexer(source).tokenize() } catch (_: LexerError) { return null }
+            val tokens = try { Lexer(source).tokenize() } catch (_: Throwable) { return null }
             val file = when (val r = Parser(tokens, path).parse()) {
                 is ParseResult.Success   -> r.file
                 is ParseResult.Recovered -> r.file
@@ -668,6 +695,6 @@ class LspServer(
                 is ResolveResult.Recovered -> r.module
                 is ResolveResult.Failure   -> null
             }
-        } catch (_: Exception) { null }
+        } catch (_: Throwable) { null }
     }
 }

@@ -1,0 +1,119 @@
+<idea-plugin>
+    <id>nv.intellij.nordvest</id>
+    <name>Nordvest Language</name>
+    <vendor>Nordvest</vendor>
+    <description><![CDATA[
+        IntelliJ support for the <b>Nordvest</b> programming language.
+        <ul>
+            <li>Syntax highlighting — keywords, math operators, strings, annotations, numbers</li>
+            <li>Mathematical symbol input — type <code>\forall</code> + Space → <code>∀</code></li>
+            <li>Math completion — Ctrl+Space after <code>\</code> shows symbol suggestions</li>
+            <li>Symbol picker — Alt+\ opens a searchable palette of all math operators</li>
+            <li>LSP integration via <code>nv lsp</code> — diagnostics, completion, hover,
+                go-to-definition, references, formatting, rename</li>
+            <li>Run / test configurations with gutter ▶ icons</li>
+            <li>Bracket matching and <code>//</code> line commenter</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.redhat.devtools.lsp4ij</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+
+        <!-- ── File type ──────────────────────────────────────────────────── -->
+        <fileType
+            name="Nordvest"
+            implementationClass="nv.intellij.lang.NordvestFileType"
+            fieldName="INSTANCE"
+            language="Nordvest"
+            extensions="nv"/>
+
+        <!-- ── Syntax highlighting ────────────────────────────────────────── -->
+        <lang.syntaxHighlighterFactory
+            language="Nordvest"
+            implementationClass="nv.intellij.lexer.NordvestSyntaxHighlighterFactory"/>
+
+        <colorSettingsPage
+            implementation="nv.intellij.lexer.NordvestColorSettingsPage"/>
+
+        <!-- ── Structure ──────────────────────────────────────────────────── -->
+        <lang.parserDefinition
+            language="Nordvest"
+            implementationClass="nv.intellij.lang.NordvestParserDefinition"/>
+
+        <lang.braceMatcher
+            language="Nordvest"
+            implementationClass="nv.intellij.editor.NordvestBraceMatcher"/>
+
+        <lang.commenter
+            language="Nordvest"
+            implementationClass="nv.intellij.editor.NordvestCommenter"/>
+
+        <!-- ── Mathematical symbol input ──────────────────────────────────── -->
+        <!--
+            Priority higher than default so the handler fires before IntelliJ's
+            built-in auto-insert handlers. The handler is a no-op in non-.nv files.
+        -->
+        <typedHandler
+            implementation="nv.intellij.editor.MathSymbolTypedHandler"
+            order="first"/>
+
+        <completion.contributor
+            language="Nordvest"
+            implementationClass="nv.intellij.editor.MathSymbolCompletionContributor"
+            order="first"/>
+
+        <!-- ── Run configurations ─────────────────────────────────────────── -->
+        <configurationType
+            implementation="nv.intellij.run.NordvestRunConfigurationType"/>
+
+        <runLineMarkerContributor
+            language="Nordvest"
+            implementationClass="nv.intellij.run.NordvestRunLineMarkerProvider"/>
+
+        <!-- ── Settings ───────────────────────────────────────────────────── -->
+        <applicationConfigurable
+            parentId="tools"
+            id="nv.intellij.settings"
+            displayName="Nordvest"
+            instance="nv.intellij.settings.NordvestSettingsConfigurable"/>
+
+        <applicationService
+            serviceImplementation="nv.intellij.settings.NordvestSettings"/>
+
+        <!-- ── Notifications ──────────────────────────────────────────────── -->
+        <notificationGroup
+            id="Nordvest"
+            displayType="BALLOON"
+            isLogByDefault="true"/>
+
+    </extensions>
+
+    <!-- ── LSP4IJ server registration ────────────────────────────────────── -->
+    <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+        <server
+            id="nordvest-lsp"
+            name="Nordvest Language Server"
+            factoryClass="nv.intellij.lsp.NordvestLspServerDefinition"/>
+        <fileTypeMapping
+            fileType="Nordvest"
+            serverId="nordvest-lsp"
+            languageId="nordvest"/>
+    </extensions>
+
+    <!-- ── Actions ────────────────────────────────────────────────────────── -->
+    <actions>
+        <action
+            id="nv.intellij.MathSymbolInsert"
+            class="nv.intellij.editor.MathSymbolInsertAction"
+            text="Insert Math Symbol…"
+            description="Open the Nordvest mathematical symbol picker">
+            <keyboard-shortcut
+                keymap="$default"
+                first-keystroke="alt BACK_SLASH"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+
+</idea-plugin>

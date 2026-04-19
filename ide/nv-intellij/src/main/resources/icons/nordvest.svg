@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Dark navy background -->
+  <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" fill="#1E3A5F"/>
+
+  <!--
+    Grundtvigs Kirke — stylised west-facade silhouette.
+    Three stepped gable levels widen by 1.5 px/side per step,
+    giving the church's characteristic organ-pipe cascade.
+
+    Peak  (y 1.5–3.5):  2 px wide   (x 7–9)
+    Step1 (y 3.5–5.5):  5 px wide   (x 5.5–10.5)
+    Step2 (y 5.5–8.5):  8 px wide   (x 4–12)
+    Base  (y 8.5–14.5): 11 px wide  (x 2.5–13.5)
+  -->
+  <polygon
+    points="7,1.5 9,1.5
+            9,3.5 10.5,3.5
+            10.5,5.5 12,5.5
+            12,8.5 13.5,8.5
+            13.5,14.5 2.5,14.5
+            2.5,8.5 4,8.5
+            4,5.5 5.5,5.5
+            5.5,3.5 7,3.5
+            7,1.5"
+    fill="#E8BF50"/>
+
+  <!-- Circular rose window in the upper gable (step 2) -->
+  <circle cx="8" cy="6.8" r="1.1" fill="#1E3A5F"/>
+
+  <!--
+    Three entrance arches (painted with background colour over the
+    golden silhouette to simulate arched openings).
+    Arches are equally spaced, each 1.4 px wide, 2.8 px apart centre-to-centre.
+  -->
+  <!-- Left arch -->
+  <rect  x="4.5"  y="12" width="1.4" height="3" fill="#1E3A5F"/>
+  <ellipse cx="5.2" cy="12" rx="0.7" ry="0.6" fill="#1E3A5F"/>
+  <!-- Centre arch -->
+  <rect  x="7.3"  y="12" width="1.4" height="3" fill="#1E3A5F"/>
+  <ellipse cx="8"   cy="12" rx="0.7" ry="0.6" fill="#1E3A5F"/>
+  <!-- Right arch -->
+  <rect  x="10.1" y="12" width="1.4" height="3" fill="#1E3A5F"/>
+  <ellipse cx="10.8" cy="12" rx="0.7" ry="0.6" fill="#1E3A5F"/>
+</svg>

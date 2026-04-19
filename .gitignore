@@ -4,6 +4,7 @@ build/
 
 # IntelliJ IDEA
 .idea/
+.intellijPlatform/
 *.iml
 *.iws
 *.ipr

@@ -2,7 +2,7 @@
 
 A statically typed, compiled language with clean indentation-based syntax, first-class mathematical notation, and a unified toolchain.
 
-> **Status:** Phases 0–5 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and a real standard library. 807 tests passing. Next: Phase 6 — IDE Plugins.
+> **Status:** Phases 0–5 complete — bootstrap compiler (Kotlin) produces working native binaries via LLVM IR, with LSP server, formatter, package manager, and a real standard library. 807 tests passing. **Phase 6 in progress** — IntelliJ plugin (Tier 1, LSP4IJ).
 > See [`IMPL.txt`](IMPL.txt) for current progress and [`PLAN.txt`](PLAN.txt) for the full roadmap.
 
 ---
@@ -135,13 +135,14 @@ nv clean                                        remove .nv-cache/
 ## Repository layout
 
 ```
-compiler/   Kotlin bootstrap compiler (Gradle subproject)
-tools/      nv CLI entry point        (Gradle subproject)
-tests/      Test suite — golden files + parse tests
-stdlib/     Nordvest standard library source (.nv)
-spec/       Formal PEG grammar (nv.peg) and language spec
-docs/       Reference documentation source
-examples/   Curated example programs
+compiler/       Kotlin bootstrap compiler (Gradle subproject)
+tools/          nv CLI entry point        (Gradle subproject)
+tests/          Test suite — golden files + parse tests
+stdlib/         Nordvest standard library source (.nv)
+spec/           Formal PEG grammar (nv.peg) and language spec
+docs/           Reference documentation source
+examples/       Curated example programs
+ide/nv-intellij IntelliJ IDEA plugin (Phase 6)
 ```
 
 ---
@@ -260,6 +261,29 @@ cd nordvest-lang
 
 ---
 
+## IDE support
+
+### IntelliJ IDEA
+
+The IntelliJ plugin lives in [`ide/nv-intellij/`](ide/nv-intellij/) and covers:
+
+- **Syntax highlighting** — keywords, annotations, built-in types, Unicode math operators, strings, numbers, comments
+- **Mathematical symbol input** — type `\forall`+Space → `∀` in-place; **Ctrl+Space** for a completion popup; **Alt+\** for a searchable symbol picker with 60+ glyphs
+- **LSP integration** via `nv lsp` — diagnostics, completion, hover, go-to-definition, find usages, formatting, rename
+- **Run/test configurations** — `nv run` and `nv test` with ▶ gutter icons
+- **Bracket matching** and `//` commenter
+
+```bash
+# Launch a sandboxed IntelliJ with the plugin loaded:
+cd ide/nv-intellij && ./gradlew runIde
+```
+
+See [`ide/nv-intellij/README.md`](ide/nv-intellij/README.md) for full setup and usage instructions.
+
+> VS Code support is planned (Phase 6.1) after the IntelliJ plugin is stable.
+
+---
+
 ## Implementation roadmap
 
 | Phase | Goal | Status |
@@ -270,7 +294,7 @@ cd nordvest-lang
 | **3 — Polish & ecosystem** | LSP, formatter, package registry, error messages | Done |
 | **4 — Language completion** | stdlib bodies, codegen hardening, flagship examples, fuzz testing | Done |
 | **5 — Stdlib & production hardening** | Real stdlib implementations, RC, string/collections/I/O/hash/fmt/iter/log; `@newtype`, `@derive`, `@builder`, `@lazy`, `by`, `@config`/`@env` | Done |
-| **6 — IDE plugins** | VS Code extension + IntelliJ plugin backed by nv-lsp | Planned |
+| **6 — IDE plugins** | IntelliJ plugin (Tier 1, LSP4IJ) — **active**; VS Code deferred | In progress |
 
 The bootstrap compiler is written in **Kotlin** and targets **LLVM IR**. It is the permanent reference implementation — the language does not self-host.
 
