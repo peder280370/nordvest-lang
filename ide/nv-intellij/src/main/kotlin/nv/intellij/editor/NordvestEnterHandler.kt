@@ -108,35 +108,38 @@ class NordvestEnterHandler : EnterHandlerDelegate {
         return Result.Continue
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers (delegated to companion for testability) ─────────────────────
 
-    /** Returns the leading whitespace (spaces/tabs) of [text]. */
-    private fun leadingWhitespace(text: String): String =
-        text.takeWhile { it == ' ' || it == '\t' }
-
-    /**
-     * Strips a trailing `// ...` comment from [line], being careful not to
-     * strip `//` that appears inside a string literal.
-     */
-    private fun stripInlineComment(line: String): String {
-        var inString = false
-        var i = 0
-        while (i < line.length) {
-            val c = line[i]
-            when {
-                c == '"' && !inString          -> inString = true
-                c == '"' && inString           -> inString = false
-                c == '\\' && inString          -> i++   // skip escaped char
-                c == '/' && !inString && i + 1 < line.length && line[i + 1] == '/' ->
-                    return line.substring(0, i)
-            }
-            i++
-        }
-        return line
-    }
+    private fun leadingWhitespace(text: String): String = Companion.leadingWhitespace(text)
+    private fun stripInlineComment(line: String): String = Companion.stripInlineComment(line)
 
     companion object {
         /** Carries the desired new-line indent across [preprocessEnter] → [postProcessEnter]. */
         private val pendingIndent = ThreadLocal<String?>()
+
+        /** Returns the leading whitespace (spaces/tabs) of [text]. */
+        internal fun leadingWhitespace(text: String): String =
+            text.takeWhile { it == ' ' || it == '\t' }
+
+        /**
+         * Strips a trailing `// ...` comment from [line], being careful not to
+         * strip `//` that appears inside a string literal.
+         */
+        internal fun stripInlineComment(line: String): String {
+            var inString = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                when {
+                    c == '"' && !inString          -> inString = true
+                    c == '"' && inString           -> inString = false
+                    c == '\\' && inString          -> i++   // skip escaped char
+                    c == '/' && !inString && i + 1 < line.length && line[i + 1] == '/' ->
+                        return line.substring(0, i)
+                }
+                i++
+            }
+            return line
+        }
     }
 }

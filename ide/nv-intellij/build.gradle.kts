@@ -24,6 +24,7 @@ dependencies {
         // go-to-definition, references, formatting, and rename via nv-lsp.
         plugin("com.redhat.devtools.lsp4ij:0.19.3")
     }
+    testImplementation(kotlin("test"))
 }
 
 intellijPlatform {

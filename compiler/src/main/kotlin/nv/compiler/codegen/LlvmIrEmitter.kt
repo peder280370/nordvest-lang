@@ -2648,6 +2648,10 @@ $storeStmt
         val argList = argRegs.zip(argTypes).joinToString(", ") { (r, t) ->
             val lt = llvmType(t); "$lt noundef $r"
         }
+        if (retLt == "void") {
+            emit("  call void $mangledName($argList)")
+            return "0"
+        }
         val res = fresh("call")
         emit("  $res = call $retLt $mangledName($argList)")
         return res

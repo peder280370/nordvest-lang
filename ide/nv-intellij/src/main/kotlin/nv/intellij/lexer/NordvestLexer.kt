@@ -103,6 +103,10 @@ class NordvestLexer : LexerBase() {
             return NordvestTokenTypes.ANNOTATION
         }
 
+        // π is a letter in Unicode but reserved as a MATH_OP constant in Nordvest;
+        // handle it before the general letter check to avoid treating it as an identifier.
+        if (c == 'π') { pos++; return NordvestTokenTypes.MATH_OP }
+
         // Identifier or keyword
         if (c.isLetter() || c == '_' || c.isUnicodeMathLetter()) {
             return scanIdentOrKeyword()
