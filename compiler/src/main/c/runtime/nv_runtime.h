@@ -304,6 +304,53 @@ nv_future_t *nv_future_spawn(void *(*fn)(void *), void *arg);
  */
 void *nv_future_await(nv_future_t *f);
 
+/* ── Phase std.json: JSON parse, query, value extraction, construction ──────── */
+
+/** Validate s as JSON; returns Ok(s) or Err("invalid JSON"). Result is an opaque i8*. */
+void *nv_json_parse(const char *s);
+
+/** Return 1 if val starts with "null" (after whitespace). */
+int nv_json_is_null(const char *val);
+
+/** Return raw JSON value for key in obj, or NULL. Caller must free(). */
+char *nv_json_get_field(const char *obj, const char *key);
+
+/** Return raw JSON value at index idx in arr, or NULL. Caller must free(). */
+char *nv_json_get_index(const char *arr, int64_t idx);
+
+/** Return number of elements in JSON array arr. */
+int64_t nv_json_array_len(const char *arr);
+
+/** Extract unquoted content from JSON string value. Caller must free(). */
+char *nv_json_str_value(const char *val);
+
+/** Parse JSON number as integer. */
+int64_t nv_json_int_value(const char *val);
+
+/** Parse JSON number as float. */
+double nv_json_float_value(const char *val);
+
+/** Return 1 if val starts with 't' (JSON true). */
+int nv_json_bool_value(const char *val);
+
+/** Identity: returns val unchanged (JSON text is already a string). */
+const char *nv_json_stringify(const char *val);
+
+/** Wrap s in JSON string quotes, escaping " and \. Caller must free(). */
+char *nv_json_make_string(const char *s);
+
+/** Format n as a JSON number string. Caller must free(). */
+char *nv_json_make_int(int64_t n);
+
+/** Format f as a JSON number string. Caller must free(). */
+char *nv_json_make_float(double f);
+
+/** Return static string "true" or "false". Do not free. */
+const char *nv_json_make_bool(int b);
+
+/** Return static string "null". Do not free. */
+const char *nv_json_make_null(void);
+
 #ifdef __cplusplus
 }
 #endif

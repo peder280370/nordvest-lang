@@ -1,25 +1,72 @@
 module std.json
 
-/** Parse a JSON string into a dynamic value. */
-pub fn parse(s: str) → Result<str>
+/**
+ * Parse a JSON string, returning Ok(json) on success or Err(message) on failure.
+ * Light validation: checks that the value begins with a recognized JSON start character.
+ * The returned Ok value is the original input string (no copy is made).
+ */
+@extern(fn: "nv_json_parse") pub fn parse(s: str) → Result<str>
 
-/** Serialize a value to a JSON string. */
-pub fn stringify(value: str) → str
+/**
+ * Check whether a JSON value string represents JSON null.
+ * Works for raw JSON text like "null" or " null ".
+ */
+@extern(fn: "nv_json_is_null") pub fn isNull(value: str) → bool
 
-/** Serialize a value to a pretty-printed JSON string. */
-pub fn prettyStringify(value: str, indent: int) → str
+/**
+ * Return the raw JSON text for field key in JSON object obj, or nil if not found.
+ * Uses strstr with colon-verification retry; does not fully parse nested structure.
+ */
+@extern(fn: "nv_json_get_field") pub fn getField(obj: str, key: str) → str?
 
-/** Parse a JSON string into a typed struct (requires @derive(All) on target type). */
-pub fn decode<T>(s: str) → Result<T>
+/**
+ * Return the raw JSON text for the element at index idx in JSON array arr, or nil
+ * if idx is out of bounds.
+ */
+@extern(fn: "nv_json_get_index") pub fn getIndex(arr: str, idx: int) → str?
 
-/** Serialize a typed value to a JSON string. */
-pub fn encode<T>(value: T) → str
+/**
+ * Return the number of elements in a JSON array.
+ * Returns 0 for empty arrays or non-array input.
+ */
+@extern(fn: "nv_json_array_len") pub fn arrayLen(arr: str) → int
 
-/** Get a field from a JSON object by key. */
-pub fn getField(obj: str, key: str) → str?
+/**
+ * Extract the content of a JSON string value (strips surrounding double-quotes).
+ * Does not unescape \\n, \\t, \\u etc.; returns raw bytes between the quotes.
+ * If the value is not a JSON string, returns the value unchanged.
+ */
+@extern(fn: "nv_json_str_value") pub fn strValue(val: str) → str
 
-/** Get an array element by index from a JSON array. */
-pub fn getIndex(arr: str, index: int) → str?
+/** Parse a JSON number value as an integer. Returns 0 on error. */
+@extern(fn: "nv_json_int_value") pub fn intValue(val: str) → int
 
-/** Check if a JSON value is null. */
-pub fn isNull(value: str) → bool
+/** Parse a JSON number value as a float. Returns 0.0 on error. */
+@extern(fn: "nv_json_float_value") pub fn floatValue(val: str) → float
+
+/** Return true if val is a JSON true value (starts with 't'). */
+@extern(fn: "nv_json_bool_value") pub fn boolValue(val: str) → bool
+
+/**
+ * Serialize a value back to a JSON string (identity for JSON text strings).
+ * Returns the input unchanged; provided for symmetry with parse.
+ */
+@extern(fn: "nv_json_stringify") pub fn stringify(value: str) → str
+
+/**
+ * Wrap s in JSON string delimiters, escaping embedded '"' and '\' characters.
+ * Returns a new heap-allocated JSON string literal.
+ */
+@extern(fn: "nv_json_make_string") pub fn makeString(s: str) → str
+
+/** Return a heap-allocated JSON number string for integer n. */
+@extern(fn: "nv_json_make_int") pub fn makeInt(n: int) → str
+
+/** Return a heap-allocated JSON number string for float f. */
+@extern(fn: "nv_json_make_float") pub fn makeFloat(f: float) → str
+
+/** Return the JSON literal "true" or "false" for boolean b. */
+@extern(fn: "nv_json_make_bool") pub fn makeBool(b: bool) → str
+
+/** Return the JSON literal "null". */
+@extern(fn: "nv_json_make_null") pub fn makeNull() → str

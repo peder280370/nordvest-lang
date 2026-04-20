@@ -1,0 +1,48 @@
+module examples.json
+
+// std.json example — parse, query, construct JSON values.
+//
+// JSON values are represented as plain strings containing their raw JSON text.
+// Use getField/getIndex to extract sub-values, and strValue/intValue/boolValue
+// to convert leaf values to Nordvest types.
+
+@extern(fn: "nv_json_is_null")     pub fn isNull(v: str) → bool
+@extern(fn: "nv_json_get_field")   pub fn getField(obj: str, key: str) → str?
+@extern(fn: "nv_json_get_index")   pub fn getIndex(arr: str, idx: int) → str?
+@extern(fn: "nv_json_array_len")   pub fn arrayLen(arr: str) → int
+@extern(fn: "nv_json_str_value")   pub fn strValue(v: str) → str
+@extern(fn: "nv_json_int_value")   pub fn intValue(v: str) → int
+@extern(fn: "nv_json_bool_value")  pub fn boolValue(v: str) → bool
+@extern(fn: "nv_json_make_string") pub fn makeString(s: str) → str
+@extern(fn: "nv_json_make_int")    pub fn makeInt(n: int) → str
+@extern(fn: "nv_json_make_bool")   pub fn makeBool(b: bool) → str
+@extern(fn: "nv_json_make_null")   pub fn makeNull() → str
+
+fn main()
+    // ── Object field access ─────────────────────────────────────────────────
+    let user = "\{\"name\":\"Alice\",\"age\":30,\"active\":true}"
+    let name   = getField(user, "name") ?? "unknown"
+    let age    = getField(user, "age")  ?? "0"
+    let active = getField(user, "active") ?? "false"
+    println("name:   " + strValue(name))
+    println("age:    {intValue(age)}")
+    println("active: {boolValue(active)}")
+
+    // ── Array element access ────────────────────────────────────────────────
+    let tags  = "[\"rust\",\"json\",\"llvm\"]"
+    let count = arrayLen(tags)
+    println("tags count: {count}")
+    let first = getIndex(tags, 0) ?? "nil"
+    let last  = getIndex(tags, count - 1) ?? "nil"
+    println("first tag: " + strValue(first))
+    println("last tag:  " + strValue(last))
+
+    // ── Null check ──────────────────────────────────────────────────────────
+    println("null?  {isNull("null")}")
+    println("null?  {isNull("42")}")
+
+    // ── Constructing JSON values ────────────────────────────────────────────
+    println(makeString("hello world"))
+    println(makeInt(42))
+    println(makeBool(true))
+    println(makeNull())

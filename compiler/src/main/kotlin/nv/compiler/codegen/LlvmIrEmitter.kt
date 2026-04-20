@@ -127,7 +127,15 @@ class LlvmIrEmitter(
         "nv_assert_ok", "nv_assert_err",
         "nv_test_begin", "nv_test_end",
         "nv_test_print_header", "nv_test_report", "nv_test_exit",
-        "nv_test_skip"
+        "nv_test_skip",
+        // std.json
+        "nv_json_parse",
+        "nv_json_is_null", "nv_json_get_field", "nv_json_get_index",
+        "nv_json_array_len", "nv_json_str_value",
+        "nv_json_int_value", "nv_json_float_value", "nv_json_bool_value",
+        "nv_json_stringify",
+        "nv_json_make_string", "nv_json_make_int", "nv_json_make_float",
+        "nv_json_make_bool", "nv_json_make_null"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -561,6 +569,7 @@ declare i8** @backtrace_symbols(i8**, i32)
         IterRuntime.emit(rtFns)
         LogRuntime.emit(rtFns)
         TestRuntime.emit(rtFns)
+        JsonRuntime.emit(rtFns)
     }
 
     private fun emitSealedClassFunctions() {
@@ -675,15 +684,43 @@ declare i8** @backtrace_symbols(i8**, i32)
     internal fun stringConst(text: String): String {
         val globalName = stringPool.getOrPut(text) {
             val name = "@str.${strIdx++}"
-            val escaped = llvmEscape(text)
-            val len = llvmByteLen(text) + 1
+            val resolved = resolveEscapes(text)
+            val escaped = llvmEscape(resolved)
+            val len = resolved.toByteArray(Charsets.UTF_8).size + 1
             globals.appendLine("""$name = private unnamed_addr constant [$len x i8] c"$escaped\00", align 1""")
             name
         }
+        // Compute the len using the same resolved form for the GEP type
+        val resolved = resolveEscapes(text)
         val gepReg = fresh("gep")
-        val len = llvmByteLen(text) + 1
+        val len = resolved.toByteArray(Charsets.UTF_8).size + 1
         emit("  $gepReg = getelementptr [$len x i8], [$len x i8]* $globalName, i64 0, i64 0")
         return gepReg
+    }
+
+    /** Resolve Nordvest string escape sequences into their actual characters.
+     *  The lexer preserves escapes verbatim; this function converts them for codegen.
+     *  Supported: \n \t \r \" \\ \0 \{ */
+    private fun resolveEscapes(text: String): String = buildString {
+        var i = 0
+        while (i < text.length) {
+            val ch = text[i]
+            if (ch == '\\' && i + 1 < text.length) {
+                when (text[i + 1]) {
+                    'n'  -> { append('\n'); i += 2 }
+                    't'  -> { append('\t'); i += 2 }
+                    'r'  -> { append('\r'); i += 2 }
+                    '"'  -> { append('"');  i += 2 }
+                    '\\' -> { append('\\'); i += 2 }
+                    '0'  -> { append('\u0000'); i += 2 }
+                    '{'  -> { append('{');  i += 2 }
+                    else -> { append(ch); i++ }
+                }
+            } else {
+                append(ch)
+                i++
+            }
+        }
     }
 
     internal fun fmtGep(globalName: String, len: Int): String {
