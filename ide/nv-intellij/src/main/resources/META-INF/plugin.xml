@@ -13,6 +13,9 @@
                 go-to-definition, references, formatting, rename</li>
             <li>Run / test configurations with gutter ▶ icons</li>
             <li>Bracket matching and <code>//</code> line commenter</li>
+            <li>Structure View — shows top-level functions and classes (⌘7 / Alt+7)</li>
+            <li>Go to Symbol (⌘⌥O) and Go to Class (⌘O) across the project</li>
+            <li>Inspection: suggest Unicode operators for ASCII equivalents (>= → ≥, etc.)</li>
         </ul>
     ]]></description>
 
@@ -37,7 +40,7 @@
         <colorSettingsPage
             implementation="nv.intellij.lexer.NordvestColorSettingsPage"/>
 
-        <!-- ── Structure ──────────────────────────────────────────────────── -->
+        <!-- ── PSI structure ──────────────────────────────────────────────── -->
         <lang.parserDefinition
             language="Nordvest"
             implementationClass="nv.intellij.lang.NordvestParserDefinition"/>
@@ -50,16 +53,42 @@
             language="Nordvest"
             implementationClass="nv.intellij.editor.NordvestCommenter"/>
 
+        <!-- ── Structure View ─────────────────────────────────────────────── -->
+        <lang.psiStructureViewFactory
+            language="Nordvest"
+            implementationClass="nv.intellij.structure.NordvestStructureViewFactory"/>
+
+        <!-- ── Go to Symbol / Class ───────────────────────────────────────── -->
+        <gotoSymbolContributor
+            implementation="nv.intellij.index.NordvestGotoSymbolContributor"/>
+
+        <gotoClassContributor
+            implementation="nv.intellij.index.NordvestGotoClassContributor"/>
+
+        <!-- ── File-based symbol index ────────────────────────────────────── -->
+        <fileBasedIndex
+            implementation="nv.intellij.index.NordvestSymbolIndex"/>
+
+        <!-- ── Inspections ────────────────────────────────────────────────── -->
+        <localInspection
+            language="Nordvest"
+            groupName="Nordvest"
+            displayName="ASCII operator instead of Unicode equivalent"
+            enabledByDefault="true"
+            level="WEAK WARNING"
+            implementationClass="nv.intellij.inspections.AsciiToUnicodeInspection"
+            shortName="NordvestAsciiOperator"/>
+
         <!-- ── Indentation-aware Enter handler ───────────────────────────── -->
+        <!--
+            Priority higher than default so the handler fires before IntelliJ's
+            built-in auto-insert handlers. The handler is a no-op in non-.nv files.
+        -->
         <enterHandlerDelegate
             implementation="nv.intellij.editor.NordvestEnterHandler"
             order="first"/>
 
         <!-- ── Mathematical symbol input ──────────────────────────────────── -->
-        <!--
-            Priority higher than default so the handler fires before IntelliJ's
-            built-in auto-insert handlers. The handler is a no-op in non-.nv files.
-        -->
         <typedHandler
             implementation="nv.intellij.editor.MathSymbolTypedHandler"
             order="first"/>

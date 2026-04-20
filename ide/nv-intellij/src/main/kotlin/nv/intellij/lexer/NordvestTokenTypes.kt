@@ -47,8 +47,9 @@ object NordvestTokenTypes {
     @JvmField val RBRACE      = IElementType("RBRACE",      NordvestLanguage)
 
     // ── Token sets used by ParserDefinition ───────────────────────────────
-    @JvmField val COMMENTS = TokenSet.create(COMMENT)
-    @JvmField val STRINGS  = TokenSet.create(STRING)
+    @JvmField val COMMENTS       = TokenSet.create(COMMENT)
+    @JvmField val STRINGS        = TokenSet.create(STRING)
+    @JvmField val WHITESPACE_SET = TokenSet.create(WHITESPACE)
 
     // ── Keywords (full set mirroring compiler TokenKind) ──────────────────
     val KEYWORD_SET: Set<String> = setOf(

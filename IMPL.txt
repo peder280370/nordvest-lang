@@ -21,6 +21,16 @@
   Phase 6 complete:
   - 6.2  IntelliJ plugin Tier 1: syntax highlighting, math symbol input (3 mechanisms),
          LSP4IJ wiring, run/test configurations, gutter icons, settings, Enter handler
+  - 6.3  IntelliJ plugin Tier 2 PSI (stretch goal):
+         Real PSI parser (NordvestPsiParser) identifies top-level declarations via
+         column-0 position check — no INDENT/DEDENT needed. Named composite nodes:
+         NordvestFunctionDef, NordvestClassLikeDef (class/struct/record/interface/
+         sealed/enum). Structure View (⌘7) shows top-level fns and classes with icons.
+         FileBasedIndex (NordvestSymbolIndex) maps names→kinds across the project.
+         Go to Symbol (⌘⌥O) and Go to Class (⌘O) via NordvestGotoSymbolContributor /
+         NordvestGotoClassContributor. Inspection: ASCII operator → Unicode (>=→≥,
+         <=→≤, !=→≠, ->→→) with one-click quick-fix. Debugger + inspections for
+         "Missing match case" / "Redundant nullable" deferred to post-Phase 7.
 
   Current test count: 807 (800 after 5.10 + 7 LogRuntimeTest)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
@@ -131,7 +141,7 @@
   ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
   │  VS Code extension (6.1)                 │DEFERRED│  P4  │ after IntelliJ   │
   │  IntelliJ plugin Tier 1 — LSP4IJ (6.2)   │  DONE  │  P1  │ runIde works     │
-  │  IntelliJ plugin Tier 2 — PSI (6.3)      │ TODO   │  P4  │ stretch goal     │
+  │  IntelliJ plugin Tier 2 — PSI (6.3)      │  DONE  │  P4  │ partial (see log) │
   └──────────────────────────────────────────┴────────┴──────┴──────────────────┘
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -868,13 +878,27 @@
                - Plan: TextMate grammar, LSP client via vscode-languageclient,
                  Unicode input helper, run current file, snippets, platform vsix bundles
 
-  [TODO]  6.3  IntelliJ plugin — Tier 2 PSI  (stretch goal)
-               - Full PSI tree replacing LSP4IJ
-               - Stub index for top-level declarations (fast cross-project lookup)
-               - Inspections: "Missing match case", "Redundant nullable",
-                 "Convert ASCII operator to Unicode"
-               - Quick-fixes: add missing sealed variants, add ? propagation
-               - Debugger: DWARF debug info via LLVM; XDebugger integration
+  [DONE]  6.3  IntelliJ plugin — Tier 2 PSI  (stretch goal)
+               Files added:
+                 ide/nv-intellij/.../psi/NordvestElementTypes.kt        — composite element types
+                 ide/nv-intellij/.../psi/NordvestAstNode.kt              — base PSI node
+                 ide/nv-intellij/.../psi/NordvestNamedElement.kt         — PsiNameIdentifierOwner
+                 ide/nv-intellij/.../psi/elements/NordvestFunctionDef.kt — fn decl PSI
+                 ide/nv-intellij/.../psi/elements/NordvestClassLikeDef.kt— class-like decl PSI
+                 ide/nv-intellij/.../lang/NordvestPsiParser.kt           — real top-level parser
+                 ide/nv-intellij/.../structure/NordvestStructureViewFactory.kt
+                 ide/nv-intellij/.../structure/NordvestStructureViewModel.kt
+                 ide/nv-intellij/.../structure/NordvestStructureViewElement.kt
+                 ide/nv-intellij/.../index/NordvestSymbolIndex.kt        — FileBasedIndex
+                 ide/nv-intellij/.../index/NordvestGotoSymbolContributor.kt
+                 ide/nv-intellij/.../index/NordvestGotoClassContributor.kt
+                 ide/nv-intellij/.../inspections/AsciiToUnicodeInspection.kt
+               Files updated:
+                 NordvestParserDefinition.kt  — wires NordvestPsiParser + createElement
+                 NordvestTokenTypes.kt        — added WHITESPACE_SET TokenSet
+                 plugin.xml                   — registers all new extension points
+               Deferred: "Missing match case" / "Redundant nullable" inspections;
+                 XDebugger adapter integration (requires DWARF codegen from Phase 7+)
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 7 — MULTI-FILE COMPILATION & LIBRARY LINKING  (Milestone M7)
