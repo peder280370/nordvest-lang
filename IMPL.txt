@@ -18,6 +18,18 @@
   Phase: PHASE 7 — Multi-file compilation & library linking
   Next: 7.1 Module collector and import graph
 
+  Iterator protocol (P1) complete:
+  - Iterator protocol for-in: user classes with next() → T? or iter() → Iterator
+    are now iterable via for-loops; desugars to iter()/next() method calls in IR
+  - Parser: `var`/`let` mutability modifier accepted in constructor params
+  - TypeChecker: elementTypeOfForLoop() checks iter()/next() in memberTypeMap;
+    constructor arity check allows fewer args than total params (default params optional)
+  - Codegen: emitForIterator() calls iter() then loops on next(), nil check;
+    emitSelfFieldStore() and MemberAccessExpr store enable class field mutation;
+    constructor calls pad missing args with default values; NilExpr returns
+    correct LLVM null constant per return type (fixes `→ nil` for int? returns)
+  - New example: examples/iterators.nv
+
   Phase 6 complete:
   - 6.2  IntelliJ plugin Tier 1: syntax highlighting, math symbol input (3 mechanisms),
          LSP4IJ wiring, run/test configurations, gutter icons, settings, Enter handler
@@ -32,7 +44,7 @@
          <=→≤, !=→≠, ->→→) with one-click quick-fix. Debugger + inspections for
          "Missing match case" / "Redundant nullable" deferred to post-Phase 7.
 
-  Current test count: 824 (807 after 5.11 + 17 operator overloading)
+  Current test count: 836 (824 prior + 12 iterator protocol)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -80,7 +92,7 @@
   │  TaskGroup structured concurrency        │ TODO   │  P2  │ cancel + errors  │
   │  Future<T> + .all/.any/.race             │ TODO   │  P2  │ depends on spawn │
   │  Lazy sequences — yield state machine    │ STUB   │  P1  │ coroutine frame  │
-  │  Iterator protocol for-in (.iter/next)   │ STUB   │  P1  │ Iterable<T> iface│
+  │  Iterator protocol for-in (.iter/next)   │  DONE  │  P1  │ 12 tests passing │
   │  Operator overloading — codegen          │  DONE  │  P1  │ 23 tests passing │
   │  str comparison lexicographic (not hash) │ PARTIAL│  P2  │ Compare on str   │
   │  Pattern matching — or-patterns          │ PARTIAL│  P2  │ A(_) | B(_) arm  │

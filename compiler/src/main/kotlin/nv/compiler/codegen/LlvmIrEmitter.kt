@@ -148,6 +148,8 @@ class LlvmIrEmitter(
 
     // ── Method return type registry: "TypeName_methodName" → LLVM type string ──
     private val methodReturnTypes = mutableMapOf<String, String>()
+    /** Maps iterable class name → iterator class name (populated from iter() return types). */
+    private val iteratorClassNames = mutableMapOf<String, String>()
 
     // ── Sealed class registry: className → decl; variant "ClassName.Variant" → tag index ──
     private val sealedClassDecls = mutableMapOf<String, SealedClassDecl>()
@@ -1610,6 +1612,12 @@ $storeStmt
 
         // Register return type for use by call sites
         methodReturnTypes["${typeName}_${fn.name}"] = fnReturnType
+        // If this is an iter() method, record the iterator class name for for-loop codegen
+        if (fn.name == "iter") {
+            val iterNvType = fn.returnType?.let { resolveTypeNode(it) } ?: Type.TUnit
+            val iterTypeName = iterNvType.simpleTypeName()
+            if (iterTypeName.isNotEmpty()) iteratorClassNames[typeName] = iterTypeName
+        }
 
         userFns.appendLine("define $fnReturnType $mangledName($paramList) {")
         userFns.appendLine("entry:")
@@ -1713,6 +1721,12 @@ $storeStmt
             if (stmt.value != null && stmt.value !is TupleLiteralExpr) emitExpr(stmt.value)
             if (fnReturnType == "i32") terminate("  ret i32 0")
             else terminate("  ret void")
+            return
+        }
+        // NilExpr: emit the appropriate null constant for the function's return type
+        // (avoids emitting `ret i64 null` which is invalid LLVM IR for primitive nullable returns)
+        if (stmt.value is NilExpr) {
+            terminate("  ret $fnReturnType ${nullConstant(fnReturnType)}")
             return
         }
         val valReg = emitExpr(stmt.value)
@@ -1851,11 +1865,11 @@ $storeStmt
         loopStack.addLast(LoopTarget(condLabel, endLabel, stmt.label))
 
         val iterable = stmt.iterable
-        if (iterable is RangeExpr) {
-            emitForRange(stmt, iterable, condLabel, bodyLabel, endLabel)
-        } else {
-            // Generic iterable: iterate over array using index
-            emitForArray(stmt, iterable, condLabel, bodyLabel, endLabel)
+        val iterableType = typeOf(iterable)
+        when {
+            iterable is RangeExpr -> emitForRange(stmt, iterable, condLabel, bodyLabel, endLabel)
+            isUserIterable(iterableType) -> emitForIterator(stmt, iterable, iterableType, condLabel, bodyLabel, endLabel)
+            else -> emitForArray(stmt, iterable, condLabel, bodyLabel, endLabel)
         }
 
         loopStack.removeLast()
@@ -1997,6 +2011,102 @@ $storeStmt
         }
     }
 
+    /**
+     * True if [type] is a user-defined iterable:
+     * - TNamed whose class has an `iter()` method (Iterable), or
+     * - TNamed whose class has a `next()` method (Iterator used directly).
+     * Built-in TArray/TStr/TSequence are excluded — they use the existing array-index path.
+     */
+    private fun isUserIterable(type: Type): Boolean {
+        if (type !is Type.TNamed) return false
+        val n = type.qualifiedName
+        return methodReturnTypes.containsKey("${n}_iter") || methodReturnTypes.containsKey("${n}_next")
+    }
+
+    /**
+     * Emit a for-in loop over a user-defined Iterator/Iterable type.
+     *
+     * Desugars to:
+     *   let _it = iterable.iter()           // if type has iter(); else _it = iterable
+     *   while true:
+     *     let _val = _it.next()
+     *     if _val == nil: break
+     *     <bind loop variable to _val>
+     *     <body>
+     */
+    private fun emitForIterator(
+        stmt: ForStmt,
+        iterableExpr: Expr,
+        iterableType: Type,
+        condLabel: String,
+        bodyLabel: String,
+        endLabel: String,
+    ) {
+        val iterableTypeName = iterableType.simpleTypeName()
+        val hasIterMethod = methodReturnTypes.containsKey("${iterableTypeName}_iter")
+
+        // Obtain the iterator object
+        val objReg = emitExpr(iterableExpr)
+        val itReg: String
+        val itLt = "i8*"  // all class/iterator objects are i8* in bootstrap
+
+        if (hasIterMethod) {
+            // Call .iter() to get the iterator
+            val r = fresh("it")
+            emit("  $r = call i8* @nv_${iterableTypeName}_iter(i8* noundef $objReg)")
+            itReg = r
+        } else {
+            // The object itself is the iterator
+            itReg = objReg
+        }
+
+        // Determine iterator type name (for calling next())
+        val itTypeName = if (hasIterMethod) {
+            iteratorClassNames[iterableTypeName] ?: iterableTypeName
+        } else {
+            iterableTypeName
+        }
+
+        // Store iterator pointer in alloca (needed so the loop body can rebind cleanly)
+        val itAlloca = emitAlloca("it.ptr.${labelIdx}", itLt)
+        emitStore(itLt, itReg, itAlloca)
+
+        emit("  br label %$condLabel")
+
+        // ── Condition: call next(), check for nil ────────────────────────
+        emitRaw("$condLabel:")
+        isTerminated = false
+
+        val itLoaded = fresh("it.loaded")
+        emit("  $itLoaded = load i8*, i8** $itAlloca, align 8")
+
+        val nextRetLt = methodReturnTypes["${itTypeName}_next"] ?: "i8*"
+        val nextVal   = fresh("next.val")
+        emit("  $nextVal = call $nextRetLt @nv_${itTypeName}_next(i8* noundef $itLoaded)")
+
+        val nilCmp  = fresh("is.nil")
+        emit("  $nilCmp = icmp eq $nextRetLt $nextVal, ${nullConstant(nextRetLt)}")
+        emit("  br i1 $nilCmp, label %$endLabel, label %$bodyLabel")
+
+        // ── Body ─────────────────────────────────────────────────────────
+        emitRaw("$bodyLabel:")
+        isTerminated = false
+
+        val bindName = when (val b = stmt.binding) {
+            is IdentBinding -> b.name
+            is TupleBinding -> b.names.firstOrNull() ?: "_"
+        }
+        if (bindName != "_") {
+            val bindAlloca = emitAlloca(bindName, nextRetLt)
+            varAllocas[bindName] = Pair(bindAlloca, nextRetLt)
+            emitStore(nextRetLt, nextVal, bindAlloca)
+        }
+
+        stmt.body.forEach { emitStmt(it) }
+
+        if (!isTerminated) emit("  br label %$condLabel")
+    }
+
     private fun emitAssignStmt(stmt: AssignStmt) {
         val valReg = emitExpr(stmt.value)
         when (stmt.target) {
@@ -2017,16 +2127,82 @@ $storeStmt
                         res
                     }
                     emitStore(lt, coerced, allocaReg)
+                } else {
+                    // Fallback: try to store to a constructor param field of self (mutable field access)
+                    emitSelfFieldStore(name, valReg, typeOf(stmt.value), stmt.op)
                 }
             }
             is IndexExpr -> {
                 // Phase 1.5: simplified — not fully supported
             }
             is MemberAccessExpr -> {
-                // Phase 1.5: simplified — not fully supported
+                // obj.field = value — handle self.field and general receiver.field
+                val receiverExpr = stmt.target.receiver
+                val fieldName    = stmt.target.member
+                val receiverType = typeOf(receiverExpr)
+                val typeName     = if (receiverType is Type.TNamed) receiverType.qualifiedName.substringAfterLast('.') else ""
+                if (typeName.isNotEmpty() && structLayouts.containsKey(typeName)) {
+                    val fields = structLayouts[typeName]!!
+                    val fieldIdx = fields.indexOfFirst { it.first == fieldName }
+                    if (fieldIdx >= 0) {
+                        val fieldType = fields[fieldIdx].second
+                        val fieldLt   = llvmType(fieldType)
+                        val gepIdx    = fieldIdx + (if (typeName in classTypeNames) 2 else 0)
+                        val structType = "%struct.$typeName"
+                        val recvReg    = emitExpr(receiverExpr)
+                        val castR = fresh("sa.cast")
+                        emit("  $castR = bitcast i8* $recvReg to $structType*")
+                        val fpR = fresh("sa.fp")
+                        emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+                        val coerced = if (stmt.op == AssignOp.ASSIGN) {
+                            coerceToType(valReg, typeOf(stmt.value), fieldLt)
+                        } else {
+                            val cur = emitLoad(fieldLt, fpR, "cur")
+                            val valCoerced = coerceToType(valReg, typeOf(stmt.value), fieldLt)
+                            val res = fresh("res")
+                            val op = assignOpToLlvm(stmt.op, fieldLt)
+                            emit("  $res = $op $fieldLt $cur, $valCoerced")
+                            res
+                        }
+                        emit("  store $fieldLt $coerced, $fieldLt* $fpR, align ${llvmTypeAlign(fieldLt)}")
+                    }
+                }
             }
             else -> { /* unsupported lvalue */ }
         }
+    }
+
+    /**
+     * Emit a store to a constructor param field of [self] by name.
+     * Used when an assignment target IdentExpr is not in varAllocas but is a known field of the
+     * enclosing class (e.g., `cur = cur + 1` inside a method where `cur` is a ctor param field).
+     */
+    private fun emitSelfFieldStore(fieldName: String, valReg: String, valType: Type, op: AssignOp) {
+        val selfType = varTypes["self"] as? Type.TNamed ?: return
+        val ownerName = selfType.qualifiedName.substringAfterLast('.')
+        val allFields = structLayouts[ownerName] ?: return
+        val fieldIdx  = allFields.indexOfFirst { it.first == fieldName }
+        if (fieldIdx < 0) return
+        val (_, ft) = allFields[fieldIdx]
+        val fieldLt  = llvmType(ft)
+        val gepIdx   = fieldIdx + (if (ownerName in classTypeNames) 2 else 0)
+        val structType = "%struct.$ownerName"
+        val selfReg    = emitLoad("i8*", varAllocas["self"]!!.first)
+        val castR = fresh("ssf.cast")
+        emit("  $castR = bitcast i8* $selfReg to $structType*")
+        val fpR = fresh("ssf.fp")
+        emit("  $fpR = getelementptr $structType, $structType* $castR, i32 0, i32 $gepIdx")
+        val coerced = if (op == AssignOp.ASSIGN) {
+            coerceToType(valReg, valType, fieldLt)
+        } else {
+            val cur = emitLoad(fieldLt, fpR, "cur")
+            val valCoerced = coerceToType(valReg, valType, fieldLt)
+            val res = fresh("res")
+            val assignOp = assignOpToLlvm(op, fieldLt)
+            emit("  $res = $assignOp $fieldLt $cur, $valCoerced")
+            res
+        }
+        emit("  store $fieldLt $coerced, $fieldLt* $fpR, align ${llvmTypeAlign(fieldLt)}")
     }
 
     private fun assignOpToLlvm(op: AssignOp, lt: String): String = when (op) {
@@ -2647,7 +2823,26 @@ $storeStmt
             fnName in structLayouts -> "i8*"
             else -> fnRetType?.let { llvmType(it) } ?: "i64"
         }
-        val argList = argRegs.zip(argTypes).joinToString(", ") { (r, t) ->
+        // For constructor calls, pad missing args with their default values
+        val (finalArgRegs, finalArgTypes) = if (fnName in structLayouts) {
+            val ctorParamCount = structCtorParamCount[fnName] ?: 0
+            val allFields      = structLayouts[fnName]!!.take(ctorParamCount)
+            val defaults       = structCtorDefaults[fnName] ?: emptyList()
+            val regs  = argRegs.toMutableList()
+            val types = argTypes.toMutableList()
+            while (regs.size < ctorParamCount) {
+                val fi = regs.size
+                val (_, ft) = allFields[fi]
+                val lt = llvmType(ft)
+                val defExpr = defaults.getOrNull(fi)?.second
+                regs  += if (defExpr != null) emitExpr(defExpr) else defaultValue(lt)
+                types += ft
+            }
+            regs to types
+        } else {
+            argRegs to argTypes
+        }
+        val argList = finalArgRegs.zip(finalArgTypes).joinToString(", ") { (r, t) ->
             val lt = llvmType(t); "$lt noundef $r"
         }
         if (retLt == "void") {

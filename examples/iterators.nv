@@ -1,0 +1,71 @@
+// iterators.nv — Iterator and Iterable protocol
+//
+// Demonstrates:
+//   - A class that IS an iterator (has next() → T?): used directly in for-in
+//   - A class that IS iterable (has iter()): produces an iterator via iter()
+//   - The for-loop desugars to: let _it = obj.iter(); while let x = _it.next() { ... }
+//
+
+// ── Iterator: class with next() → T? ─────────────────────────────────────────
+//
+// A Counter that yields integers 1..limit (values start at 1 to avoid
+// the bootstrap limitation where int? nil = 0).
+
+class Counter(pub limit: int, pub var cur: int = 0)
+    fn next() → int?
+        cur = cur + 1
+        if cur > limit
+            → nil
+        → cur
+
+fn demoIterator()
+    println("Counter(3) yields:")
+    let c = Counter(3)
+    for x in c
+        println(x)
+
+// ── Iterable: class with iter() → Iterator ───────────────────────────────────
+//
+// Range separates the iterable (Range) from the iterator (RangeIter).
+// iter() creates a fresh RangeIter each call.
+
+class RangeIter(pub limit: int, pub var cur: int = 0)
+    fn next() → int?
+        cur = cur + 1
+        if cur > limit
+            → nil
+        → cur
+
+class Range(pub limit: int)
+    fn iter() → RangeIter
+        → RangeIter(limit)
+
+fn demoIterable()
+    println("Range(4) via iter():")
+    for x in Range(4)
+        println(x)
+
+// ── str? iterator — null pointer safe ────────────────────────────────────────
+//
+// For string elements, nil = null pointer (no bootstrap limitation).
+
+class WordGen(pub var i: int = 0)
+    fn next() → str?
+        if i == 0
+            i = 1
+            → "hello"
+        if i == 1
+            i = 2
+            → "world"
+        → nil
+
+fn demoStrIterator()
+    println("WordGen yields:")
+    let gen = WordGen()
+    for word in gen
+        println(word)
+
+fn main()
+    demoIterator()
+    demoIterable()
+    demoStrIterator()

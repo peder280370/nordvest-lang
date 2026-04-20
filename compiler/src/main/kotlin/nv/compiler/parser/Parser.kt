@@ -1021,6 +1021,8 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
         val annos = mutableListOf<Annotation>()
         while (at(AT)) annos += parseAnnotation()
         val vis = parseVisibility()
+        // Optional mutability modifier: `var` or `let` (consumed; bootstrap treats all params as mutable)
+        if (at(VAR) || at(LET)) advance()
         // Support @newtype-style type-only params: `UserId(int)` instead of `UserId(value: int)`.
         // Heuristic: IDENT followed by COLON → named param; anything else → type-only, name = "value".
         return if (at(IDENT) && at(COLON, 1)) {

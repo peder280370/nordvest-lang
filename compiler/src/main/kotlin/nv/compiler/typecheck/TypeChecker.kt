@@ -697,10 +697,45 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
     private fun checkForStmt(stmt: ForStmt, env: TypeEnv, returnType: Type?) {
         val iterableType = synthesize(stmt.iterable, env)
-        val elementType = elementTypeOf(iterableType)
+        val elementType = elementTypeOfForLoop(iterableType)
         val loopEnv = env.child()
         bindingNames(stmt.binding).forEach { name -> loopEnv.define(name, elementType) }
         checkBody(stmt.body, loopEnv, returnType)
+    }
+
+    /**
+     * Determine the element type for a for-in loop.
+     * Extends [elementTypeOf] with the Iterator protocol:
+     * - If the type has an `iter()` method, the element type comes from the iterator's `next()`.
+     * - If the type itself has a `next()` method, it IS an iterator.
+     */
+    private fun elementTypeOfForLoop(type: Type): Type {
+        val builtin = elementTypeOf(type)
+        if (builtin != Type.TUnknown) return builtin
+        if (type is Type.TNamed) {
+            val name = type.qualifiedName
+            // Type has iter() → get iterator type → get element type from next()
+            val iterFn = memberTypeMap["$name.iter"]
+            if (iterFn != null) {
+                val iterRetType = if (iterFn is Type.TFun) iterFn.returnType else iterFn
+                return elementTypeFromIterator(iterRetType)
+            }
+            // Type itself has next() → it IS the iterator
+            return elementTypeFromIterator(type)
+        }
+        return Type.TUnknown
+    }
+
+    /** Given an iterator type (TNamed with a next() method), extract the element type. */
+    private fun elementTypeFromIterator(iterType: Type): Type {
+        if (iterType is Type.TNamed) {
+            val nextFn = memberTypeMap["${iterType.qualifiedName}.next"]
+            if (nextFn is Type.TFun) {
+                val ret = nextFn.returnType
+                return if (ret is Type.TNullable) ret.inner else ret
+            }
+        }
+        return Type.TUnknown
     }
 
     private fun checkWhileStmt(stmt: WhileStmt, env: TypeEnv, returnType: Type?) {
@@ -1048,7 +1083,9 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
                 Type.TUnknown
             }
             calleeType is Type.TFun -> {
-                checkCallArgs(calleeType, allArgs, env, expr.span)
+                // Allow fewer args for constructor calls (params with defaults are optional)
+                val isConstructor = calleeType.returnType is Type.TNamed
+                checkCallArgs(calleeType, allArgs, env, expr.span, allowFewerArgs = isConstructor)
                 calleeType.returnType
             }
             // Safe method call: a?.method(args) where callee synthesizes to TNullable(TFun)
@@ -1071,11 +1108,14 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
         }
     }
 
-    private fun checkCallArgs(fnType: Type.TFun, allArgs: List<CallArg>, env: TypeEnv, callSpan: SourceSpan) {
+    private fun checkCallArgs(fnType: Type.TFun, allArgs: List<CallArg>, env: TypeEnv, callSpan: SourceSpan,
+                              allowFewerArgs: Boolean = false) {
         val paramTypes = fnType.params
         // Bypass arity check for single TUnknown param (variadic built-ins like print)
-        if (paramTypes.size != allArgs.size &&
-            !(paramTypes.size == 1 && paramTypes[0] == Type.TUnknown)) {
+        val arityOk = paramTypes.size == allArgs.size ||
+            (paramTypes.size == 1 && paramTypes[0] == Type.TUnknown) ||
+            (allowFewerArgs && allArgs.size <= paramTypes.size)  // constructor with defaults
+        if (!arityOk) {
             errors += TypeCheckError.ArityMismatch(paramTypes.size, allArgs.size, callSpan)
         }
         allArgs.forEachIndexed { i, arg ->
