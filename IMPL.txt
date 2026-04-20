@@ -32,7 +32,7 @@
          <=→≤, !=→≠, ->→→) with one-click quick-fix. Debugger + inspections for
          "Missing match case" / "Redundant nullable" deferred to post-Phase 7.
 
-  Current test count: 807 (800 after 5.10 + 7 LogRuntimeTest)
+  Current test count: 824 (807 after 5.11 + 17 operator overloading)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -81,7 +81,7 @@
   │  Future<T> + .all/.any/.race             │ TODO   │  P2  │ depends on spawn │
   │  Lazy sequences — yield state machine    │ STUB   │  P1  │ coroutine frame  │
   │  Iterator protocol for-in (.iter/next)   │ STUB   │  P1  │ Iterable<T> iface│
-  │  Operator overloading — codegen          │ PARTIAL│  P1  │ 3 bugs; see plan │
+  │  Operator overloading — codegen          │  DONE  │  P1  │ 23 tests passing │
   │  str comparison lexicographic (not hash) │ PARTIAL│  P2  │ Compare on str   │
   │  Pattern matching — or-patterns          │ PARTIAL│  P2  │ A(_) | B(_) arm  │
   │  Pattern matching — nested patterns      │ PARTIAL│  P2  │ Ok(Some(x))      │
@@ -408,11 +408,14 @@
                - FfiTest.kt: 15 tests covering parser, type checker, codegen
 
   [DONE]  2.5  Operator overloading
-               - Parser.kt: tryParseOperatorName() allows fn +/-/*/==/</>/<=/>=... in class bodies
+               - Parser.kt: tryParseOperatorName() allows fn +/-/*/==/</>/<=/>=,&,|,⊕ in class bodies
                - TypeChecker.kt: synthesizeBinary checks memberTypeMap for operator overloads on TNamed types;
-                   overload lookup runs before numeric promotion check
-               - LlvmIrEmitter.kt: operator overloaded types use normal emit path (Phase 2 stub)
-               - OperatorOverloadTest.kt: 9 tests covering parser and type checker
+                   overload lookup runs before numeric promotion check;
+                   BinaryOp.overloadName uses ASCII for NEQ/LEQ/GEQ to match parser-stored keys (bug fix)
+               - LlvmIrEmitter.kt: operator dispatch complete; mangled @nv_T_op_<suffix> calls emitted;
+                   binaryOpSymbol and operatorToSuffix cover +,-,*,/,%,^,==,!=,<,>,<=,>=,&,|,⊕ (bug fixes)
+               - OperatorOverloadTest.kt: 23 tests — parser (7), type checker (7), IR structure (6),
+                   end-to-end integration (3)
 
   [DONE]  2.6  Lazy sequences / Iterator protocol
                - Type.kt: TSequence<T> added; display() and isAssignable() updated
@@ -735,168 +738,16 @@
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)
 ────────────────────────────────────────────────────────────────────────────────
 
-  [DEFERRED] 6.1  VS Code extension — deferred until IntelliJ plugin is complete.
-
-  [DONE]  6.2  IntelliJ plugin — Tier 1  (directory: ide/nv-intellij/, Kotlin)
-               Goal: plugin runs locally in a sandboxed IntelliJ via `./gradlew runIde`.
-               No marketplace submission required at this stage.
-
-               Build setup
-               - Gradle project using IntelliJ Platform Plugin Gradle Plugin v2
-               - intellij.platform.type = "IC" (Community), version "2024.3"
-               - Plugin dependencies: com.redhat.devtools.lsp4ij (LSP4IJ)
-               - `./gradlew runIde` — launches sandboxed IDE with plugin loaded
-               - `./gradlew buildPlugin` — produces .zip for "Install from disk"
-
-               Project layout (all files implemented)
-               ide/nv-intellij/
-                 src/main/kotlin/nv/intellij/
-                   lang/
-                     NordvestLanguage.kt         — Language singleton
-                     NordvestFileType.kt         — .nv extension, MIME type, icon
-                     NordvestIcons.kt            — load icons/nordvest.svg
-                     NordvestFile.kt             — PsiFile subtype
-                     NordvestParserDefinition.kt — stub parser for Tier 1 PSI tree
-                   lexer/
-                     NordvestLexer.kt            — IntelliJ Lexer wrapping compiler Lexer.kt
-                     NordvestTokenTypes.kt       — IElementType constants for each token kind
-                     NordvestSyntaxHighlighter.kt — map token types → TextAttributesKey
-                     NordvestSyntaxHighlighterFactory.kt
-                     NordvestColorSettingsPage.kt — Preferences › Color Scheme
-                   editor/
-                     NordvestBraceMatcher.kt     — (), [], [[]], {} matching
-                     NordvestCommenter.kt        — line comment via //
-                     NordvestEnterHandler.kt     — indentation-aware Enter (EnterHandlerDelegate)
-                     MathSymbolTypedHandler.kt   — \forall→∀ live substitution
-                     MathSymbolCompletionContributor.kt — \<prefix> completion popup
-                     MathSymbolInsertAction.kt   — "Insert Math Symbol" popup palette
-                     MathSymbolTable.kt          — full symbol name→codepoint table
-                   lsp/
-                     NordvestLspServerDefinition.kt — LanguageServerFactory; keepServerAlive;
-                                                      nv binary auto-detection with notification
-                   run/
-                     NordvestRunConfigurationType.kt
-                     NordvestRunConfiguration.kt
-                     NordvestRunConfigurationFactory.kt (NordvestRun + NordvestTest factories)
-                     NordvestRunState.kt
-                     NordvestRunConfigurationEditor.kt   — UI form: file path, args
-                     NordvestRunLineMarkerProvider.kt    — gutter ▶ next to fn main() / @test fn;
-                                                           creates/reuses run config and executes it
-                   settings/
-                     NordvestSettings.kt         — PersistentStateComponent (nv binary path)
-                     NordvestSettingsConfigurable.kt
-                     NordvestSettingsComponent.kt — Preferences › Tools › Nordvest
-                 src/main/resources/
-                   META-INF/plugin.xml
-                   icons/nordvest.svg
-
-               6.2-A  Language + file type registration
-               - NordvestLanguage (Language("Nordvest")), NordvestFileType (.nv, icon)
-               - plugin.xml: <fileType>, <lang.syntaxHighlighterFactory>,
-                 <colorSettingsPage>, <lang.parserDefinition>, <lang.braceMatcher>,
-                 <lang.commenter>, <enterHandlerDelegate>, <typedHandler>,
-                 <completion.contributor>, <configurationType>,
-                 <runLineMarkerContributor>, <applicationConfigurable>,
-                 <applicationService>, <notificationGroup>, <actions>
-
-               6.2-B  Syntax highlighting
-               - NordvestLexer wraps compiler Lexer; adapts INDENT/DEDENT → whitespace
-               - Token groups: KEYWORD, ANNOTATION, BUILTIN_TYPE, MATH_OP, STRING,
-                 NUMBER, COMMENT, OPERATOR, IDENTIFIER, BRACE/BRACKET
-               - NordvestColorSettingsPage: demo text shows Unicode operators, sealed
-                 class, annotations, string interpolation
-
-               6.2-C  Mathematical symbol input  (three complementary mechanisms)
-
-                 Mechanism 1 — Live substitution (MathSymbolTypedHandler)
-                 A TypedHandlerDelegate fires on every keypress. When the caret is
-                 immediately after a `\`-prefixed identifier (e.g. `\forall`), typing
-                 Space or Tab replaces the escape + trigger key with the Unicode symbol.
-                 Example: user types `\forall<Space>` → editor inserts `∀ ` in-place.
-
-                 The full escape table (MathSymbolTable.kt):
-                   \forall  → ∀    \exists → ∃    \sum   → ∑    \prod  → ∏
-                   \in      → ∈    \and    → ∧    \or    → ∨    \not   → ¬
-                   \pi      → π    \inf    → ∞    \->    → →    \leq   → ≤
-                   \geq     → ≥    \neq    → ≠    \div   → ÷    \xor   → ⊕
-                   \lambda  → λ    \alpha  → α    \beta  → β    \gamma → γ
-                   \delta   → δ    \epsilon→ ε    \theta → θ    \sigma → σ
-                   \omega   → ω    \mu     → μ    \tau   → τ    \rho   → ρ
-
-                 Mechanism 2 — Completion popup (MathSymbolCompletionContributor)
-                 A custom CompletionContributor activates inside .nv files when the
-                 prefix starts with `\`. It injects LookupElements for all matching
-                 symbols; each shows the symbol glyph + escape name in the popup.
-                 Selecting any entry inserts the Unicode code point and removes the
-                 `\` prefix. Works naturally with Ctrl+Space.
-
-                 Mechanism 3 — Insert Symbol action
-                 "Nordvest: Insert Math Symbol" action (Alt+Backslash default shortcut)
-                 opens a searchable symbol picker dialog. Shows all symbols in a grid
-                 with name and codepoint; double-click or Enter inserts at caret.
-
-               6.2-D  LSP4IJ wiring
-               - NordvestLspServerDefinition implements LanguageServerFactory
-               - Server command: ["nv", "lsp"] (discovered via settings nv path)
-               - Mapped to .nv files via <fileTypeMapping serverId="nordvest-lsp">
-               - keepServerAlive() = true — server stays warm between file switches
-               - nv binary auto-detection: explicit setting > common PATH locations >
-                 fallback "nv" + user notification to configure in Settings
-               - LSP capabilities negotiated automatically via LSP initialize handshake
-
-               6.2-E  Run configurations
-               - NordvestRunConfigurationType: "Nordvest" category, two factories:
-                   NordvestRunConfigurationFactory (id "NordvestRun")
-                   NordvestTestConfigurationFactory (id "NordvestTest")
-               - NordvestRunConfiguration: filePath + extraArgs + isTest fields;
-                   XML persistence via writeExternal/readExternal
-               - NordvestRunState: builds GeneralCommandLine(nvPath, "run"/"test", filePath)
-               - NordvestRunLineMarkerProvider: shows ▶ gutter icon on `fn main(` and
-                   `@test fn` lines; creates/reuses run config and executes it
-               - NordvestRunConfigurationEditor: JPanel form (file chooser + args field)
-
-               6.2-F  Settings
-               - Preferences › Tools › Nordvest:
-                   "nv binary path" text field (default: auto-detect from PATH)
-                   "LSP server arguments" (default: lsp)
-                   "Format on save" checkbox (default: off)
-               - NordvestSettings.State persisted in .idea/nordvest.xml
-
-               6.2-G  Bracket matching and commenter
-               - NordvestBraceMatcher: pairs (), [], {}, [[]] (double-bracket for matrix)
-               - NordvestCommenter: line comment `//`, no block comment
-
-               6.2-H  Enter handler (indentation-aware)
-               - NordvestEnterHandler (EnterHandlerDelegate) preserves current line's
-                 leading whitespace on Enter; adds 4-space indent after lines ending in `:`
-                 (fn body, if/else, for, while, match, class, etc.)
-               - Inline `//` comments stripped before checking line terminator
-               - Registered with order="first" so it runs before IntelliJ's defaults
-
   [DEFERRED] 6.1  VS Code extension  (new repo: nordvest-lang/nv-vscode, TypeScript)
                - Deferred until after Phase 7 (multi-file compilation)
                - Plan: TextMate grammar, LSP client via vscode-languageclient,
                  Unicode input helper, run current file, snippets, platform vsix bundles
 
+  [DONE]  6.2  IntelliJ plugin — Tier 1  (directory: ide/nv-intellij/, Kotlin)
+               Goal: plugin runs locally in a sandboxed IntelliJ via `./gradlew runIde`.
+               No marketplace submission required at this stage.
+
   [DONE]  6.3  IntelliJ plugin — Tier 2 PSI  (stretch goal)
-               Files added:
-                 ide/nv-intellij/.../psi/NordvestElementTypes.kt        — composite element types
-                 ide/nv-intellij/.../psi/NordvestAstNode.kt              — base PSI node
-                 ide/nv-intellij/.../psi/NordvestNamedElement.kt         — PsiNameIdentifierOwner
-                 ide/nv-intellij/.../psi/elements/NordvestFunctionDef.kt — fn decl PSI
-                 ide/nv-intellij/.../psi/elements/NordvestClassLikeDef.kt— class-like decl PSI
-                 ide/nv-intellij/.../lang/NordvestPsiParser.kt           — real top-level parser
-                 ide/nv-intellij/.../structure/NordvestStructureViewFactory.kt
-                 ide/nv-intellij/.../structure/NordvestStructureViewModel.kt
-                 ide/nv-intellij/.../structure/NordvestStructureViewElement.kt
-                 ide/nv-intellij/.../index/NordvestSymbolIndex.kt        — FileBasedIndex
-                 ide/nv-intellij/.../index/NordvestGotoSymbolContributor.kt
-                 ide/nv-intellij/.../index/NordvestGotoClassContributor.kt
-                 ide/nv-intellij/.../inspections/AsciiToUnicodeInspection.kt
-               Files updated:
-                 NordvestParserDefinition.kt  — wires NordvestPsiParser + createElement
-                 NordvestTokenTypes.kt        — added WHITESPACE_SET TokenSet
-                 plugin.xml                   — registers all new extension points
                Deferred: "Missing match case" / "Redundant nullable" inspections;
                  XDebugger adapter integration (requires DWARF codegen from Phase 7+)
 

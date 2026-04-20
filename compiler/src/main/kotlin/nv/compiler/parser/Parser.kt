@@ -371,9 +371,10 @@ class Parser(private val tokens: List<Token>, private val sourcePath: String) {
             at(GT)    -> ">"
             at(LEQ)   -> "<="
             at(GEQ)   -> ">="
-            at(AMP)   -> "&"
-            at(PIPE)  -> "|"
-            else      -> null
+            at(AMP)     -> "&"
+            at(PIPE)    -> "|"
+            at(XOR_OP)  -> "⊕"
+            else        -> null
         } ?: return null
         advance()
         return sym

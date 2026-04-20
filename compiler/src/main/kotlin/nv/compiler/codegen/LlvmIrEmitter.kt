@@ -2307,6 +2307,7 @@ $storeStmt
         BinaryOp.SLASH -> "/"; BinaryOp.EQ -> "=="; BinaryOp.NEQ -> "!="
         BinaryOp.LT -> "<"; BinaryOp.GT -> ">"; BinaryOp.LEQ -> "<="
         BinaryOp.GEQ -> ">="; BinaryOp.MOD -> "%"; BinaryOp.POWER -> "^"
+        BinaryOp.BIT_AND -> "&"; BinaryOp.BIT_OR -> "|"; BinaryOp.BIT_XOR -> "⊕"
         else -> op.name
     }
 
@@ -2314,6 +2315,7 @@ $storeStmt
         "+"  -> "plus"; "-" -> "minus"; "*" -> "mul"; "/" -> "div"
         "==" -> "eq"; "!=" -> "neq"; "<" -> "lt"; ">" -> "gt"
         "<=" -> "le"; ">=" -> "ge"; "%" -> "mod"; "^" -> "pow"
+        "&"  -> "bitand"; "|" -> "bitor"; "⊕" -> "xor"
         else -> null
     }
 

@@ -11,6 +11,14 @@ Key documents:
 - `PLAN.txt` — phased implementation roadmap, formal syntax specification outline, standard library design, and tooling plan
 - `IMPL.txt` — current implementation progress tracker (authoritative status for each phase item)
 
+## After Implementing a Substantial Feature
+
+After completing any substantial feature (a new language construct, stdlib module, codegen pass, annotation, etc.), always:
+
+1. Check every `.nv` file under `examples/` — compile each with `nv run` and confirm it runs without error
+2. If an example uses or could benefit from the new feature, update it to demonstrate the feature
+3. If an example fails to compile due to a pre-existing stub or missing feature, note it but do not fix unrelated issues
+
 ## Language Overview
 
 Nordvest is a statically typed, compiled, indentation-sensitive language. Key distinguishing features:

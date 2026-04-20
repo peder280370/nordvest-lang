@@ -1,18 +1,12 @@
-// value_types.nv — struct vs record vs class; weak/unowned references
+// value_types.nv — struct vs record vs class; operator overloading
 //
 // Demonstrates: struct (value type, copied on assignment),
-// class (reference type), direct field access, and weak/unowned refs.
+// class (reference type), direct field access, operator overloading.
 //
-// STATUS: Compiles and runs (Phase 1).
-//   Known Phase 1 constraints:
-//   - self.field access inside method bodies returns incorrect values (Phase 2).
-//     Use direct field access (obj.field) from outside instead.
-//   - Class body fields (fields with initializers) cause OOM in parser.
-//   - record codegen is Phase 2 — struct is used as substitute below.
-//   - weak/unowned references are Phase 2.
-//   - Operator overloading (fn +) is Phase 2.
-//   - self mutations do not persist across calls (Phase 2 RC).
-//   The runnable demo uses free functions and direct field access.
+// STATUS: Compiles and runs.
+//   Known constraints:
+//   - record codegen deferred — struct is used as substitute below.
+//   - weak/unowned references deferred.
 //   nv run examples/value_types.nv
 
 module examples.value_types
@@ -25,12 +19,12 @@ module examples.value_types
 // use free functions that take the struct as a parameter instead.
 
 struct Vec2(x: float, y: float)
-    // NOTE: self.field access in methods is Phase 2. Methods are declared
-    // here for documentation; use the free functions below to run today.
-    // fn lengthSq() → float
-    //     → self.x ^ 2.0 + self.y ^ 2.0
-    // fn dot(other: Vec2) → float
-    //     → self.x * other.x + self.y * other.y
+    fn +(other: Vec2) → Vec2
+        → Vec2(x + other.x, y + other.y)
+    fn -(other: Vec2) → Vec2
+        → Vec2(x - other.x, y - other.y)
+    fn ==(other: Vec2) → bool
+        → x == other.x ∧ y == other.y
 
 struct Color(r: int, g: int, b: int)
     // fn luminance() → float
@@ -82,9 +76,6 @@ fn vec2Dot(a: Vec2, b: Vec2) → float
 fn vec2Scale(v: Vec2, factor: float) → Vec2
     → Vec2(v.x * factor, v.y * factor)
 
-fn vec2Add(a: Vec2, b: Vec2) → Vec2
-    → Vec2(a.x + b.x, a.y + b.y)
-
 fn colorLuminance(c: Color) → float
     → 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
@@ -113,8 +104,12 @@ fn main()
     println("v1.dot(v2)    = {vec2Dot(v1, v2)}")          // 11
     let v3 = vec2Scale(v1, 2.0)
     println("v1.scale(2)   = Vec2({v3.x}, {v3.y})")      // Vec2(6, 8)
-    let v4 = vec2Add(v1, v2)
+    let v4 = v1 + v2
     println("v1 + v2       = Vec2({v4.x}, {v4.y})")      // Vec2(4, 6)
+    let v5 = v1 - v2
+    println("v1 - v2       = Vec2({v5.x}, {v5.y})")      // Vec2(2, 2)
+    println("v1 == v1      = {v1 == v1}")                 // true
+    println("v1 == v2      = {v1 == v2}")                 // false
 
     println("")
     let rect = Rect(0.0, 0.0, 10.0, 5.0)

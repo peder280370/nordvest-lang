@@ -879,7 +879,7 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
 
         // Operator overloading: check if left type defines the operator method
         if (lType is Type.TNamed) {
-            val opName = expr.op.symbol
+            val opName = expr.op.overloadName
             val overloadKey = "${lType.qualifiedName}.$opName"
             val overloadType = memberTypeMap[overloadKey]
             if (overloadType is Type.TFun && overloadType.params.size == 1) {
@@ -1465,7 +1465,19 @@ class TypeChecker(private val resolvedModule: ResolvedModule) {
     }
 }
 
-// ── BinaryOp.symbol helper ────────────────────────────────────────────────
+// ── BinaryOp.symbol / overloadName helpers ────────────────────────────────
+
+/**
+ * Returns the ASCII operator name used as the memberTypeMap key for overload
+ * lookup. Must match the strings produced by tryParseOperatorName() in Parser.kt.
+ * NEQ/LEQ/GEQ use ASCII ("!=", "<=", ">=") while BinaryOp.symbol returns Unicode.
+ */
+private val BinaryOp.overloadName: String get() = when (this) {
+    BinaryOp.NEQ -> "!="
+    BinaryOp.LEQ -> "<="
+    BinaryOp.GEQ -> ">="
+    else         -> this.symbol
+}
 
 private val BinaryOp.symbol: String get() = when (this) {
     BinaryOp.PLUS       -> "+"
