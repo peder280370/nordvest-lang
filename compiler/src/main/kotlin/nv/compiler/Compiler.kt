@@ -33,6 +33,7 @@ object Compiler {
         source: String,
         sourcePath: String,
         targetArch: String = detectHostArch(),
+        testMode: Boolean = false,
     ): CompileResult {
         val tokens = try {
             Lexer(source).tokenize()
@@ -54,7 +55,7 @@ object Compiler {
                         val tcResult = TypeChecker(module).check()
                         when (tcResult) {
                             is TypeCheckResult.Success   -> {
-                                when (val cgResult = LlvmIrEmitter(tcResult.module, targetArch).emit()) {
+                                when (val cgResult = LlvmIrEmitter(tcResult.module, targetArch, testMode).emit()) {
                                     is CodegenResult.Success -> CompileResult.IrSuccess(cgResult.llvmIr)
                                     is CodegenResult.Failure -> CompileResult.Failure(
                                         cgResult.errors.map {

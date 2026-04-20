@@ -378,7 +378,8 @@ private fun LlvmIrEmitter.emitCallExpr(expr: CallExpr): String {
             "print"   -> return emitPrintCall(expr, newline = false)
             "println" -> return emitPrintCall(expr, newline = true)
             "str"     -> return emitStrConversion(expr)
-            "assert"  -> return emitAssert(expr)
+            // Defer to @extern declaration if the user re-declares assert (e.g. std.test's nv_assert).
+            "assert"  -> if ("assert" !in externFunctions) return emitAssert(expr)
             "panic"   -> return emitPanicCall(expr)
             "len"     -> return emitLenCall(expr)
         }

@@ -25,6 +25,8 @@ class LlvmIrEmitter(
     internal val tcModule: TypeCheckedModule,
     /** Target architecture for @asm / @bytes arch-selection. Defaults to host arch. */
     val targetArch: String = detectHostArch(),
+    /** When true, skip user main() and emit a TAP test-runner main() wrapping @test functions. */
+    val testMode: Boolean = false,
 ) {
 
     // ── Output sections ───────────────────────────────────────────────────
@@ -118,7 +120,14 @@ class LlvmIrEmitter(
         "nv_log_debug", "nv_log_info", "nv_log_warn", "nv_log_error",
         "nv_log_fatal", "nv_log_set_level", "nv_log_flush",
         "nv_log_warnWith", "nv_log_errorWith", "nv_log_fatalWith",
-        "nv_log_set_trace_enabled", "nv_log_do_trace"
+        "nv_log_set_trace_enabled", "nv_log_do_trace",
+        // std.test
+        "nv_assert", "nv_fail",
+        "nv_assert_nil", "nv_assert_not_nil",
+        "nv_assert_ok", "nv_assert_err",
+        "nv_test_begin", "nv_test_end",
+        "nv_test_print_header", "nv_test_report", "nv_test_exit",
+        "nv_test_skip"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -172,6 +181,13 @@ class LlvmIrEmitter(
             emitDecl(decl)
         }
 
+        if (testMode) {
+            val testFns = file.declarations
+                .filterIsInstance<FunctionDecl>()
+                .filter { fn -> fn.annotations.any { it.name == "test" } && fn.params.isEmpty() }
+            emitTestRunnerMain(testFns)
+        }
+
         val ir = buildString {
             appendLine("; Nordvest bootstrap compiler — Phase 1.5")
             appendLine("; Source: ${file.sourcePath}")
@@ -185,6 +201,51 @@ class LlvmIrEmitter(
             append(userFns)
         }
         return CodegenResult.Success(ir)
+    }
+
+    /** Emit a TAP-compatible main() that calls each @test function in order. */
+    private fun emitTestRunnerMain(testFns: List<FunctionDecl>) {
+        if (testFns.isEmpty()) return
+        val total = testFns.size
+        val sb = StringBuilder()
+        sb.appendLine()
+        sb.appendLine("define i32 @main(i32 %argc, i8** %argv) {")
+        sb.appendLine("entry:")
+        sb.appendLine("  call void @nv_test_print_header(i64 $total)")
+
+        for ((idx, fn) in testFns.withIndex()) {
+            val num = idx + 1
+            val displayName = fn.annotations
+                .find { it.name == "test" }
+                ?.args?.find { it.name == "description" || it.name == null }
+                ?.let { (it.value as? AnnotationStrValue)?.value }
+                ?: fn.name
+            val nameGlobal = internString(displayName)
+            sb.appendLine("  call void @nv_test_begin()")
+            sb.appendLine("  call void @nv_${fn.name}()")
+            sb.appendLine("  call void @nv_test_report(i8* $nameGlobal, i64 $num)")
+        }
+
+        sb.appendLine("  %exitcode = call i32 @nv_test_exit()")
+        sb.appendLine("  ret i32 %exitcode")
+        sb.appendLine("}")
+        userFns.append(sb)
+    }
+
+    /**
+     * Intern a string constant into [globals] and return a constant GEP expression
+     * suitable for use as an inline argument in [userFns] IR (not in a function body).
+     */
+    private fun internString(s: String): String {
+        val globalName = stringPool.getOrPut(s) {
+            val name = "@str.${strIdx++}"
+            val escaped = llvmEscape(s)
+            val len = llvmByteLen(s) + 1
+            globals.appendLine("""$name = private unnamed_addr constant [$len x i8] c"$escaped\00", align 1""")
+            name
+        }
+        val len = llvmByteLen(s) + 1
+        return "getelementptr inbounds ([$len x i8], [$len x i8]* $globalName, i64 0, i64 0)"
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -499,6 +560,7 @@ declare i8** @backtrace_symbols(i8**, i32)
         FmtRuntime.emit(rtFns)
         IterRuntime.emit(rtFns)
         LogRuntime.emit(rtFns)
+        TestRuntime.emit(rtFns)
     }
 
     private fun emitSealedClassFunctions() {
@@ -516,6 +578,8 @@ declare i8** @backtrace_symbols(i8**, i32)
     private fun emitDecl(decl: Decl) {
         when (decl) {
             is FunctionDecl -> {
+                // In testMode, skip the user's main() — the test runner generates its own.
+                if (testMode && decl.name == "main" && decl.params.isEmpty()) return
                 if (decl.annotations.any { it.name == "gpu" }) {
                     userFns.appendLine("; @gpu kernel: ${decl.name}")
                 }

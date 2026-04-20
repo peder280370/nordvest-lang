@@ -44,7 +44,7 @@
          <=→≤, !=→≠, ->→→) with one-click quick-fix. Debugger + inspections for
          "Missing match case" / "Redundant nullable" deferred to post-Phase 7.
 
-  Current test count: 836 (824 prior + 12 iterator protocol)
+  Current test count: 859 (836 prior + 23 std.test)
   Note: Phase5Test was split into per-module *RuntimeTest.kt files (d6ea4fb).
 
   All Phase 5 items complete:
@@ -117,7 +117,7 @@
   ├──────────────────────────────────────────┬────────┬──────┬──────────────────┤
   │  Module                                  │ Status │ Prio │ Notes            │
   ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
-  │  std.test   — @test runner integration   │ STUB   │  P1  │ nv test depends  │
+  │  std.test   — @test runner integration   │  DONE  │  P1  │ 23 tests passing │
   │  std.json   — parse/serialize JSON       │ STUB   │  P1  │ ubiquitous format│
   │  std.regex  — pattern matching           │ STUB   │  P1  │ string work horse│
   │  std.net.http — HTTP client + server     │ STUB   │  P2  │ depends on net   │

@@ -212,28 +212,93 @@ private fun cmdTest(args: List<String>) {
         return
     }
 
+    // Split files into: those with @test functions (run as test suite) vs compile-only
+    data class TestFile(val file: File, val source: String, val hasTests: Boolean)
+
+    val testFiles = nvFiles.map { file ->
+        val source = try { file.readText() } catch (e: Exception) { "" }
+        val hasTests = source.contains("@test")
+        TestFile(file, source, hasTests)
+    }
+
+    val canRunBinary = findCompiler() != null
+
     var passed = 0
     var failed = 0
-    println("TAP version 13")
-    println("1..${nvFiles.size}")
+    var testNum = 0
 
-    nvFiles.forEachIndexed { index, file ->
-        val testNum = index + 1
-        val source = try { file.readText() } catch (e: Exception) {
-            println("not ok $testNum - ${file.path} # read error: ${e.message}")
-            failed++
-            return@forEachIndexed
-        }
-        when (val result = Compiler.compile(source, file.path)) {
-            is CompileResult.IrSuccess -> { println("ok $testNum - ${file.path}"); passed++ }
-            is CompileResult.Failure -> {
-                val firstErr = result.errors.firstOrNull()?.message ?: "unknown error"
-                println("not ok $testNum - ${file.path}")
-                println("  # $firstErr")
+    // Count total "items": compile checks for non-test files, runtime test suites for test files
+    // For simplicity, report one TAP item per file (as before for non-test files, or one suite per test file)
+    println("TAP version 13")
+    println("1..${testFiles.size}")
+
+    val tmpDir = Files.createTempDirectory("nv_test_").toFile()
+    try {
+        testFiles.forEach { (file, source, hasTests) ->
+            testNum++
+            if (source.isEmpty()) {
+                println("not ok $testNum - ${file.path} # read error")
                 failed++
+                return@forEach
             }
-            else -> { println("ok $testNum - ${file.path}"); passed++ }
+
+            if (hasTests && canRunBinary) {
+                // Compile in testMode to get a test-runner binary
+                when (val result = Compiler.compile(source, file.path, testMode = true)) {
+                    is CompileResult.IrSuccess -> {
+                        val irFile  = File(tmpDir, "test_$testNum.ll")
+                        val binFile = File(tmpDir, "test_$testNum")
+                        irFile.writeText(result.llvmIr)
+                        val compiled = compileIr(irFile, binFile, optimize = false)
+                        if (compiled == null) {
+                            println("not ok $testNum - ${file.path} # link failed")
+                            failed++
+                        } else {
+                            // Run the test binary and capture its TAP output
+                            val proc = ProcessBuilder(binFile.absolutePath)
+                                .redirectErrorStream(false)
+                                .start()
+                            val tapOutput = proc.inputStream.bufferedReader().readText()
+                            val exitCode = proc.waitFor()
+                            // Forward the TAP output for the nested tests
+                            if (tapOutput.isNotBlank()) {
+                                tapOutput.lines().forEach { line ->
+                                    if (line.isNotBlank()) println("    $line")
+                                }
+                            }
+                            if (exitCode == 0) {
+                                println("ok $testNum - ${file.path}")
+                                passed++
+                            } else {
+                                println("not ok $testNum - ${file.path}")
+                                failed++
+                            }
+                        }
+                    }
+                    is CompileResult.Failure -> {
+                        val firstErr = result.errors.firstOrNull()?.message ?: "unknown error"
+                        println("not ok $testNum - ${file.path}")
+                        println("  # $firstErr")
+                        failed++
+                    }
+                    else -> { println("ok $testNum - ${file.path}"); passed++ }
+                }
+            } else {
+                // No @test functions (or no compiler available): compile-check only
+                when (val result = Compiler.compile(source, file.path)) {
+                    is CompileResult.IrSuccess -> { println("ok $testNum - ${file.path}"); passed++ }
+                    is CompileResult.Failure -> {
+                        val firstErr = result.errors.firstOrNull()?.message ?: "unknown error"
+                        println("not ok $testNum - ${file.path}")
+                        println("  # $firstErr")
+                        failed++
+                    }
+                    else -> { println("ok $testNum - ${file.path}"); passed++ }
+                }
+            }
         }
+    } finally {
+        tmpDir.deleteRecursively()
     }
 
     println()

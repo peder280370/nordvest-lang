@@ -1,28 +1,49 @@
 module std.test
 
-/** Mark a function as a test. Applied as @test annotation. */
-pub fn assert(condition: bool, message: str)
+// ── Core assertion primitives (backed by runtime) ────────────────────────────
 
-/** Assert that two values are equal. */
-pub fn assertEquals<T>(expected: T, actual: T)
+/** Assert that a condition is true; fail with [message] if it is not. */
+@extern(fn: "nv_assert")         pub fn assert(condition: bool, message: str)
 
-/** Assert that two values are not equal. */
-pub fn assertNotEquals<T>(expected: T, actual: T)
+/** Fail the current test unconditionally with [message]. */
+@extern(fn: "nv_fail")           pub fn fail(message: str)
 
-/** Assert that a value is nil. */
-pub fn assertNil<T>(value: T?)
+/** Assert that [value] is nil. */
+@extern(fn: "nv_assert_nil")     pub fn assertNil<T>(value: T?)
 
-/** Assert that a value is not nil. */
-pub fn assertNotNil<T>(value: T?)
+/** Assert that [value] is not nil. */
+@extern(fn: "nv_assert_not_nil") pub fn assertNotNil<T>(value: T?)
 
-/** Assert that an expression throws an error. */
-pub fn assertThrows(f: () → unit)
+/** Assert that [result] is an Ok value. */
+@extern(fn: "nv_assert_ok")      pub fn assertOk<T>(result: Result<T>)
 
-/** Assert that a float value is approximately equal (within epsilon). */
-pub fn assertApprox(expected: float, actual: float, eps: float)
+/** Assert that [result] is an Err value. */
+@extern(fn: "nv_assert_err")     pub fn assertErr<T>(result: Result<T>)
 
-/** Fail the current test with a message. */
-pub fn fail(message: str)
+/** Skip the current test with [message] (no-op in bootstrap; TAP SKIP in full runtime). */
+@extern(fn: "nv_test_skip")      pub fn skip(message: str)
 
-/** Skip the current test with a message. */
-pub fn skip(message: str)
+// ── Generic comparison assertions ────────────────────────────────────────────
+
+/** Assert that [actual] == [expected]. */
+pub fn assertEq<T>(actual: T, expected: T)
+    assert(actual == expected, "expected equal values")
+
+/** Assert that [actual] != [expected]. */
+pub fn assertNe<T>(actual: T, expected: T)
+    assert(actual != expected, "expected unequal values")
+
+/** Assert that [actual] < [expected]. */
+pub fn assertLt<T>(actual: T, expected: T)
+    assert(actual < expected, "expected actual < expected")
+
+/** Assert that [actual] > [expected]. */
+pub fn assertGt<T>(actual: T, expected: T)
+    assert(actual > expected, "expected actual > expected")
+
+// ── Float approximate equality ───────────────────────────────────────────────
+
+/** Assert that |[actual] - [expected]| ≤ [eps]. */
+pub fn assertApprox(actual: float, expected: float, eps: float)
+    let diff = if actual > expected then actual - expected else expected - actual
+    assert(diff <= eps, "expected approximately equal floats")
