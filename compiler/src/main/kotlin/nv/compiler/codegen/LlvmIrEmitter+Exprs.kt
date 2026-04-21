@@ -17,7 +17,15 @@ internal fun LlvmIrEmitter.emitExpr(expr: Expr): String = when (expr) {
     is ConstEExpr             -> "2.718281828459045"
     is ConstInfExpr           -> "0x7FF0000000000000"
     is CharLitExpr            -> emitCharLit(expr)
-    is RawStringExpr          -> stringConst(expr.text)
+    is RawStringExpr          -> {
+        // Token text includes delimiters: r"..." or r"""...""" — strip them.
+        val raw = when {
+            expr.text.startsWith("r\"\"\"") -> expr.text.removePrefix("r\"\"\"").removeSuffix("\"\"\"")
+            expr.text.startsWith("r\"")     -> expr.text.removePrefix("r\"").removeSuffix("\"")
+            else                            -> expr.text
+        }
+        stringConst(raw)
+    }
     is InterpolatedStringExpr -> emitInterpolatedString(expr)
     is IdentExpr              -> emitIdentExpr(expr)
     is ParenExpr              -> emitExpr(expr.inner)
@@ -623,6 +631,10 @@ private fun LlvmIrEmitter.emitMemberAccessExpr(expr: MemberAccessExpr): String {
     return when {
         expr.member == "length" && receiverType == Type.TStr -> {
             val res = fresh("len"); emit("  $res = call i64 @nv_str_len(i8*$receiverReg)"); res
+        }
+        (expr.member == "count" || expr.member == "length" || expr.member == "len") && receiverType is Type.TArray -> {
+            val cntPtr = fresh("arr.cntptr"); emit("  $cntPtr = bitcast i8* $receiverReg to i64*")
+            val cntReg = fresh("arr.cnt");    emit("  $cntReg = load i64, i64* $cntPtr, align 8"); cntReg
         }
         expr.member == "str" -> convertToStr(receiverReg, receiverType)
         else -> {

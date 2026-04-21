@@ -90,6 +90,7 @@ internal fun LlvmIrEmitter.emitFunctionDecl(fn: FunctionDecl) {
     fnAllocas = StringBuilder()
     varAllocas.clear()
     varTypes.clear()
+    usedAllocaNames.clear()
     tempIdx   = 0
     labelIdx  = 0
     isTerminated = false
@@ -167,6 +168,7 @@ internal fun LlvmIrEmitter.emitStructOrClassDecl(
     fnAllocas = StringBuilder()
     varAllocas.clear()
     varTypes.clear()
+    usedAllocaNames.clear()
     tempIdx   = 0
     labelIdx  = 0
     isTerminated = false
@@ -268,6 +270,7 @@ private fun LlvmIrEmitter.emitMethodDecl(typeName: String, fn: FunctionDecl) {
     fnAllocas = StringBuilder()
     varAllocas.clear()
     varTypes.clear()
+    usedAllocaNames.clear()
     tempIdx   = 0
     labelIdx  = 0
     isTerminated = false

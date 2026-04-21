@@ -1,0 +1,71 @@
+module std.regex
+
+// ── Compilation ───────────────────────────────────────────────────────────────
+
+/**
+ * Compile a POSIX extended regular expression.
+ * Named groups (?P<name>...) are supported and converted to plain (...) internally.
+ * Returns Ok(regex_handle) on success or Err(error_message) on failure.
+ * Cache the returned handle in a variable when matching in a loop.
+ */
+@extern(fn: "nv_regex_compile")      pub fn compile(pattern: str) → Result<str>
+
+/** Free a compiled regex handle (optional; safe to call with any handle). */
+@extern(fn: "nv_regex_free")         pub fn free(regex: str) → void
+
+// ── Matching ──────────────────────────────────────────────────────────────────
+
+/** True if the pattern matches the ENTIRE string s (anchored). */
+@extern(fn: "nv_regex_matches")      pub fn matches(regex: str, s: str) → bool
+
+/** True if the pattern appears anywhere in s. */
+@extern(fn: "nv_regex_contains")     pub fn contains(regex: str, s: str) → bool
+
+// ── Searching ─────────────────────────────────────────────────────────────────
+
+/** Return an opaque Match handle for the first occurrence, or nil if none. */
+@extern(fn: "nv_regex_find")         pub fn find(regex: str, s: str) → str?
+
+/** Return all non-overlapping Match handles. */
+@extern(fn: "nv_regex_find_all")     pub fn findAll(regex: str, s: str) → [str]
+
+// ── Replacement ───────────────────────────────────────────────────────────────
+
+/**
+ * Replace the first match. In 'repl', $0 is the whole match and $1..$N are
+ * capture groups. Returns s unchanged if there is no match.
+ */
+@extern(fn: "nv_regex_replace")      pub fn replace(regex: str, s: str, repl: str) → str
+
+/**
+ * Replace every non-overlapping match. $0/$1/$N substitution applies.
+ */
+@extern(fn: "nv_regex_replace_all")  pub fn replaceAll(regex: str, s: str, repl: str) → str
+
+// ── Splitting ─────────────────────────────────────────────────────────────────
+
+/** Split s on each match; returns the substrings between matches. */
+@extern(fn: "nv_regex_split")        pub fn split(regex: str, s: str) → [str]
+
+// ── Match accessors ───────────────────────────────────────────────────────────
+
+/** The matched text. */
+@extern(fn: "nv_match_value")        pub fn matchValue(m: str) → str
+
+/** Start byte offset of the match in the source string. */
+@extern(fn: "nv_match_start")        pub fn matchStart(m: str) → int
+
+/** End byte offset (exclusive) of the match in the source string. */
+@extern(fn: "nv_match_end")          pub fn matchEnd(m: str) → int
+
+/**
+ * Return capture group by index (0 = whole match, 1 = first group, …).
+ * Returns nil if the index is out of range or the group did not participate.
+ */
+@extern(fn: "nv_match_group_idx")    pub fn matchGroup(m: str, idx: int) → str?
+
+/**
+ * Return a named capture group (?P<name>...) by name.
+ * Returns nil if the name is not found or the group did not participate.
+ */
+@extern(fn: "nv_match_group_name")   pub fn matchGroupNamed(m: str, name: str) → str?

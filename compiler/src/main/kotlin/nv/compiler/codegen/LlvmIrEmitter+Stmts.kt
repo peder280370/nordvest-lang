@@ -119,7 +119,11 @@ private fun LlvmIrEmitter.emitIfStmt(stmt: IfStmt) {
         isTerminated = false
 
         val bindName = stmt.letBinding.name
-        val allocaReg = emitAlloca(bindName, innerLt)
+        // Use a unique register name to avoid collisions when the same variable
+        // name appears in multiple if-let bindings within the same function.
+        val allocaReg = fresh("iflet.$bindName")
+        val align = llvmTypeAlign(innerLt)
+        fnAllocas.appendLine("  $allocaReg = alloca $innerLt, align $align")
         varAllocas[bindName] = Pair(allocaReg, innerLt)
         emitStore(innerLt, srcReg, allocaReg)
 

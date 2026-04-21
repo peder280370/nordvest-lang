@@ -49,6 +49,7 @@ class LlvmIrEmitter(
     internal var fnAllocas = StringBuilder()
     internal val varAllocas = mutableMapOf<String, Pair<String, String>>()  // name → (reg, llvmType)
     internal val varTypes   = mutableMapOf<String, Type>()                   // name → Nordvest Type (finer than llvmType)
+    internal val usedAllocaNames = mutableSetOf<String>()                   // track %local.* names to avoid duplicates
     internal var fnReturnType = "void"
     internal var isTerminated = false
 
@@ -135,7 +136,17 @@ class LlvmIrEmitter(
         "nv_json_int_value", "nv_json_float_value", "nv_json_bool_value",
         "nv_json_stringify",
         "nv_json_make_string", "nv_json_make_int", "nv_json_make_float",
-        "nv_json_make_bool", "nv_json_make_null"
+        "nv_json_make_bool", "nv_json_make_null",
+        // std.regex (public @extern bindings + internal helpers)
+        "nv_regex_compile", "nv_regex_new", "nv_regex_free",
+        "nv_regex_matches", "nv_regex_contains",
+        "nv_regex_find", "nv_regex_find_all",
+        "nv_regex_replace", "nv_regex_replace_all", "nv_regex_split",
+        "nv_match_value", "nv_match_start", "nv_match_end",
+        "nv_match_group_idx", "nv_match_group_name",
+        // internal helpers (no @extern binding, but defined in same module)
+        "nv_regex_substr", "nv_regex_preproc", "nv_regex_build_match",
+        "nv_regex_expand_repl", "nv_match_free"
     )
 
     // ── Actual LLVM signatures for pointer-typed inline runtime functions ──
@@ -552,6 +563,11 @@ declare i8*  @popen(i8*, i8*)
 declare i32  @pclose(i8*)
 declare i32  @backtrace(i8**, i32)
 declare i8** @backtrace_symbols(i8**, i32)
+; POSIX regex (regmatch_t = {i32 rm_so, i32 rm_eo} = 8 bytes on macOS and Linux)
+declare i32  @regcomp(i8*, i8*, i32)
+declare i32  @regexec(i8*, i8*, i64, i8*, i32)
+declare void @regfree(i8*)
+declare i64  @regerror(i32, i8*, i8*, i64)
 """.trimIndent())
     }
 
@@ -570,6 +586,7 @@ declare i8** @backtrace_symbols(i8**, i32)
         LogRuntime.emit(rtFns)
         TestRuntime.emit(rtFns)
         JsonRuntime.emit(rtFns)
+        RegexRuntime.emit(rtFns)
     }
 
     private fun emitSealedClassFunctions() {
@@ -769,7 +786,14 @@ declare i8** @backtrace_symbols(i8**, i32)
     }
 
     internal fun emitAlloca(name: String, llvmTy: String): String {
-        val reg = "%local.$name"
+        val base = "%local.$name"
+        val reg = if (usedAllocaNames.add(base)) base else {
+            // Name collision: generate a unique register to avoid duplicate alloca definitions.
+            var suffix = 1
+            var candidate = "$base.$suffix"
+            while (!usedAllocaNames.add(candidate)) { suffix++; candidate = "$base.$suffix" }
+            candidate
+        }
         val align = llvmTypeAlign(llvmTy)
         fnAllocas.appendLine("  $reg = alloca $llvmTy, align $align")
         return reg

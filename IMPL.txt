@@ -119,7 +119,7 @@
   ├──────────────────────────────────────────┼────────┼──────┼──────────────────┤
   │  std.test   — @test runner integration   │  DONE  │  P1  │ 23 tests passing │
   │  std.json   — parse/serialize JSON       │  DONE  │  P1  │ 24 tests passing │
-  │  std.regex  — pattern matching           │ STUB   │  P1  │ string work horse│
+  │  std.regex  — pattern matching           │  DONE  │  P1  │ 33 tests passing │
   │  std.net.http — HTTP client + server     │ STUB   │  P2  │ depends on net   │
   │  std.concurrent — Channel/Mutex/RwLock   │ STUB   │  P2  │ tied to 2.1 done │
   │  std.signal — OS signal handling         │ STUB   │  P2  │ async delivery   │
@@ -758,6 +758,27 @@
                  sequences (\n \t \r \" \\ \0 \{) before LLVM IR encoding (pre-existing bug)
                - JsonRuntimeTest.kt: 24 tests (2 IR structure + 22 integration)
                - Total tests: 883 passing
+
+  std.regex (DONE):
+               - RegexRuntime.kt: POSIX ERE via regcomp/regexec; functions nv_regex_compile,
+                 nv_regex_free, nv_regex_matches, nv_regex_contains, nv_regex_find, nv_regex_find_all,
+                 nv_regex_replace, nv_regex_replace_all, nv_regex_split; match handle with
+                 named and indexed capture groups; named groups (?P<name>...) rewritten to plain
+                 capture groups with stored name table; (?:...) rewritten to (...) for POSIX
+               - examples/regex.nv: demonstrates all API functions; uses nv_regex_new for
+                 simple (panicking) compile, raw string literals r"..." for patterns with {n}
+               - Added nv_regex_new: convenience wrapper that returns raw handle (panics on error)
+               - Bug fix: regmatch_t layout — macOS uses ssize_t (i64) for regoff_t, so
+                 regmatch_t = 16 bytes (not 8). Fixed all LLVM IR to use i64 fields, 16-byte
+                 stride, and [16 x i8] allocas.
+               - Bug fix: array .count property lowered correctly in emitMemberAccessExpr
+               - Bug fix: duplicate alloca for if-let bindings — if-let now uses fresh() register
+                 names; emitAlloca deduplicates via usedAllocaNames set; cache must be cleared
+                 when compiler changes (incremental cache key is source hash only)
+               - Bug fix: raw string codegen — RawStringExpr.text includes r"..." delimiters;
+                 strip prefix/suffix before passing to stringConst()
+               - RegexRuntimeTest.kt: 33 tests (2 IR structure + 31 integration)
+               - Total tests: 916 passing
 
 ────────────────────────────────────────────────────────────────────────────────
   PHASE 6 — IDE PLUGINS  (Milestone M6)  — after Phase 5 (language surface stable)

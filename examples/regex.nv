@@ -1,0 +1,85 @@
+module examples.regex
+
+// std.regex example — POSIX extended regular expressions.
+//
+// Regex handles are opaque str values.  Compile once and reuse the handle
+// in tight loops; call free() when done to release the underlying C struct.
+//
+// Named groups (?P<name>...) are supported: the compiler converts them to
+// plain capture groups (...) internally and remembers the mapping.
+
+@extern(fn: "nv_regex_new")         pub fn compile(pattern: str) → str
+@extern(fn: "nv_regex_free")        pub fn free(regex: str) → void
+@extern(fn: "nv_regex_matches")     pub fn matches(regex: str, s: str) → bool
+@extern(fn: "nv_regex_contains")    pub fn contains(regex: str, s: str) → bool
+@extern(fn: "nv_regex_find")        pub fn find(regex: str, s: str) → str?
+@extern(fn: "nv_regex_find_all")    pub fn findAll(regex: str, s: str) → [str]
+@extern(fn: "nv_regex_replace")     pub fn replace(regex: str, s: str, repl: str) → str
+@extern(fn: "nv_regex_replace_all") pub fn replaceAll(regex: str, s: str, repl: str) → str
+@extern(fn: "nv_regex_split")       pub fn split(regex: str, s: str) → [str]
+@extern(fn: "nv_match_value")       pub fn matchValue(m: str) → str
+@extern(fn: "nv_match_start")       pub fn matchStart(m: str) → int
+@extern(fn: "nv_match_end")         pub fn matchEnd(m: str) → int
+@extern(fn: "nv_match_group_idx")   pub fn matchGroup(m: str, idx: int) → str?
+@extern(fn: "nv_match_group_name")  pub fn matchGroupNamed(m: str, name: str) → str?
+
+fn main()
+    // ── Basic matching ──────────────────────────────────────────────────────
+    let digits = compile("[0-9]+")
+    println("matches '42':    {matches(digits, "42")}")
+    println("matches 'abc':   {matches(digits, "abc")}")
+    println("contains '42':   {contains(digits, "price: 42 USD")}")
+    free(digits)
+
+    // ── Finding a match ─────────────────────────────────────────────────────
+    let word = compile("[a-z]+")
+    let m = find(word, "  hello world")
+    if let m = m
+        println("found:  " + matchValue(m))
+        println("start:  {matchStart(m)}")
+        println("end:    {matchEnd(m)}")
+
+    // ── Find all non-overlapping matches ────────────────────────────────────
+    let numRe = compile("[0-9]+")
+    let nums  = findAll(numRe, "score: 10, bonus: 5, total: 15")
+    println("numbers found: {nums.count}")
+    for n in nums
+        println("  " + matchValue(n))
+    free(numRe)
+
+    // ── Capture groups by index ─────────────────────────────────────────────
+    let dateRe = compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
+    let dm = find(dateRe, "today is 2026-04-20, remember it")
+    if let dm = dm
+        println("full:  " + matchValue(dm))
+        println("year:  " + (matchGroup(dm, 1) ?? "?"))
+        println("month: " + (matchGroup(dm, 2) ?? "?"))
+        println("day:   " + (matchGroup(dm, 3) ?? "?"))
+    free(dateRe)
+
+    // ── Named capture groups (?P<name>...) ──────────────────────────────────
+    let ipRe = compile(r"(?P<host>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):(?P<port>[0-9]+)")
+    let im = find(ipRe, "connect to 127.0.0.1:8080 now")
+    if let im = im
+        println("host: " + (matchGroupNamed(im, "host") ?? "?"))
+        println("port: " + (matchGroupNamed(im, "port") ?? "?"))
+    free(ipRe)
+
+    // ── Replacement ─────────────────────────────────────────────────────────
+    let vowels = compile("[aeiou]")
+    println(replace(vowels, "hello", "*"))
+    println(replaceAll(vowels, "hello world", "*"))
+    free(vowels)
+
+    // ── Replacement with back-references ───────────────────────────────────
+    let swapRe = compile("([a-z]+) ([a-z]+)")
+    println(replace(swapRe, "foo bar", "$2 $1"))
+    free(swapRe)
+
+    // ── Splitting ───────────────────────────────────────────────────────────
+    let sep   = compile(",[ ]*")
+    let parts = split(sep, "one, two, three, four")
+    println("parts: {parts.count}")
+    for p in parts
+        println("  " + p)
+    free(sep)

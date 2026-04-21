@@ -19,7 +19,7 @@ internal fun LlvmIrEmitter.emitSyntheticMethod(
     block: () -> Unit,
 ) {
     fnBody = StringBuilder(); fnAllocas = StringBuilder()
-    varAllocas.clear(); varTypes.clear()
+    varAllocas.clear(); varTypes.clear(); usedAllocaNames.clear()
     tempIdx = 0; labelIdx = 0; isTerminated = false; loopStack.clear()
     fnReturnType = retType
     block()
