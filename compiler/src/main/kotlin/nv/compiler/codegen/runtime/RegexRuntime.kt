@@ -24,14 +24,47 @@ package nv.compiler.codegen.runtime
  * Multi-digit indices ($10, $11 …) are supported.
  *
  * Platform note: regoff_t is ssize_t (i64) on macOS and int (i32) on Linux, so
- * regmatch_t = {i64 rm_so, i64 rm_eo} = 16 bytes on macOS. This runtime uses
- * the macOS layout (i64 fields, 16-byte stride).
+ * regmatch_t is 16 bytes on macOS (two i64s) and 8 bytes on Linux (two i32s).
+ * nv_pm_so/nv_pm_eo abstract this difference; rmStride parametrizes malloc sizes.
  * REG_EXTENDED = 1 and REG_NOMATCH = 1 on both platforms.
  */
 internal object RegexRuntime {
+
+    private val isLinux = System.getProperty("os.name").lowercase().startsWith("linux")
+    private val rmStride = if (isLinux) 8 else 16   // sizeof(regmatch_t)
+
     fun emit(out: StringBuilder) {
         out.appendLine("""
 ; ── std.regex ─────────────────────────────────────────────────────────────────
+
+; ── nv_pm_so / nv_pm_eo ──────────────────────────────────────────────────────
+; Abstract regmatch_t field reads: macOS uses i64 fields (stride=16),
+; Linux uses i32 fields (stride=8). Both functions return i64.
+${if (isLinux) """
+define i64 @nv_pm_so(i8* %p) {
+  %pp  = bitcast i8* %p to i32*
+  %v32 = load i32, i32* %pp, align 4
+  %v   = sext i32 %v32 to i64
+  ret i64 %v
+}
+define i64 @nv_pm_eo(i8* %p) {
+  %ep  = getelementptr i8, i8* %p, i64 4
+  %pp  = bitcast i8* %ep to i32*
+  %v32 = load i32, i32* %pp, align 4
+  %v   = sext i32 %v32 to i64
+  ret i64 %v
+}""" else """
+define i64 @nv_pm_so(i8* %p) {
+  %pp = bitcast i8* %p to i64*
+  %v  = load i64, i64* %pp, align 8
+  ret i64 %v
+}
+define i64 @nv_pm_eo(i8* %p) {
+  %ep = getelementptr i8, i8* %p, i64 8
+  %pp = bitcast i8* %ep to i64*
+  %v  = load i64, i64* %pp, align 8
+  ret i64 %v
+}"""}
 
 ; ── nv_regex_substr(s, from, len) → i8* ──────────────────────────────────────
 ; Allocate a null-terminated copy of s[from .. from+len).
@@ -443,7 +476,7 @@ rxmf.done:
 ; ── nv_regex_build_match(regex, src, pmatch, base_off) → i8* ─────────────────
 ; Build a Match handle from POSIX regmatch_t results.
 ; src   – string passed to regexec (starts at base_off within the original string)
-; pmatch – regmatch_t[] array (16 bytes per entry on macOS: two i64s rm_so, rm_eo)
+; pmatch – regmatch_t[] array (stride=$rmStride bytes per entry)
 ; base_off – byte offset of src within the original source string
 define i8* @nv_regex_build_match(i8* %regex, i8* %src, i8* %pmatch, i64 %base_off) {
 rxbm.entry:
@@ -452,11 +485,8 @@ rxbm.entry:
   %rxbm.nb_off = getelementptr i8, i8* %regex, i64 16
   %rxbm.nb_pp  = bitcast i8* %rxbm.nb_off to i8**
   %rxbm.nb     = load i8*, i8** %rxbm.nb_pp, align 8
-  %rxbm.so0_p  = bitcast i8* %pmatch to i64*
-  %rxbm.so0_64 = load i64, i64* %rxbm.so0_p, align 8
-  %rxbm.eo0_p  = getelementptr i8, i8* %pmatch, i64 8
-  %rxbm.eo0_64p = bitcast i8* %rxbm.eo0_p to i64*
-  %rxbm.eo0_64 = load i64, i64* %rxbm.eo0_64p, align 8
+  %rxbm.so0_64 = call i64 @nv_pm_so(i8* %pmatch)
+  %rxbm.eo0_64 = call i64 @nv_pm_eo(i8* %pmatch)
   %rxbm.mlen   = sub i64 %rxbm.eo0_64, %rxbm.so0_64
   %rxbm.value  = call i8* @nv_regex_substr(i8* %src, i64 %rxbm.so0_64, i64 %rxbm.mlen)
   %rxbm.abs_s  = add i64 %base_off, %rxbm.so0_64
@@ -487,13 +517,10 @@ rxbm.gloop:
   br i1 %rxbm.gd, label %rxbm.done, label %rxbm.gload
 
 rxbm.gload:
-  %rxbm.pm_off = mul i64 %rxbm.gi, 16
+  %rxbm.pm_off = mul i64 %rxbm.gi, ${rmStride}
   %rxbm.pm_p   = getelementptr i8, i8* %pmatch, i64 %rxbm.pm_off
-  %rxbm.pm_s64 = bitcast i8* %rxbm.pm_p to i64*
-  %rxbm.so64   = load i64, i64* %rxbm.pm_s64, align 8
-  %rxbm.pm_e_r = getelementptr i8, i8* %rxbm.pm_p, i64 8
-  %rxbm.pm_e64 = bitcast i8* %rxbm.pm_e_r to i64*
-  %rxbm.eo64   = load i64, i64* %rxbm.pm_e64, align 8
+  %rxbm.so64   = call i64 @nv_pm_so(i8* %rxbm.pm_p)
+  %rxbm.eo64   = call i64 @nv_pm_eo(i8* %rxbm.pm_p)
   %rxbm.nomatch = icmp slt i64 %rxbm.so64, 0
   br i1 %rxbm.nomatch, label %rxbm.gnull, label %rxbm.gsub
 
@@ -629,19 +656,16 @@ rxmgn.null:
 ; True only if the pattern matches the ENTIRE string.
 define i1 @nv_regex_matches(i8* %regex, i8* %s) {
 rxmat.entry:
-  %rxmat.pm = alloca [16 x i8], align 8
-  %rxmat.pmp = bitcast [16 x i8]* %rxmat.pm to i8*
+  %rxmat.pm = alloca [${rmStride} x i8], align 8
+  %rxmat.pmp = bitcast [${rmStride} x i8]* %rxmat.pm to i8*
   %rxmat.rt  = getelementptr i8, i8* %regex, i64 24
   %rxmat.rc  = call i32 @regexec(i8* %rxmat.rt, i8* %s, i64 1, i8* %rxmat.pmp, i32 0)
   %rxmat.hit = icmp eq i32 %rxmat.rc, 0
   br i1 %rxmat.hit, label %rxmat.chk, label %rxmat.false
 
 rxmat.chk:
-  %rxmat.so_p  = bitcast i8* %rxmat.pmp to i64*
-  %rxmat.so    = load i64, i64* %rxmat.so_p, align 8
-  %rxmat.eo_rp = getelementptr i8, i8* %rxmat.pmp, i64 8
-  %rxmat.eo_p  = bitcast i8* %rxmat.eo_rp to i64*
-  %rxmat.eo    = load i64, i64* %rxmat.eo_p, align 8
+  %rxmat.so    = call i64 @nv_pm_so(i8* %rxmat.pmp)
+  %rxmat.eo    = call i64 @nv_pm_eo(i8* %rxmat.pmp)
   %rxmat.sl    = call i64 @strlen(i8* %s)
   %rxmat.so_ok = icmp eq i64 %rxmat.so, 0
   %rxmat.eo_ok = icmp eq i64 %rxmat.eo, %rxmat.sl
@@ -655,8 +679,8 @@ rxmat.false:
 ; ── nv_regex_contains(regex, s) → i1 ─────────────────────────────────────────
 define i1 @nv_regex_contains(i8* %regex, i8* %s) {
 rxcon.entry:
-  %rxcon.pm  = alloca [16 x i8], align 8
-  %rxcon.pmp = bitcast [16 x i8]* %rxcon.pm to i8*
+  %rxcon.pm  = alloca [${rmStride} x i8], align 8
+  %rxcon.pmp = bitcast [${rmStride} x i8]* %rxcon.pm to i8*
   %rxcon.rt  = getelementptr i8, i8* %regex, i64 24
   %rxcon.rc  = call i32 @regexec(i8* %rxcon.rt, i8* %s, i64 1, i8* %rxcon.pmp, i32 0)
   %rxcon.res = icmp eq i32 %rxcon.rc, 0
@@ -669,7 +693,7 @@ rxf.entry:
   %rxf.ng_p  = bitcast i8* %regex to i64*
   %rxf.ng    = load i64, i64* %rxf.ng_p, align 8
   %rxf.nm    = add i64 %rxf.ng, 1
-  %rxf.pmsz  = mul i64 %rxf.nm, 16
+  %rxf.pmsz  = mul i64 %rxf.nm, ${rmStride}
   %rxf.pm    = call i8* @malloc(i64 %rxf.pmsz)
   %rxf.rt    = getelementptr i8, i8* %regex, i64 24
   %rxf.rc    = call i32 @regexec(i8* %rxf.rt, i8* %s, i64 %rxf.nm, i8* %rxf.pm, i32 0)
@@ -692,7 +716,7 @@ rxfa.entry:
   %rxfa.ng_p = bitcast i8* %regex to i64*
   %rxfa.ng   = load i64, i64* %rxfa.ng_p, align 8
   %rxfa.nm   = add i64 %rxfa.ng, 1
-  %rxfa.pmsz = mul i64 %rxfa.nm, 16
+  %rxfa.pmsz = mul i64 %rxfa.nm, ${rmStride}
   %rxfa.pm   = call i8* @malloc(i64 %rxfa.pmsz)
   %rxfa.rt   = getelementptr i8, i8* %regex, i64 24
   %rxfa.arr0 = call i8* @malloc(i64 8)
@@ -713,11 +737,8 @@ rxfa.loop:
   br i1 %rxfa.hit, label %rxfa.match, label %rxfa.done
 
 rxfa.match:
-  %rxfa.so_p  = bitcast i8* %rxfa.pm to i64*
-  %rxfa.so64  = load i64, i64* %rxfa.so_p, align 8
-  %rxfa.eo_rp = getelementptr i8, i8* %rxfa.pm, i64 8
-  %rxfa.eo_p  = bitcast i8* %rxfa.eo_rp to i64*
-  %rxfa.eo64  = load i64, i64* %rxfa.eo_p, align 8
+  %rxfa.so64  = call i64 @nv_pm_so(i8* %rxfa.pm)
+  %rxfa.eo64  = call i64 @nv_pm_eo(i8* %rxfa.pm)
   %rxfa.off   = load i64, i64* %rxfa.off.a, align 8
   %rxfa.m     = call i8* @nv_regex_build_match(i8* %regex, i8* %rxfa.pos, i8* %rxfa.pm, i64 %rxfa.off)
   %rxfa.acur  = load i8*, i8** %rxfa.arr.a, align 8
@@ -932,7 +953,7 @@ rxrp.entry:
   %rxrp.ng_p = bitcast i8* %regex to i64*
   %rxrp.ng   = load i64, i64* %rxrp.ng_p, align 8
   %rxrp.nm   = add i64 %rxrp.ng, 1
-  %rxrp.pmsz = mul i64 %rxrp.nm, 16
+  %rxrp.pmsz = mul i64 %rxrp.nm, ${rmStride}
   %rxrp.pm   = call i8* @malloc(i64 %rxrp.pmsz)
   %rxrp.rt   = getelementptr i8, i8* %regex, i64 24
   %rxrp.rc   = call i32 @regexec(i8* %rxrp.rt, i8* %s, i64 %rxrp.nm, i8* %rxrp.pm, i32 0)
@@ -946,11 +967,8 @@ rxrp.nomatch:
   ret i8* %rxrp.copy
 
 rxrp.do:
-  %rxrp.so_p  = bitcast i8* %rxrp.pm to i64*
-  %rxrp.so64  = load i64, i64* %rxrp.so_p, align 8
-  %rxrp.eo_rp = getelementptr i8, i8* %rxrp.pm, i64 8
-  %rxrp.eo_p  = bitcast i8* %rxrp.eo_rp to i64*
-  %rxrp.eo64  = load i64, i64* %rxrp.eo_p, align 8
+  %rxrp.so64  = call i64 @nv_pm_so(i8* %rxrp.pm)
+  %rxrp.eo64  = call i64 @nv_pm_eo(i8* %rxrp.pm)
   %rxrp.m     = call i8* @nv_regex_build_match(i8* %regex, i8* %s, i8* %rxrp.pm, i64 0)
   call void @free(i8* %rxrp.pm)
   %rxrp.exp   = call i8* @nv_regex_expand_repl(i8* %repl, i8* %rxrp.m)
@@ -980,7 +998,7 @@ rxra.entry:
   %rxra.ng_p = bitcast i8* %regex to i64*
   %rxra.ng   = load i64, i64* %rxra.ng_p, align 8
   %rxra.nm   = add i64 %rxra.ng, 1
-  %rxra.pmsz = mul i64 %rxra.nm, 16
+  %rxra.pmsz = mul i64 %rxra.nm, ${rmStride}
   %rxra.pm   = call i8* @malloc(i64 %rxra.pmsz)
   %rxra.rt   = getelementptr i8, i8* %regex, i64 24
   %rxra.pos.a = alloca i8*, align 8
@@ -1001,11 +1019,8 @@ rxra.p1:
   br i1 %rxra.ok1, label %rxra.p1m, label %rxra.p1tail
 
 rxra.p1m:
-  %rxra.so1_p  = bitcast i8* %rxra.pm to i64*
-  %rxra.so164  = load i64, i64* %rxra.so1_p, align 8
-  %rxra.eo1_rp = getelementptr i8, i8* %rxra.pm, i64 8
-  %rxra.eo1_p  = bitcast i8* %rxra.eo1_rp to i64*
-  %rxra.eo164  = load i64, i64* %rxra.eo1_p, align 8
+  %rxra.so164  = call i64 @nv_pm_so(i8* %rxra.pm)
+  %rxra.eo164  = call i64 @nv_pm_eo(i8* %rxra.pm)
   %rxra.m1     = call i8* @nv_regex_build_match(i8* %regex, i8* %rxra.pos1, i8* %rxra.pm, i64 %rxra.off1)
   %rxra.exp1   = call i8* @nv_regex_expand_repl(i8* %repl, i8* %rxra.m1)
   call void @nv_match_free(i8* %rxra.m1)
@@ -1065,11 +1080,8 @@ rxra.p2:
   br i1 %rxra.ok2, label %rxra.p2m, label %rxra.p2tail
 
 rxra.p2m:
-  %rxra.so2_p  = bitcast i8* %rxra.pm to i64*
-  %rxra.so264  = load i64, i64* %rxra.so2_p, align 8
-  %rxra.eo2_rp = getelementptr i8, i8* %rxra.pm, i64 8
-  %rxra.eo2_p  = bitcast i8* %rxra.eo2_rp to i64*
-  %rxra.eo264  = load i64, i64* %rxra.eo2_p, align 8
+  %rxra.so264  = call i64 @nv_pm_so(i8* %rxra.pm)
+  %rxra.eo264  = call i64 @nv_pm_eo(i8* %rxra.pm)
   %rxra.op2    = load i8*, i8** %rxra.op.a, align 8
   call i8* @memcpy(i8* %rxra.op2, i8* %rxra.pos2, i64 %rxra.so264)
   %rxra.op2a   = getelementptr i8, i8* %rxra.op2, i64 %rxra.so264
@@ -1121,8 +1133,8 @@ rxra.p2tail:
 ; Returns the parts of s between each match.
 define i8* @nv_regex_split(i8* %regex, i8* %s) {
 rxsp.entry:
-  %rxsp.pm   = alloca [16 x i8], align 8
-  %rxsp.pmp  = bitcast [16 x i8]* %rxsp.pm to i8*
+  %rxsp.pm   = alloca [${rmStride} x i8], align 8
+  %rxsp.pmp  = bitcast [${rmStride} x i8]* %rxsp.pm to i8*
   %rxsp.rt   = getelementptr i8, i8* %regex, i64 24
   %rxsp.arr0 = call i8* @malloc(i64 8)
   %rxsp.a0p  = bitcast i8* %rxsp.arr0 to i64*
@@ -1140,11 +1152,8 @@ rxsp.loop:
   br i1 %rxsp.ok, label %rxsp.match, label %rxsp.tail
 
 rxsp.match:
-  %rxsp.so_p  = bitcast i8* %rxsp.pmp to i64*
-  %rxsp.so64  = load i64, i64* %rxsp.so_p, align 8
-  %rxsp.eo_rp = getelementptr i8, i8* %rxsp.pmp, i64 8
-  %rxsp.eo_p  = bitcast i8* %rxsp.eo_rp to i64*
-  %rxsp.eo64  = load i64, i64* %rxsp.eo_p, align 8
+  %rxsp.so64  = call i64 @nv_pm_so(i8* %rxsp.pmp)
+  %rxsp.eo64  = call i64 @nv_pm_eo(i8* %rxsp.pmp)
   %rxsp.part  = call i8* @nv_regex_substr(i8* %rxsp.pos, i64 0, i64 %rxsp.so64)
   %rxsp.acur  = load i8*, i8** %rxsp.arr.a, align 8
   %rxsp.anew  = call i8* @nv_arr_push_str(i8* %rxsp.acur, i8* %rxsp.part)
